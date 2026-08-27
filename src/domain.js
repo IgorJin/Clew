@@ -32,6 +32,15 @@ export const RUN_STATUS = Object.freeze({
   INTERRUPTED: 'INTERRUPTED',
 });
 
+export const FAILURE_CLASS = Object.freeze({
+  INTERRUPTED: 'interrupted',
+  TIMEOUT: 'timeout',
+  EXTERNAL_UNAVAILABLE: 'external_unavailable',
+  WORKSPACE: 'workspace',
+  REVIEW: 'review',
+  UNKNOWN: 'unknown',
+});
+
 export const PLAN_STATUS = Object.freeze({
   PENDING_APPROVAL: 'PENDING_APPROVAL',
   APPROVED: 'APPROVED',
@@ -55,6 +64,18 @@ export const EXECUTION_MODE = Object.freeze({
   ISOLATED: 'isolated',
   PARALLEL: 'parallel',
 });
+
+export function classifyFailure(error) {
+  if (!error) return FAILURE_CLASS.UNKNOWN;
+  if (error.code === 'HARNESS_INTERRUPTED') return FAILURE_CLASS.INTERRUPTED;
+  if (error.code === 'HARNESS_TIMED_OUT') return FAILURE_CLASS.TIMEOUT;
+  if (error.code === 'EXTERNAL_HARNESS_UNAVAILABLE') return FAILURE_CLASS.EXTERNAL_UNAVAILABLE;
+  if (error.name === 'IntegrationConflictError' || error.code === 'WORKSPACE_ERROR')
+    return FAILURE_CLASS.WORKSPACE;
+  if (error.code === 'REVIEW_FAILED' || error.name === 'ReviewError') return FAILURE_CLASS.REVIEW;
+
+  return FAILURE_CLASS.UNKNOWN;
+}
 
 const transitions = {
   [TASK_STATE.DRAFT]: [TASK_STATE.PLAN_READY, TASK_STATE.QUEUED, TASK_STATE.CANCELLED],

@@ -7,6 +7,7 @@ import {
   STAGE_STATUS,
   RUN_STATUS,
   PLAN_STATUS,
+  classifyFailure,
   HARNESS_NAME,
   EXECUTION_MODE,
 } from './domain.js';
@@ -213,7 +214,10 @@ export class Scheduler {
       if (runId) this.store.finishRun(runId, RUN_STATUS.FAILED);
       this.store.setStage(taskId, 'worker', STAGE_STATUS.FAILED);
       this.store.setTaskState(taskId, TASK_STATE.FAILED);
-      this.store.appendEvent(taskId, 'RUN_FAILED', { message: error.message });
+      this.store.appendEvent(taskId, 'RUN_FAILED', {
+        message: error.message,
+        failureClass: classifyFailure(error),
+      });
       throw error;
     }
   }
@@ -770,6 +774,7 @@ export class Scheduler {
       this.store.appendEvent(taskId, 'STAGE_RUN_FAILED', {
         stageId: stage.id,
         message: error.message,
+        failureClass: classifyFailure(error),
       });
       throw error;
     }

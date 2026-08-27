@@ -139,9 +139,12 @@ export class ExternalHarnessUnavailable {
     this.name = name;
   }
   async run() {
-    throw new Error(
+    const error = new Error(
       `${this.name} adapter is not configured yet; run with --harness fake or configure the native ${this.name} server`,
     );
+
+    error.code = 'EXTERNAL_HARNESS_UNAVAILABLE';
+    throw error;
   }
 }
 

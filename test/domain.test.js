@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   validateTaskContract,
   assertValidTaskTransition,
+  classifyFailure,
+  FAILURE_CLASS,
   validateExecutionPlan,
 } from '../src/domain.js';
 
@@ -24,6 +26,15 @@ test('rejects invalid transitions', () => {
   );
   assert.doesNotThrow(() => assertValidTaskTransition('EXECUTING', 'RECOVERING'));
   assert.doesNotThrow(() => assertValidTaskTransition('RECOVERING', 'EXECUTING'));
+});
+test('classifies operational failures for retry policy', () => {
+  assert.equal(classifyFailure({ code: 'HARNESS_TIMED_OUT' }), FAILURE_CLASS.TIMEOUT);
+  assert.equal(
+    classifyFailure({ code: 'EXTERNAL_HARNESS_UNAVAILABLE' }),
+    FAILURE_CLASS.EXTERNAL_UNAVAILABLE,
+  );
+  assert.equal(classifyFailure({ name: 'IntegrationConflictError' }), FAILURE_CLASS.WORKSPACE);
+  assert.equal(classifyFailure(new Error('unknown')), FAILURE_CLASS.UNKNOWN);
 });
 test('requires explicit ids for object acceptance criteria', () => {
   assert.throws(
