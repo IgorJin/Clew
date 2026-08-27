@@ -2,6 +2,8 @@
 
 Clew is a local, task-centric control plane for AI-assisted development. It keeps the thread across task contracts, native coding harnesses, Git worktrees, verification, review, retries, and human approvals.
 
+For a human-oriented guide with concrete use cases and current limitations, see [`DONE.md`](./DONE.md).
+
 Clew v0.1 starts with a deterministic local engine and a Quick vertical slice. The `fake` harness is included so the product can be exercised without external credentials; Codex and OpenCode adapters are isolated behind the same interface and are enabled as their machine-facing protocols are configured.
 
 ## Requirements
