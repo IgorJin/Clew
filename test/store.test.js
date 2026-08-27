@@ -31,10 +31,13 @@ test('persists a task, stage, run, and event history', () => {
     status: 'RUNNING',
     harness: 'fake',
   });
+  store.setRunIdentity('run-1', 'thread-1', 'turn-1');
   assert.equal(store.listStages('T-1')[0].id, 'worker');
   assert.equal(savedPlan.version, 1);
   assert.equal(store.getLatestPlan('T-1').plan.stages[0].id, 'worker');
   assert.equal(store.listRuns('T-1')[0].id, 'run-1');
+  assert.equal(store.listRuns('T-1')[0].session_id, 'thread-1');
+  assert.equal(store.listRuns('T-1')[0].turn_id, 'turn-1');
   assert.ok(store.listEvents('T-1').length >= 2);
   store.close();
   rmSync(dir, { recursive: true, force: true });
@@ -53,6 +56,19 @@ test('upgrades persisted plans with approval status', () => {
       created_at TEXT NOT NULL,
       PRIMARY KEY(task_id, version)
     );
+    CREATE TABLE runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      harness TEXT NOT NULL,
+      session_id TEXT,
+      workspace TEXT,
+      commit_sha TEXT,
+      started_at TEXT,
+      finished_at TEXT
+    );
   `);
   legacyDatabase.close();
 
@@ -64,6 +80,12 @@ test('upgrades persisted plans with approval status', () => {
 
   assert.ok(statusColumn);
   assert.equal(statusColumn.dflt_value, "'APPROVED'");
+  assert.ok(
+    store.db
+      .prepare('PRAGMA table_info(runs)')
+      .all()
+      .some((column) => column.name === 'turn_id'),
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

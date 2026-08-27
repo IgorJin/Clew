@@ -14,6 +14,8 @@
 - Added Git commit capture for worker outputs and deterministic cherry-pick integration into a dedicated integration worktree.
 - Added explicit integration-conflict diagnostics with a safe cherry-pick abort and inspectable failed state.
 - Added an optional native Codex reviewer route with read-only/output-schema options and a separate `--review-harness` CLI flag.
+- Added a shared harness conformance suite covering correlated lifecycle events, native identity, approval decisions, interruption, and timeout behavior for Fake, Codex, and OpenCode adapters.
+- Updated the Codex adapter to persist native thread/turn IDs, route server approval requests through an explicit callback, and interrupt active turns through the official `turn/interrupt` protocol.
 
 ## 0.1.0-alpha.1 — initial product slice
 
@@ -28,7 +30,7 @@ The Codex app-server and OpenCode adapter boundaries were introduced during the 
 
 Known limitations:
 
-- Codex and OpenCode adapters are experimental: Codex handshake/approval/reconnect behavior and OpenCode SSE consumption still require live compatibility validation.
+- Codex and OpenCode adapters are experimental: their normalized lifecycle is fixture-tested, while live version compatibility, Codex reconnect, and OpenCode SSE consumption still require validation.
 - Native reviewer/retry is not production-ready; fake review/retry is available for deterministic tests.
 - Arbitrary validated DAG execution, plan approval, and local restart recovery are implemented; native Codex architect compatibility still needs live validation, while live harness reconnection and automatic conflict resolution are not implemented.
 - Worktrees are retained for inspection; cleanup policy is not automatic yet.

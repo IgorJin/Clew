@@ -74,6 +74,8 @@ ai/<task-id>-worker
 
 `fake` — единственный harness, который гарантированно работает без внешней настройки. Codex/OpenCode требуют запущенного сервера, авторизации и совместимого протокола; их live-совместимость должна быть проверена в конкретной среде.
 
+Общий conformance suite проверяет для всех трёх adapters порядок и correlation lifecycle events. Codex fixture дополнительно проверяет native `threadId`/`turnId`, server-initiated approval с явным решением, официальный `turn/interrupt` и нормализованный timeout. Эти native IDs сохраняются в записи run. По умолчанию Clew безопасно отвечает `decline` на Codex approval; интерактивная CLI-маршрутизация approval будет отдельным шагом.
+
 Для Standard/Deep review можно отдельно выбрать native Codex reviewer:
 
 ```sh
@@ -289,4 +291,4 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Проверить native architect и reviewer на реальном Codex app-server.
 
-Следующий крупный шаг для orchestration core — production-grade Codex approvals/interrupt lifecycle и adapter conformance kit.
+Следующий крупный шаг для orchestration core — провести AbortSignal через scheduler/CLI, добавить команду `interrupt`, а затем реализовать reconnect/resume native sessions.

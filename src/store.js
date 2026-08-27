@@ -13,12 +13,16 @@ export class Store {
       CREATE TABLE IF NOT EXISTS stages (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, id TEXT NOT NULL, status TEXT NOT NULL, depends_on TEXT NOT NULL, PRIMARY KEY(task_id,id));
       CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'APPROVED', created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
       CREATE TABLE IF NOT EXISTS approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, plan_version INTEGER NOT NULL, gate_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT, actor TEXT NOT NULL, at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
+      CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, turn_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
     const planColumns = this.db.prepare('PRAGMA table_info(plans)').all();
 
     if (!planColumns.some((column) => column.name === 'status'))
       this.db.exec("ALTER TABLE plans ADD COLUMN status TEXT NOT NULL DEFAULT 'APPROVED'");
+    const runColumns = this.db.prepare('PRAGMA table_info(runs)').all();
+
+    if (!runColumns.some((column) => column.name === 'turn_id'))
+      this.db.exec('ALTER TABLE runs ADD COLUMN turn_id TEXT');
   }
   close() {
     this.db.close();
@@ -149,7 +153,7 @@ export class Store {
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,workspace,started_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -159,12 +163,13 @@ export class Store {
         run.status,
         run.harness,
         run.sessionId ?? null,
+        run.turnId ?? null,
         run.workspace ?? null,
         run.startedAt ?? null,
       );
   }
-  setRunSession(id, sessionId) {
-    this.db.prepare('UPDATE runs SET session_id=? WHERE id=?').run(sessionId, id);
+  setRunIdentity(id, sessionId, turnId = null) {
+    this.db.prepare('UPDATE runs SET session_id=?,turn_id=? WHERE id=?').run(sessionId, turnId, id);
   }
   finishRun(id, status, commitSha = null) {
     this.db

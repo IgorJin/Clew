@@ -109,10 +109,10 @@ export class Scheduler {
         task: row.contract,
         stageId: 'worker',
         cwd: workspace.path,
-        onEvent: (event) => this.store.appendEvent(taskId, `HARNESS_${event.type}`, event),
+        onEvent: (event) => this.recordHarnessEvent(taskId, event),
       });
 
-      this.store.setRunSession(runId, result.sessionId ?? null);
+      this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       const status = this.workspaceManager.getWorktreeStatus(workspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
         ? this.workspaceManager.commitWorktreeChanges(
@@ -649,7 +649,7 @@ export class Scheduler {
         task: { ...task, title: stage.goal },
         stageId: stage.id,
         cwd: stageWorkspace.path,
-        onEvent: (event) => this.store.appendEvent(taskId, `HARNESS_${event.type}`, event),
+        onEvent: (event) => this.recordHarnessEvent(taskId, event),
       });
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -659,7 +659,7 @@ export class Scheduler {
           )
         : status.sha;
 
-      this.store.setRunSession(runId, result.sessionId ?? null);
+      this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
       this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
       this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', {
@@ -693,6 +693,12 @@ export class Scheduler {
     if (harnessName === HARNESS_NAME.OPENCODE) return new OpenCodeHarness();
 
     return new ExternalHarnessUnavailable(harnessName);
+  }
+
+  recordHarnessEvent(taskId, event) {
+    const eventType = event.type.startsWith('HARNESS_') ? event.type : `HARNESS_${event.type}`;
+
+    this.store.appendEvent(taskId, eventType, event);
   }
 
   createReviewerAdapter(reviewerName) {

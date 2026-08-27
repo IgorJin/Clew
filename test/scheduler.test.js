@@ -773,6 +773,7 @@ test('Codex adapter follows the app-server handshake and completion event', asyn
     onEvent: (event) => events.push(event),
   });
 
-  assert.equal(result.sessionId.startsWith('codex-'), true);
+  assert.equal(result.sessionId, 'thr_fixture');
+  assert.equal(result.turnId, 'turn_fixture');
   assert.ok(events.some((event) => event.type === 'HARNESS_COMPLETED'));
 });
