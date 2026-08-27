@@ -15,6 +15,7 @@ import {
   CodexHarness,
   OpenCodeHarness,
   ExternalHarnessUnavailable,
+  HarnessInterruptedError,
 } from './harness.js';
 import { FakeReviewer, CodexReviewer } from './review.js';
 import { FakeArchitect, CodexArchitect } from './architect.js';
@@ -29,6 +30,8 @@ export class Scheduler {
       architectFactory = null,
       planFactory = null,
       requirePlanApproval = true,
+      signal = null,
+      interruptPollMs = 250,
     } = {},
   ) {
     this.store = store;
@@ -38,6 +41,9 @@ export class Scheduler {
     this.architectFactory = architectFactory;
     this.planFactory = planFactory;
     this.requirePlanApproval = requirePlanApproval;
+    this.signal = signal;
+    this.interruptPollMs = interruptPollMs;
+    this.taskSignals = new Map();
   }
   async runTask(
     taskId,
@@ -45,6 +51,29 @@ export class Scheduler {
     requestedHarness = null,
     requestedReviewHarness = null,
     requestedArchitect = null,
+  ) {
+    const taskSignal = this.getTaskSignal(taskId);
+
+    try {
+      return await this.runTaskInternal(
+        taskId,
+        requestedProfile,
+        requestedHarness,
+        requestedReviewHarness,
+        requestedArchitect,
+        taskSignal,
+      );
+    } finally {
+      this.releaseTaskSignal(taskId);
+    }
+  }
+  async runTaskInternal(
+    taskId,
+    requestedProfile,
+    requestedHarness = null,
+    requestedReviewHarness = null,
+    requestedArchitect = null,
+    taskSignal = this.getTaskSignal(taskId),
   ) {
     const row = this.store.getTask(taskId);
 
@@ -61,6 +90,7 @@ export class Scheduler {
         harnessName,
         requestedReviewHarness,
         requestedArchitect,
+        taskSignal,
       );
     if (
       ![TASK_STATE.DRAFT, TASK_STATE.QUEUED, TASK_STATE.READY, TASK_STATE.FAILED].includes(
@@ -110,6 +140,7 @@ export class Scheduler {
         stageId: 'worker',
         cwd: workspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event),
+        signal: taskSignal,
       });
 
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
@@ -165,6 +196,14 @@ export class Scheduler {
         state: this.store.getTask(taskId).state,
       };
     } catch (error) {
+      if (error instanceof HarnessInterruptedError || error.code === 'HARNESS_INTERRUPTED') {
+        this.store.finishRun(runId, RUN_STATUS.INTERRUPTED);
+        this.store.setStage(taskId, 'worker', STAGE_STATUS.CANCELLED);
+        this.store.setTaskState(taskId, TASK_STATE.CANCELLED);
+        this.store.appendEvent(taskId, 'RUN_INTERRUPTED', { message: error.message });
+        this.store.clearInterruptRequest(taskId);
+        throw error;
+      }
       if (runId) this.store.finishRun(runId, RUN_STATUS.FAILED);
       this.store.setStage(taskId, 'worker', STAGE_STATUS.FAILED);
       this.store.setTaskState(taskId, TASK_STATE.FAILED);
@@ -180,6 +219,7 @@ export class Scheduler {
     harnessName,
     requestedReviewHarness = null,
     requestedArchitect = null,
+    taskSignal = null,
   ) {
     const taskId = row.id;
 
@@ -301,6 +341,7 @@ export class Scheduler {
       maxWorkers: profile.maxWorkers,
       integrationStageId: integrationStage.id,
       initialCompleted: recoveredStages,
+      signal: taskSignal,
     });
 
     if (execution.failures.size) {
@@ -460,6 +501,7 @@ export class Scheduler {
     maxWorkers,
     integrationStageId,
     initialCompleted = new Map(),
+    signal = null,
   }) {
     const pending = new Map(
       plan.stages
@@ -504,6 +546,7 @@ export class Scheduler {
           harnessName,
           completed,
           integrationStageId,
+          signal,
         }).then(
           (value) => ({ stageId: stage.id, status: 'fulfilled', value }),
           (error) => ({ stageId: stage.id, status: 'rejected', error }),
@@ -522,7 +565,17 @@ export class Scheduler {
       running.delete(settledStage.stageId);
       if (settledStage.status === 'fulfilled')
         completed.set(settledStage.stageId, settledStage.value);
-      else failures.set(settledStage.stageId, settledStage.error);
+      else {
+        if (settledStage.error?.code === 'HARNESS_INTERRUPTED') {
+          this.store.setTaskState(task.id, TASK_STATE.CANCELLED);
+          this.store.clearInterruptRequest(task.id);
+          for (const pendingStage of pending.values())
+            this.store.setStage(task.id, pendingStage.id, STAGE_STATUS.CANCELLED);
+          await Promise.allSettled(running.values());
+          throw settledStage.error;
+        }
+        failures.set(settledStage.stageId, settledStage.error);
+      }
     }
 
     return { completed, failures, blocked };
@@ -536,6 +589,7 @@ export class Scheduler {
     harnessName,
     completed,
     integrationStageId,
+    signal = null,
   }) {
     let workspace;
     const attempt =
@@ -591,6 +645,7 @@ export class Scheduler {
         harnessName,
         attempt,
         workspace,
+        signal,
       });
     } catch (error) {
       if (stage.id === integrationStageId)
@@ -620,7 +675,15 @@ export class Scheduler {
     return ordered;
   }
 
-  async executeStage({ task, stage, harness, harnessName, attempt, workspace = null }) {
+  async executeStage({
+    task,
+    stage,
+    harness,
+    harnessName,
+    attempt,
+    workspace = null,
+    signal = null,
+  }) {
     const taskId = task.id;
     const runId = randomUUID();
 
@@ -650,6 +713,7 @@ export class Scheduler {
         stageId: stage.id,
         cwd: stageWorkspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event),
+        signal,
       });
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -676,6 +740,15 @@ export class Scheduler {
         evidence: result.verification,
       };
     } catch (error) {
+      if (error?.code === 'HARNESS_INTERRUPTED') {
+        this.store.finishRun(runId, RUN_STATUS.INTERRUPTED);
+        this.store.setStage(taskId, stage.id, STAGE_STATUS.CANCELLED);
+        this.store.appendEvent(taskId, 'STAGE_RUN_INTERRUPTED', {
+          stageId: stage.id,
+          message: error.message,
+        });
+        throw error;
+      }
       this.store.finishRun(runId, RUN_STATUS.FAILED);
       this.store.setStage(taskId, stage.id, STAGE_STATUS.FAILED);
       this.store.appendEvent(taskId, 'STAGE_RUN_FAILED', {
@@ -693,6 +766,33 @@ export class Scheduler {
     if (harnessName === HARNESS_NAME.OPENCODE) return new OpenCodeHarness();
 
     return new ExternalHarnessUnavailable(harnessName);
+  }
+
+  getTaskSignal(taskId) {
+    const existing = this.taskSignals.get(taskId);
+
+    if (existing) return existing.controller.signal;
+    const controller = new AbortController();
+    const onExternalAbort = () => controller.abort();
+    const pollTimer = setInterval(() => {
+      if (this.store.isInterruptRequested(taskId)) controller.abort();
+    }, this.interruptPollMs);
+
+    pollTimer.unref?.();
+    this.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    if (this.signal?.aborted || this.store.isInterruptRequested(taskId)) controller.abort();
+    this.taskSignals.set(taskId, { controller, pollTimer, onExternalAbort });
+
+    return controller.signal;
+  }
+
+  releaseTaskSignal(taskId) {
+    const entry = this.taskSignals.get(taskId);
+
+    if (!entry) return;
+    clearInterval(entry.pollTimer);
+    this.signal?.removeEventListener('abort', entry.onExternalAbort);
+    this.taskSignals.delete(taskId);
   }
 
   recordHarnessEvent(taskId, event) {

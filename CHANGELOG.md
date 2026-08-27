@@ -2,6 +2,8 @@
 
 ## 0.1.0-alpha.3 — execution and review iteration
 
+- Added `clew interrupt ID` and Ctrl-C propagation through scheduler and harnesses; interrupted tasks become `CANCELLED` with an auditable `INTERRUPTED` run.
+- Added persisted interrupt requests so a second CLI process can safely signal an active scheduler.
 - Added a deterministic fake reviewer and Standard-flow review decision path.
 - Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
 - Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { CodexReviewer } from '../src/review.js';
-import { CodexHarness } from '../src/harness.js';
+import { CodexHarness, FakeHarness, HarnessInterruptedError } from '../src/harness.js';
 import { GitWorktreeManager, IntegrationConflictError } from '../src/workspace.js';
 
 function runGitCommand(args, cwd) {
@@ -38,6 +38,38 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   assert.equal(result.state, 'READY');
   assert.equal(store.listRuns('T-2')[0].status, 'COMPLETED');
   assert.ok(store.listEvents('T-2').some((event) => event.type === 'VERIFICATION_RECORDED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('interrupts an active task through a persisted request', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-interrupt-request-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-INT',
+    title: 'Interrupt',
+    goal: 'Interrupt',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'stops cleanly' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => new FakeHarness({ delayMs: 1_000 }),
+    interruptPollMs: 5,
+  });
+  const run = scheduler.runTask('T-INT', 'quick', 'fake');
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  store.requestInterrupt('T-INT', 'fixture-user');
+  await assert.rejects(run, HarnessInterruptedError);
+  assert.equal(store.getTask('T-INT').state, 'CANCELLED');
+  assert.equal(store.listRuns('T-INT')[0].status, 'INTERRUPTED');
+  assert.equal(store.listStages('T-INT')[0].status, 'CANCELLED');
+  assert.ok(store.listEvents('T-INT').some((event) => event.type === 'RUN_INTERRUPTED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

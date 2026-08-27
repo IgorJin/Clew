@@ -69,3 +69,42 @@ test('CLI gates Deep execution on explicit plan approval', () => {
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('CLI records an interrupt request for an active task', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-interrupt-'));
+
+  try {
+    runCommand('git', ['init', '-b', 'main'], repo);
+    runCommand('git', ['config', 'user.email', 'test@example.com'], repo);
+    runCommand('git', ['config', 'user.name', 'Clew Test'], repo);
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    runCommand('git', ['add', 'README.md'], repo);
+    runCommand('git', ['commit', '-m', 'fixture'], repo);
+    runCli(['init'], repo);
+    runCli(
+      [
+        'task',
+        'create',
+        '--id',
+        'CLI-INT',
+        '--title',
+        'CLI interrupt',
+        '--goal',
+        'Exercise interrupt request',
+        '--accept',
+        'the request is recorded',
+      ],
+      repo,
+    );
+
+    const result = JSON.parse(runCli(['interrupt', 'CLI-INT', '--actor', 'fixture-user'], repo));
+
+    assert.equal(result.taskId, 'CLI-INT');
+    assert.equal(result.actor, 'fixture-user');
+    const events = JSON.parse(runCli(['events', 'CLI-INT'], repo));
+
+    assert.ok(events.some((event) => event.type === 'INTERRUPT_REQUESTED'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

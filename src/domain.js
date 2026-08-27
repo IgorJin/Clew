@@ -22,6 +22,7 @@ export const STAGE_STATUS = Object.freeze({
   COMPLETED: 'COMPLETED',
   FAILED: 'FAILED',
   BLOCKED: 'BLOCKED',
+  CANCELLED: 'CANCELLED',
 });
 
 export const RUN_STATUS = Object.freeze({

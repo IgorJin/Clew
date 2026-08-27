@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { validateTaskContract, PROFILE_NAME, PLAN_STATUS } from './domain.js';
+import { validateTaskContract, PROFILE_NAME, PLAN_STATUS, TASK_STATE } from './domain.js';
 import { Store } from './store.js';
 import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
@@ -29,7 +29,7 @@ function printJson(data) {
 }
 function printHelp() {
   console.log(
-    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
+    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew interrupt ID [--actor ACTOR]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
   );
 }
 
@@ -105,18 +105,45 @@ export async function main(args) {
 
       return printJson(result);
     }
+    if (command === 'interrupt') {
+      const id = subcommand;
+
+      if (!id) throw new Error('task id is required');
+      const task = store.getTask(id);
+
+      if (!task) throw new Error(`task not found: ${id}`);
+      if ([TASK_STATE.COMPLETED, TASK_STATE.CANCELLED].includes(task.state))
+        throw new Error(`task ${id} is already ${task.state}`);
+
+      return printJson(
+        store.requestInterrupt(
+          id,
+          getOptionValue(rest, '--actor', process.env.USER || 'local-user'),
+        ),
+      );
+    }
     if (command === 'run') {
       const id = subcommand;
 
       if (!id) throw new Error('task id is required');
       const manager = new GitWorktreeManager(join(stateDir, 'worktrees'));
-      const result = await new Scheduler(store, manager).runTask(
-        id,
-        getOptionValue(rest, '--profile'),
-        getOptionValue(rest, '--harness'),
-        getOptionValue(rest, '--review-harness'),
-        getOptionValue(rest, '--architect'),
-      );
+      const controller = new AbortController();
+      const interrupt = () => controller.abort();
+
+      process.once('SIGINT', interrupt);
+      let result;
+
+      try {
+        result = await new Scheduler(store, manager, { signal: controller.signal }).runTask(
+          id,
+          getOptionValue(rest, '--profile'),
+          getOptionValue(rest, '--harness'),
+          getOptionValue(rest, '--review-harness'),
+          getOptionValue(rest, '--architect'),
+        );
+      } finally {
+        process.removeListener('SIGINT', interrupt);
+      }
 
       return printJson(result);
     }

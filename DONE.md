@@ -102,6 +102,16 @@ EXECUTING/FAILED → RECOVERING → EXECUTING
 
 `STAGE_RECOVERED` означает, что Clew нашёл доказуемо завершённый run с revision и не запускал stage повторно. Если у stage нет сохранённого revision, recovery останавливается в `BLOCKED`, а не дублирует работу молча.
 
+Чтобы прервать выполняющуюся задачу, нажмите `Ctrl-C` в активном процессе `clew run`. Native harness получает `AbortSignal`, задача переходит в `CANCELLED`, а активный run сохраняется как `INTERRUPTED`.
+
+Из другого процесса можно создать persisted-запрос:
+
+```sh
+node bin/clew.js interrupt TASK-ID --actor your-name
+```
+
+Активный scheduler подхватит запрос и прервет текущий harness. Запрос и результат перехода доступны через `clew events TASK-ID`.
+
 ## Установка и первая проверка
 
 Требования:
@@ -291,4 +301,4 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Проверить native architect и reviewer на реальном Codex app-server.
 
-Следующий крупный шаг для orchestration core — провести AbortSignal через scheduler/CLI, добавить команду `interrupt`, а затем реализовать reconnect/resume native sessions.
+Следующий крупный шаг для orchestration core — реализовать reconnect/resume native sessions и интерактивную маршрутизацию Codex approvals через human gates.

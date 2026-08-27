@@ -13,6 +13,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS stages (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, id TEXT NOT NULL, status TEXT NOT NULL, depends_on TEXT NOT NULL, PRIMARY KEY(task_id,id));
       CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'APPROVED', created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
       CREATE TABLE IF NOT EXISTS approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, plan_version INTEGER NOT NULL, gate_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT, actor TEXT NOT NULL, at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS interrupt_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, actor TEXT NOT NULL, requested_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, turn_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
     const planColumns = this.db.prepare('PRAGMA table_info(plans)').all();
@@ -63,6 +64,26 @@ export class Store {
 
     this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
     this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
+  }
+  requestInterrupt(taskId, actor = 'local-user') {
+    const requestedAt = new Date().toISOString();
+
+    this.db
+      .prepare(
+        'INSERT INTO interrupt_requests (task_id,actor,requested_at) VALUES (?,?,?) ON CONFLICT(task_id) DO UPDATE SET actor=excluded.actor,requested_at=excluded.requested_at',
+      )
+      .run(taskId, actor, requestedAt);
+    this.appendEvent(taskId, 'INTERRUPT_REQUESTED', { actor, requestedAt });
+
+    return { taskId, actor, requestedAt };
+  }
+  isInterruptRequested(taskId) {
+    return Boolean(
+      this.db.prepare('SELECT task_id FROM interrupt_requests WHERE task_id=?').get(taskId),
+    );
+  }
+  clearInterruptRequest(taskId) {
+    this.db.prepare('DELETE FROM interrupt_requests WHERE task_id=?').run(taskId);
   }
   addStage(taskId, id, dependsOn = [], status = STAGE_STATUS.QUEUED) {
     this.db
