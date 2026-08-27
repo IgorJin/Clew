@@ -58,6 +58,7 @@ export class Scheduler {
     requestedHarness = null,
     requestedReviewHarness = null,
     requestedArchitect = null,
+    resumeSessionId = null,
   ) {
     const taskSignal = this.getTaskSignal(taskId);
 
@@ -69,6 +70,7 @@ export class Scheduler {
         requestedReviewHarness,
         requestedArchitect,
         taskSignal,
+        resumeSessionId,
       );
     } finally {
       this.releaseTaskSignal(taskId);
@@ -81,6 +83,7 @@ export class Scheduler {
     requestedReviewHarness = null,
     requestedArchitect = null,
     taskSignal = this.getTaskSignal(taskId),
+    resumeSessionId = null,
   ) {
     const row = this.store.getTask(taskId);
 
@@ -148,6 +151,7 @@ export class Scheduler {
         cwd: workspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal: taskSignal,
+        resumeSessionId,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
       });
 
@@ -235,8 +239,16 @@ export class Scheduler {
         });
         this.store.setStage(taskId, 'worker', STAGE_STATUS.QUEUED);
         this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+        const failedRun = this.store.listRuns(taskId).find((run) => run.id === runId);
 
-        return this.runTask(taskId, requestedProfile, requestedHarness, requestedReviewHarness);
+        return this.runTask(
+          taskId,
+          requestedProfile,
+          requestedHarness,
+          requestedReviewHarness,
+          requestedArchitect,
+          failedRun?.session_id ?? null,
+        );
       }
       throw error;
     }

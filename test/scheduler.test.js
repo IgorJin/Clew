@@ -54,6 +54,7 @@ test('retries a timed-out worker within the profile attempt limit', async () => 
   const dir = mkdtempSync(join(tmpdir(), 'clew-timeout-retry-'));
   const store = new Store(join(dir, 'state.sqlite'));
   let attempts = 0;
+  let resumedSession;
   const workspaceManager = {
     createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
     getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
@@ -70,7 +71,9 @@ test('retries a timed-out worker within the profile attempt limit', async () => 
     harnessFactory: () => ({
       run: async (options) => {
         attempts += 1;
+        resumedSession = options.resumeSessionId;
         if (attempts === 1) {
+          options.onEvent({ type: 'SESSION_STARTED', sessionId: 'timeout-session' });
           const error = new Error('fixture timeout');
 
           error.code = 'HARNESS_TIMED_OUT';
@@ -85,6 +88,7 @@ test('retries a timed-out worker within the profile attempt limit', async () => 
 
   assert.equal(result.state, 'READY');
   assert.equal(store.listRuns('T-TIMEOUT').length, 2);
+  assert.equal(resumedSession, 'timeout-session');
   assert.ok(store.listEvents('T-TIMEOUT').some((event) => event.type === 'RETRY_SCHEDULED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });

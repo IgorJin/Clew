@@ -23,6 +23,7 @@
 - Added explicit failure classes to run events and bounded retries for timed-out worker attempts.
 - Added OpenCode session resume support and persisted turn/output identity in the harness boundary.
 - Added a clean-checkout CLI acceptance fixture covering Quick, Standard, and Deep fake flows.
+- Timed-out retries now reuse the persisted native session when the adapter supports session resume.
 
 ## 0.1.0-alpha.1 — initial product slice
 

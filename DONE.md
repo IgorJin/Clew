@@ -285,7 +285,7 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 - полноценный Codex app-server lifecycle с production-grade reconnect/resume;
 - live OpenCode session/event stream во всех поддерживаемых версиях;
 - native reviewer и structured review findings;
-- retry routing по общей классификации failures и native-session reuse; timeout worker уже классифицируется и повторяется в пределах `maxAttempts`, остальные классы требуют отдельной policy;
+- retry routing по общей классификации failures; timeout worker уже классифицируется, повторяется в пределах `maxAttempts` и передаёт сохранённую native session в resume-capable adapter, остальные классы требуют отдельной policy;
 - live-валидация native Codex architect на зафиксированной версии app-server; fake architect и protocol boundary уже покрыты тестами;
 - остальные human gates кроме подтверждения Deep plan и native harness approvals;
 - production-grade reconnect/resume активной OpenCode session и возобновление именно прерванного Codex turn; базовый OpenCode `resumeSessionId` и Deep-переиспользование Codex thread через `thread/resume` уже реализованы;
