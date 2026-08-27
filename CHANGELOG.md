@@ -4,6 +4,7 @@
 
 - Added `clew interrupt ID` and Ctrl-C propagation through scheduler and harnesses; interrupted tasks become `CANCELLED` with an auditable `INTERRUPTED` run.
 - Added persisted interrupt requests so a second CLI process can safely signal an active scheduler.
+- Added Codex thread resume during Deep recovery: persisted native session IDs are reused through `thread/resume` before a new turn starts.
 - Added a deterministic fake reviewer and Standard-flow review decision path.
 - Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
 - Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.
@@ -34,6 +35,6 @@ Known limitations:
 
 - Codex and OpenCode adapters are experimental: their normalized lifecycle is fixture-tested, while live version compatibility, Codex reconnect, and OpenCode SSE consumption still require validation.
 - Native reviewer/retry is not production-ready; fake review/retry is available for deterministic tests.
-- Arbitrary validated DAG execution, plan approval, and local restart recovery are implemented; native Codex architect compatibility still needs live validation, while live harness reconnection and automatic conflict resolution are not implemented.
+- Arbitrary validated DAG execution, plan approval, and local restart recovery are implemented; native Codex architect compatibility and live OpenCode reconnect still need validation, while automatic conflict resolution is not implemented.
 - Worktrees are retained for inspection; cleanup policy is not automatic yet.
 - Node's built-in SQLite API is experimental in the supported runtime.

@@ -44,6 +44,7 @@ export class Scheduler {
     this.signal = signal;
     this.interruptPollMs = interruptPollMs;
     this.taskSignals = new Map();
+    this.resumeSessions = new Map();
   }
   async runTask(
     taskId,
@@ -139,7 +140,7 @@ export class Scheduler {
         task: row.contract,
         stageId: 'worker',
         cwd: workspace.path,
-        onEvent: (event) => this.recordHarnessEvent(taskId, event),
+        onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal: taskSignal,
       });
 
@@ -396,7 +397,9 @@ export class Scheduler {
     const runs = this.store.listRuns(taskId);
     const events = this.store.listEvents(taskId);
     const recoveredStages = new Map();
+    const resumableSessions = new Map();
     const interruptRun = (run) => {
+      if (run.session_id) resumableSessions.set(run.stage_id, run.session_id);
       this.store.finishRun(run.id, RUN_STATUS.INTERRUPTED, run.commit_sha);
       this.store.appendEvent(taskId, 'RUN_INTERRUPTED', {
         stageId: run.stage_id,
@@ -460,6 +463,8 @@ export class Scheduler {
         });
       }
     }
+
+    this.resumeSessions.set(taskId, resumableSessions);
 
     return recoveredStages;
   }
@@ -547,6 +552,7 @@ export class Scheduler {
           completed,
           integrationStageId,
           signal,
+          resumeSessionId: this.takeResumeSession(task.id, stage.id),
         }).then(
           (value) => ({ stageId: stage.id, status: 'fulfilled', value }),
           (error) => ({ stageId: stage.id, status: 'rejected', error }),
@@ -590,6 +596,7 @@ export class Scheduler {
     completed,
     integrationStageId,
     signal = null,
+    resumeSessionId = null,
   }) {
     let workspace;
     const attempt =
@@ -646,6 +653,7 @@ export class Scheduler {
         attempt,
         workspace,
         signal,
+        resumeSessionId,
       });
     } catch (error) {
       if (stage.id === integrationStageId)
@@ -683,6 +691,7 @@ export class Scheduler {
     attempt,
     workspace = null,
     signal = null,
+    resumeSessionId = null,
   }) {
     const taskId = task.id;
     const runId = randomUUID();
@@ -712,8 +721,9 @@ export class Scheduler {
         task: { ...task, title: stage.goal },
         stageId: stage.id,
         cwd: stageWorkspace.path,
-        onEvent: (event) => this.recordHarnessEvent(taskId, event),
+        onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal,
+        resumeSessionId,
       });
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -795,10 +805,21 @@ export class Scheduler {
     this.taskSignals.delete(taskId);
   }
 
-  recordHarnessEvent(taskId, event) {
+  recordHarnessEvent(taskId, event, runId = null) {
     const eventType = event.type.startsWith('HARNESS_') ? event.type : `HARNESS_${event.type}`;
 
     this.store.appendEvent(taskId, eventType, event);
+    if (runId && event.sessionId)
+      this.store.setRunIdentity(runId, event.sessionId, event.turnId ?? null);
+  }
+
+  takeResumeSession(taskId, stageId) {
+    const sessions = this.resumeSessions.get(taskId);
+    const sessionId = sessions?.get(stageId) ?? null;
+
+    sessions?.delete(stageId);
+
+    return sessionId;
   }
 
   createReviewerAdapter(reviewerName) {

@@ -10,7 +10,8 @@ rl.on('line', (line) => {
   const message = JSON.parse(line);
 
   if (message.method === 'initialize') sendRpcResponse(message.id, { userAgent: 'fixture' });
-  if (message.method === 'thread/start') sendRpcResponse(message.id, { thread: { id: threadId } });
+  if (message.method === 'thread/start' || message.method === 'thread/resume')
+    sendRpcResponse(message.id, { thread: { id: threadId } });
   if (message.method === 'turn/start') {
     sendRpcResponse(message.id, { turn: { id: turnId, status: 'inProgress' } });
     process.stdout.write(

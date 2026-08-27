@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
+  SESSION_RESUMED: 'SESSION_RESUMED',
   TURN_STARTED: 'TURN_STARTED',
   TOOL_STARTED: 'TOOL_STARTED',
   TOOL_COMPLETED: 'TOOL_COMPLETED',
@@ -168,6 +169,7 @@ export class CodexHarness {
     readOnly = false,
     signal,
     onApproval = () => APPROVAL_DECISION.DECLINE,
+    resumeSessionId = null,
   }) {
     if (signal?.aborted) throw new HarnessInterruptedError('Codex');
     const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
@@ -395,11 +397,11 @@ export class CodexHarness {
 
       pendingRequests.set(initializeId, () => {
         sendRpcNotification('initialized', {});
-        const threadRequestId = sendRpcRequest('thread/start', {
-          cwd,
-          model,
-          sandbox: readOnly ? 'readOnly' : undefined,
-        });
+        const threadMethod = resumeSessionId ? 'thread/resume' : 'thread/start';
+        const threadParams = resumeSessionId
+          ? { threadId: resumeSessionId }
+          : { cwd, model, sandbox: readOnly ? 'readOnly' : undefined };
+        const threadRequestId = sendRpcRequest(threadMethod, threadParams);
 
         pendingRequests.set(threadRequestId, (threadResult) => {
           threadId = threadResult.thread?.id;
@@ -412,7 +414,12 @@ export class CodexHarness {
               null,
               HARNESS_EVENT_TYPE.HARNESS_FAILED,
             );
-          onEvent({ type: HARNESS_EVENT_TYPE.SESSION_STARTED, sessionId: threadId });
+          onEvent({
+            type: resumeSessionId
+              ? HARNESS_EVENT_TYPE.SESSION_RESUMED
+              : HARNESS_EVENT_TYPE.SESSION_STARTED,
+            sessionId: threadId,
+          });
           const turnRequestId = sendRpcRequest('turn/start', buildTurnStartParams(threadId));
 
           pendingRequests.set(turnRequestId, (turnResult) => {

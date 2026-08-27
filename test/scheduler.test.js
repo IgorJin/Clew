@@ -673,6 +673,8 @@ test('interrupts a persisted running attempt before resuming it', async () => {
     attempt: 1,
     status: 'RUNNING',
     harness: 'fake',
+    sessionId: 'thread-abandoned',
+    turnId: 'turn-abandoned',
     workspace: dir,
     startedAt: new Date().toISOString(),
   });
@@ -687,11 +689,22 @@ test('interrupts a persisted running attempt before resuming it', async () => {
     }),
     getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
-  const scheduler = new Scheduler(store, workspaceManager, { requirePlanApproval: false });
+  const resumedSessionIds = [];
+  const scheduler = new Scheduler(store, workspaceManager, {
+    requirePlanApproval: false,
+    harnessFactory: () => ({
+      run: async ({ resumeSessionId }) => {
+        resumedSessionIds.push(resumeSessionId);
+
+        return { sessionId: 'thread-resumed', turnId: 'turn-resumed', verification: [] };
+      },
+    }),
+  });
 
   const result = await scheduler.runTask('T-18', 'deep', 'fake');
 
   assert.equal(result.state, 'READY');
+  assert.ok(resumedSessionIds.includes('thread-abandoned'));
   const workerRuns = store.listRuns('T-18').filter((run) => run.stage_id === 'worker');
 
   assert.deepEqual(

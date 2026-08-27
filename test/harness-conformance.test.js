@@ -104,6 +104,24 @@ test('Codex harness conforms and persists native thread and turn identity', asyn
   assert.equal(result.turnId, 'turn_fixture');
 });
 
+test('Codex harness resumes an existing thread before starting a new turn', async () => {
+  const harness = new CodexHarness({
+    command: process.execPath,
+    args: ['fixtures/fake-codex-server.js'],
+    timeoutMs: 2_000,
+  });
+  const events = [];
+  const result = await harness.run({
+    task: fixtureTask,
+    cwd: process.cwd(),
+    resumeSessionId: 'thr_previous',
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(result.sessionId, 'thr_fixture');
+  assert.ok(events.some((event) => event.type === HARNESS_EVENT_TYPE.SESSION_RESUMED));
+});
+
 test('Codex harness routes approval requests through an explicit decision callback', async () => {
   const harness = new CodexHarness({
     command: process.execPath,

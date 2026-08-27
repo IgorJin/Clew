@@ -281,7 +281,7 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 - retry routing по общей классификации failures и native-session reuse;
 - live-валидация native Codex architect на зафиксированной версии app-server; fake architect и protocol boundary уже покрыты тестами;
 - остальные human gates кроме подтверждения Deep plan, включая approvals от harness tools;
-- reconnect/resume активной native Codex/OpenCode session; локальный Deep recovery сейчас создаёт новую попытку после `INTERRUPTED`;
+- reconnect/resume активной OpenCode session и возобновление именно прерванного Codex turn; Deep recovery уже переиспользует сохранённый Codex thread через `thread/resume` и начинает новый turn;
 - автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;
@@ -301,4 +301,4 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Проверить native architect и reviewer на реальном Codex app-server.
 
-Следующий крупный шаг для orchestration core — реализовать reconnect/resume native sessions и интерактивную маршрутизацию Codex approvals через human gates.
+Следующий крупный шаг для orchestration core — довести OpenCode reconnect/resume и интерактивную маршрутизацию Codex approvals через human gates.
