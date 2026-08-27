@@ -62,11 +62,14 @@ export class Scheduler {
       });
       this.store.setRunSession(runId, result.sessionId ?? null);
       const status = this.workspaceManager.status(workspace.path);
+      const revision = this.workspaceManager.commit
+        ? this.workspaceManager.commit(workspace.path, `clew(${taskId}): worker attempt ${attempt}`)
+        : status.sha;
       this.store.event(taskId, 'VERIFICATION_RECORDED', {
         evidence: result.verification,
-        revision: status.sha,
+        revision,
       });
-      this.store.finishRun(runId, 'COMPLETED', status.sha);
+      this.store.finishRun(runId, 'COMPLETED', revision);
       this.store.setStage(taskId, 'worker', 'COMPLETED');
       this.store.setTaskState(taskId, 'VERIFYING');
       this.store.setTaskState(taskId, profile.review ? 'REVIEWING' : 'READY');
@@ -75,7 +78,7 @@ export class Scheduler {
         const review = await reviewer.review({
           task: row.contract,
           evidence: result.verification,
-          revision: status.sha,
+          revision,
         });
         this.store.event(taskId, 'REVIEW_RECORDED', review);
         if (review.verdict === 'pass') this.store.setTaskState(taskId, 'READY');
@@ -99,7 +102,7 @@ export class Scheduler {
         runId,
         attempt,
         workspace,
-        revision: status.sha,
+        revision,
         state: this.store.getTask(taskId).state,
       };
     } catch (error) {
@@ -149,20 +152,40 @@ export class Scheduler {
       this.store.setTaskState(taskId, 'FAILED');
       throw new Error('one or more parallel stages failed');
     }
+    const completedWorkers = workerResults.map((result) => result.value);
     this.store.event(taskId, 'INTEGRATION_STARTED', { dependencies: ['backend', 'frontend'] });
     const integration = plan.stages.find((stage) => stage.id === 'integration');
     let integrationResult;
     try {
+      const integrationWorkspace = this.workspaceManager.create(
+        taskId,
+        integration.id,
+        row.contract.base_ref,
+        1,
+      );
+      if (this.workspaceManager.integrate) {
+        const integrationGitResult = this.workspaceManager.integrate(
+          integrationWorkspace.path,
+          completedWorkers.map((result) => result.revision),
+        );
+        this.store.event(taskId, 'COMMITS_INTEGRATED', integrationGitResult);
+      }
       integrationResult = await this.runStage({
         task: row.contract,
         stage: integration,
         harness,
         harnessName,
         attempt: 1,
+        workspace: integrationWorkspace,
       });
     } catch (error) {
+      this.store.setStage(taskId, 'integration', 'FAILED');
       this.store.setTaskState(taskId, 'FAILED');
-      this.store.event(taskId, 'INTEGRATION_FAILED', { message: error.message });
+      this.store.event(
+        taskId,
+        error.name === 'IntegrationConflictError' ? 'INTEGRATION_CONFLICT' : 'INTEGRATION_FAILED',
+        { message: error.message, commit: error.commit },
+      );
       throw error;
     }
     this.store.event(taskId, 'INTEGRATION_COMPLETED', {
@@ -187,11 +210,12 @@ export class Scheduler {
     };
   }
 
-  async runStage({ task, stage, harness, harnessName, attempt }) {
+  async runStage({ task, stage, harness, harnessName, attempt, workspace = null }) {
     const taskId = task.id;
     const runId = randomUUID();
     this.store.setStage(taskId, stage.id, 'RUNNING');
-    const workspace = this.workspaceManager.create(taskId, stage.id, task.base_ref, attempt);
+    const stageWorkspace =
+      workspace ?? this.workspaceManager.create(taskId, stage.id, task.base_ref, attempt);
     const run = {
       id: runId,
       taskId,
@@ -199,36 +223,42 @@ export class Scheduler {
       attempt,
       status: 'RUNNING',
       harness: harnessName,
-      workspace: workspace.path,
+      workspace: stageWorkspace.path,
       startedAt: new Date().toISOString(),
     };
     this.store.createRun(run);
     this.store.event(taskId, 'STAGE_RUN_STARTED', {
       ...run,
-      branch: workspace.branch,
-      baseSha: workspace.baseSha,
+      branch: stageWorkspace.branch,
+      baseSha: stageWorkspace.baseSha,
     });
     try {
       const result = await harness.run({
         task: { ...task, title: stage.goal },
         stageId: stage.id,
-        cwd: workspace.path,
+        cwd: stageWorkspace.path,
         onEvent: (event) => this.store.event(taskId, `HARNESS_${event.type}`, event),
       });
-      const status = this.workspaceManager.status(workspace.path);
+      const status = this.workspaceManager.status(stageWorkspace.path);
+      const revision = this.workspaceManager.commit
+        ? this.workspaceManager.commit(
+            stageWorkspace.path,
+            `clew(${taskId}): ${stage.id} attempt ${attempt}`,
+          )
+        : status.sha;
       this.store.setRunSession(runId, result.sessionId ?? null);
-      this.store.finishRun(runId, 'COMPLETED', status.sha);
+      this.store.finishRun(runId, 'COMPLETED', revision);
       this.store.setStage(taskId, stage.id, 'COMPLETED');
       this.store.event(taskId, 'VERIFICATION_RECORDED', {
         stageId: stage.id,
         evidence: result.verification,
-        revision: status.sha,
+        revision,
       });
       return {
         runId,
         stageId: stage.id,
-        workspace,
-        revision: status.sha,
+        workspace: stageWorkspace,
+        revision,
         evidence: result.verification,
       };
     } catch (error) {

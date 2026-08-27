@@ -6,6 +6,8 @@
 - Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
 - Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.
 - Added concurrent execution for independent Deep stages, dependency-gated integration, and explicit blocked/failed states.
+- Added Git commit capture for worker outputs and deterministic cherry-pick integration into a dedicated integration worktree.
+- Added explicit integration-conflict diagnostics with a safe cherry-pick abort and inspectable failed state.
 - Added an optional native Codex reviewer route with read-only/output-schema options and a separate `--review-harness` CLI flag.
 
 ## 0.1.0-alpha.1 — initial product slice
@@ -23,6 +25,6 @@ Known limitations:
 
 - Codex and OpenCode adapters are experimental: Codex handshake/approval/reconnect behavior and OpenCode SSE consumption still require live compatibility validation.
 - Native reviewer/retry is not production-ready; fake review/retry is available for deterministic tests.
-- Deep concurrency is implemented for the built-in plan fixture; arbitrary DAG scheduling, concurrency limits, recovery, and production merge integration are not implemented.
+- Deep concurrency and commit integration are implemented for the built-in plan fixture; arbitrary DAG scheduling, concurrency limits, recovery, and automatic conflict resolution are not implemented.
 - Worktrees are retained for inspection; cleanup policy is not automatic yet.
 - Node's built-in SQLite API is experimental in the supported runtime.

@@ -10,6 +10,14 @@ function git(args, cwd) {
   }).trim();
 }
 
+export class IntegrationConflictError extends Error {
+  constructor(commit, message) {
+    super(`failed to integrate commit ${commit}: ${message}`);
+    this.name = 'IntegrationConflictError';
+    this.commit = commit;
+  }
+}
+
 export class GitWorktreeManager {
   constructor(root, projectRoot = process.cwd()) {
     this.root = resolve(root);
@@ -36,6 +44,38 @@ export class GitWorktreeManager {
       sha: git(['rev-parse', 'HEAD'], path),
       dirty: Boolean(git(['status', '--porcelain'], path)),
     };
+  }
+  commit(path, message) {
+    const status = this.status(path);
+    if (!status.dirty) return status.sha;
+    git(['add', '--all'], path);
+    git(['commit', '-m', message], path);
+    return git(['rev-parse', 'HEAD'], path);
+  }
+  integrate(path, commits) {
+    const integrated = [];
+    const skipped = [];
+    for (const commit of commits) {
+      try {
+        git(['merge-base', '--is-ancestor', commit, 'HEAD'], path);
+        skipped.push(commit);
+        continue;
+      } catch {
+        // A non-zero exit means the commit is not yet in the integration branch.
+      }
+      try {
+        git(['cherry-pick', commit], path);
+        integrated.push(commit);
+      } catch (error) {
+        try {
+          git(['cherry-pick', '--abort'], path);
+        } catch {
+          // Preserve the original integration error; the worktree remains inspectable.
+        }
+        throw new IntegrationConflictError(commit, error.stderr || error.message);
+      }
+    }
+    return { integrated, skipped, revision: git(['rev-parse', 'HEAD'], path) };
   }
   remove(path, { force = false } = {}) {
     const target = resolve(path);

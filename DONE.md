@@ -52,7 +52,9 @@ Quick run не работает в основном checkout. Clew создаё�
 ai/<task-id>-worker
 ```
 
-и worktree внутри `.clew/worktrees/`. В результат запуска попадают путь, branch, base SHA и текущий revision. Worktree можно проверить и удалить через `GitWorktreeManager` из кода; CLI-команды для ручной уборки пока не добавлены.
+и worktree внутри `.clew/worktrees/`. В результат запуска попадают путь, branch, base SHA и текущий revision. Результат worker stage фиксируется отдельным Git commit. В Deep flow commits независимых workers последовательно переносятся через cherry-pick в integration worktree. Worktree можно проверить и удалить через `GitWorktreeManager` из кода; CLI-команды для ручной уборки пока не добавлены.
+
+Если commits конфликтуют, Clew прерывает cherry-pick, оставляет integration worktree в чистом диагностируемом состоянии, записывает событие `INTEGRATION_CONFLICT` и переводит integration stage и задачу в `FAILED`. Автоматического разрешения конфликтов пока нет.
 
 ### Harness boundary
 
@@ -126,7 +128,7 @@ node bin/clew.js events AUTH-142
 - base SHA и revision;
 - `state: READY`.
 
-Важно: fake harness делает безопасную fixture-запись `.clew-execution.log` в worktree. Это демонстрация lifecycle, а не реализация refresh-token feature.
+Важно: fake harness делает безопасную stage-specific fixture-запись `.clew-runs/<stage-id>.log` в worktree. Это демонстрация lifecycle, а не реализация refresh-token feature.
 
 ## Сценарий 2: создать контракт JSON
 
@@ -204,11 +206,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                         |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены               |
-| `deep`     | fake plan валидируется как DAG, backend/frontend выполняются конкурентно, integration ждёт обе зависимости, затем запускается review; native architect/merge integration пока не завершены |
+| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                        |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                              |
+| `deep`     | fake plan валидируется как DAG, backend/frontend выполняются конкурентно и создают commits; Clew cherry-pick'ает их в integration worktree, запускает integration stage и review; native architect и разрешение конфликтов пока не готовы |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -221,8 +223,8 @@ node bin/clew.js doctor
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
 - native architect plan с human approval;
-- произвольный multi-stage DAG с concurrency limits, recovery и production merge integration;
-- интеграция результатов worktrees и merge-conflict workflow;
+- произвольный multi-stage DAG с concurrency limits и recovery;
+- автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;
 - OpenTelemetry/Phoenix;

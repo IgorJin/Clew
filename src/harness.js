@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
@@ -8,7 +8,9 @@ export class FakeHarness {
     const sessionId = `fake-${randomUUID()}`;
     onEvent({ type: 'SESSION_STARTED', sessionId, stageId });
     onEvent({ type: 'TURN_STARTED', sessionId });
-    appendFileSync(join(cwd, '.clew-execution.log'), `${task.id}/${stageId}\n`);
+    const evidenceDir = join(cwd, '.clew-runs');
+    mkdirSync(evidenceDir, { recursive: true });
+    appendFileSync(join(evidenceDir, `${stageId}.log`), `${task.id}/${stageId}\n`);
     onEvent({ type: 'TOOL_COMPLETED', sessionId, tool: 'fixture-write', exitCode: 0 });
     onEvent({
       type: 'VERIFICATION_DETECTED',
