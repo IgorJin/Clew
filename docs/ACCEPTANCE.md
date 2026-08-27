@@ -32,6 +32,6 @@ Release evidence on 2026-08-27: `npm run smoke:codex` passed against Codex `0.14
 3. Run `npm run smoke:opencode` or a disposable Quick task with `--harness opencode`.
 4. Confirm the persisted session/turn identity, terminal event, interrupt behavior and session resume after a simulated Clew restart.
 
-Release evidence on 2026-08-27: OpenCode `1.18.23` created a real session, accepted an async prompt, streamed correlated status/retry events and reported a terminal provider failure. The configured `omlx` model provider was unreachable, so a successful completion remains the final external sign-off before tag `v0.1.0`.
+Release evidence on 2026-08-27: OpenCode `1.18.23` created a real session, accepted an async prompt, streamed correlated events, executed a tool, recorded passing command evidence for `AC-1`, committed the result, reached `READY`, and left the primary checkout untouched. A separate unavailable-provider run proved correlated retry/failure diagnostics without a false `READY`.
 
 The live procedures are release-signoff checks because they require local credentials, a working model provider and external processes. Fixture coverage remains mandatory in CI.

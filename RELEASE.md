@@ -1,6 +1,6 @@
 # Clew v0.1 release plan
 
-**Release status:** `v0.1.0-rc.1` implementation complete; final tag awaits a successful OpenCode model-provider smoke in the release environment
+**Release status:** `v0.1.0` release gate complete
 
 **Release goal:** prove that Clew can keep one task thread across native harness execution, Git worktrees, verification, review, and retry.
 
@@ -116,18 +116,19 @@ The release branch/tag must contain:
 - A candidate tag is created only from a clean tree and only after its gate is recorded in the release notes.
 - Protocol versions and package versions used by adapters are pinned in the release artifacts.
 
-## rc.1 sign-off record — 2026-08-27
+## v0.1.0 sign-off record — 2026-08-27
 
-- `npm run check`: passed, 68/68 tests at sign-off.
+- `npm run check`: passed, 69/69 tests at sign-off.
 - Clean-checkout CLI fixture: Quick, Standard, and Deep passed; primary checkout unchanged.
 - `doctor --harness codex`: passed with Codex CLI/app-server `0.148.0` and authenticated ChatGPT session.
 - `npm run smoke:codex`: passed against the real app-server. A native command verified `result.txt`, evidence was correlated to `AC-1`, a revision was committed, and task state became `READY`.
 - `npm run smoke:codex-roles`: passed against the real app-server. The read-only architect returned a schema-valid DAG, the read-only reviewer returned `pass`, and the workspace remained unchanged.
 - `doctor --harness opencode`: passed against local OpenCode server `1.18.23`.
-- `npm run smoke:opencode`: real session creation, async prompt, SSE status correlation, retry events, and terminal failure were observed. The configured external `omlx` provider was unreachable, so successful completion could not be signed off; Clew retained a truthful `FAILED` state.
+- `npm run smoke:opencode`: passed against the real `1.18.23` server with a public OpenCode model. A native tool created `result.txt`, command evidence was linked to `AC-1`, revision `b7f6c1a423959b4b524dfd09fc64a4d7fdee59f4` was committed, task state became `READY`, and the primary checkout remained untouched.
+- OpenCode provider-failure behavior was also observed with an unreachable provider; Clew retained a truthful `FAILED` state and correlated retry diagnostics.
 - npm package smoke: tarball contained the intended 44 release files, installed with zero runtime dependencies, exposed `clew --help`, and completed an installed Quick fake run in `READY`.
 
-The OpenCode provider result is an environment blocker, not an adapter transport failure. The final `v0.1.0` tag remains gated on rerunning `npm run smoke:opencode` with a working provider and receiving passing command evidence.
+All final-tag gates are satisfied.
 
 ## Recommended execution order
 

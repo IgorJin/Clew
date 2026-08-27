@@ -1,6 +1,6 @@
 # Clew: что уже можно делать
 
-Это практическая инструкция для release candidate `v0.1.0-rc.1`. Здесь описано только фактически реализованное и проверяемое поведение.
+Это практическая инструкция для `v0.1.0`. Здесь описано только фактически реализованное и проверяемое поведение.
 
 ## Коротко
 
@@ -315,7 +315,7 @@ node bin/clew.js status TASK-ID --watch --interval 1000
 - PR/merge automation;
 - runtime isolation портов, баз данных и контейнеров.
 
-OpenCode transport `1.18.23` прошёл live create/session/SSE/failure проверку. Успешный model turn зависит от provider, настроенного внутри OpenCode; в release-signoff окружении provider `omlx` был недоступен, и Clew корректно сохранил внешний failure вместо ложного `READY`.
+OpenCode `1.18.23` прошёл полный live smoke с публичной моделью: создание session, async prompt, SSE events, tool execution, passing command evidence, commit revision и итоговый `READY`. Отдельно проверено, что при недоступном provider Clew сохраняет диагностируемый failure и не выставляет ложный `READY`.
 
 Это не скрытые ограничения: они вынесены в [RELEASE.md](./RELEASE.md) и post-v0.1 секцию [tasks.md](./tasks.md).
 

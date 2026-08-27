@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
@@ -20,6 +20,12 @@ function runCommand(command, args, cwd, extraEnv = {}) {
 function runCli(args, cwd) {
   return runCommand(process.execPath, [cliFile, ...args], cwd);
 }
+
+test('CLI help reports the package version', () => {
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+  assert.match(runCli(['--help'], process.cwd()), new RegExp(`^Clew v${packageJson.version}\\b`));
+});
 
 test('CLI gates Deep execution on explicit plan approval', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-approval-'));

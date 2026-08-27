@@ -1,6 +1,6 @@
 # Clew — implementation backlog
 
-**Status:** v0.1.0-rc.1 implementation record
+**Status:** v0.1.0 complete
 
 **Source:** [`spec.md`](./spec.md)
 
@@ -19,17 +19,17 @@ This backlog is ordered by risk reduction and vertical product value. A task is 
 
 ## v0.1 completion record
 
-| Range          | Status      | Release evidence                                                                                          |
-| -------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
-| `CLEW-001–005` | Complete    | Toolchain ADR, Node.js project gates, versioned schemas/fixtures, runtime validators, config precedence   |
-| `CLEW-006`     | Complete    | Codex fixture conformance plus successful real `0.148.0` worktree/evidence/commit smoke                   |
-| `CLEW-007`     | Conditional | OpenCode `1.18.23` live session/SSE/failure path proven; successful model completion awaits a provider    |
-| `CLEW-008–022` | Complete    | Worktree isolation, durable engine, Quick CLI/acceptance, verification correlation, recovery and watch    |
-| `CLEW-023–028` | Complete    | Persisted policy, native reviewer smoke, feedback/session retry routing, human gates, Standard acceptance |
-| `CLEW-029–036` | Complete    | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
-| `CLEW-037–041` | Complete    | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
+| Range          | Status   | Release evidence                                                                                          |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `CLEW-001–005` | Complete | Toolchain ADR, Node.js project gates, versioned schemas/fixtures, runtime validators, config precedence   |
+| `CLEW-006`     | Complete | Codex fixture conformance plus successful real `0.148.0` worktree/evidence/commit smoke                   |
+| `CLEW-007`     | Complete | OpenCode `1.18.23` live session/SSE/tool/command-evidence path reached `READY`; failure path also proven  |
+| `CLEW-008–022` | Complete | Worktree isolation, durable engine, Quick CLI/acceptance, verification correlation, recovery and watch    |
+| `CLEW-023–028` | Complete | Persisted policy, native reviewer smoke, feedback/session retry routing, human gates, Standard acceptance |
+| `CLEW-029–036` | Complete | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
+| `CLEW-037–041` | Complete | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
 
-All implementation work through `CLEW-041` is present. The only remaining final-tag sign-off is external: rerun `npm run smoke:opencode` with a working provider and record a passing command evidence item. This does not add a code task; it closes the conditional live check for `CLEW-007`.
+All implementation work and release sign-off through `CLEW-041` are complete.
 
 ## Milestone 0 — Repository foundation
 

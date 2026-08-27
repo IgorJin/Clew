@@ -1,11 +1,11 @@
 # Changelog
 
-## 0.1.0-rc.1 — complete v0.1 release candidate
+## 0.1.0 — initial release
 
 - Added versioned task/profile/plan/review/verification/event schemas, fixtures, runtime validation, and seven transactional SQLite migrations.
 - Added deterministic Quick, Standard, and Deep acceptance flows with isolated worktrees, passing-evidence completion policy, structured review, bounded retries, human approvals, and auditable events.
 - Added native Codex app-server lifecycle, command evidence extraction, thread/turn persistence, approvals, interrupt, timeout, and session resume. A real Codex `0.148.0` smoke reached `READY` while leaving the primary checkout untouched.
-- Added OpenCode `1.18.23` HTTP/SSE lifecycle with session correlation, tool evidence, permissions, abort, resume, completion and provider-failure diagnostics. Live transport/session/SSE/failure behavior was verified against a local server.
+- Added OpenCode `1.18.23` HTTP/SSE lifecycle with session correlation, tool evidence, permissions, abort, resume, completion and provider-failure diagnostics. A real model turn reached `READY` with command evidence while leaving the primary checkout untouched.
 - Added Deep DAG execution with bounded concurrency, per-stage harness routing, routed timeout retry, transitive commit integration, explicit conflicts, integration verification, final review, and restart reconciliation.
 - Added review feedback delivery to the resumed worker session. The first retry reuses context; repeated timeout/review failures start a fresh session.
 - Added exact adapter version/auth/health diagnostics, config precedence and command overrides, secret rejection/redaction, safe IDs/refs/paths, unique run-attempt enforcement, and projection rebuilding from the event log.
@@ -14,7 +14,7 @@
 
 Known limitations:
 
-- OpenCode successful model execution depends on the provider configured inside OpenCode. The release-signoff server's `omlx` provider was unreachable; Clew correctly recorded the streamed retries and external failure instead of reporting `READY`.
+- OpenCode successful model execution depends on a reachable provider configured inside OpenCode; provider outages are reported as external failures rather than `READY`.
 - Clew resumes a native session/thread with a new tracked turn; it does not continue midway through an interrupted turn.
 - Merge conflicts require manual resolution; Clew never applies a destructive automatic fallback.
 - Runtime namespaces for ports, databases, queues, and containers are not isolated.

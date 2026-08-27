@@ -1,6 +1,6 @@
 # Clew — Product and Technical Specification
 
-**Status:** Draft 0.1
+**Status:** v0.1 final
 
 **Product type:** local, task-centric control plane for AI-assisted software development
 
