@@ -1,6 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { URL } from 'node:url';
 import { validateTaskContract, PROFILE_NAME, PLAN_STATUS, TASK_STATE } from './domain.js';
 import { APPROVAL_DECISION } from './harness.js';
 import { Store } from './store.js';
@@ -181,21 +182,33 @@ export async function main(args) {
     }
     if (command === 'events') return printJson(store.listEvents(subcommand));
     if (command === 'doctor') {
+      const codexCommand = process.env.CLEW_CODEX_BIN || 'codex';
+      const openCodeUrl = process.env.CLEW_OPENCODE_URL || 'http://127.0.0.1:4096';
       const checks = [
-        { name: 'node', ok: Number(process.versions.node.split('.')[0]) >= 22 },
+        {
+          name: 'node',
+          ok: Number(process.versions.node.split('.')[0]) >= 22,
+          required: true,
+          detail: process.version,
+        },
         {
           name: 'git',
-          ok: (() => {
-            try {
-              return Boolean(getGitVersion());
-            } catch {
-              return false;
-            }
-          })(),
+          ...probeCommand('git', ['--version']),
+          required: true,
         },
+        {
+          name: 'codex',
+          ...probeCommand(codexCommand, ['--version']),
+          required: false,
+          command: codexCommand,
+        },
+        { name: 'opencode', ...probeUrl(openCodeUrl), required: false, url: openCodeUrl },
       ];
 
-      return printJson({ ok: checks.every((check) => check.ok), checks });
+      return printJson({
+        ok: checks.filter((check) => check.required).every((check) => check.ok),
+        checks,
+      });
     }
 
     return printHelp();
@@ -203,6 +216,25 @@ export async function main(args) {
     store.close();
   }
 }
-function getGitVersion() {
-  return execFileSync('git', ['--version'], { encoding: 'utf8' });
+function probeCommand(command, args) {
+  try {
+    const detail = execFileSync(command, args, { encoding: 'utf8', timeout: 2_000 }).trim();
+
+    return { ok: true, detail };
+  } catch (error) {
+    return { ok: false, detail: error.code === 'ENOENT' ? 'not found' : 'unavailable' };
+  }
+}
+
+function probeUrl(value) {
+  try {
+    const url = new URL(value);
+
+    return {
+      ok: ['http:', 'https:'].includes(url.protocol),
+      detail: 'endpoint configured',
+    };
+  } catch {
+    return { ok: false, detail: 'invalid URL' };
+  }
 }

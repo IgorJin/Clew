@@ -8,9 +8,10 @@ import { fileURLToPath, URL } from 'node:url';
 
 const cliFile = fileURLToPath(new URL('../bin/clew.js', import.meta.url));
 
-function runCommand(command, args, cwd) {
+function runCommand(command, args, cwd, extraEnv = {}) {
   return execFileSync(command, args, {
     cwd,
+    env: { ...process.env, ...extraEnv },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -104,6 +105,29 @@ test('CLI records an interrupt request for an active task', () => {
     const events = JSON.parse(runCli(['events', 'CLI-INT'], repo));
 
     assert.ok(events.some((event) => event.type === 'INTERRUPT_REQUESTED'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('doctor reports optional native adapter readiness without failing fake setup', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-doctor-'));
+
+  try {
+    const result = JSON.parse(
+      runCommand(process.execPath, [cliFile, 'doctor'], repo, {
+        CLEW_CODEX_BIN: 'clew-command-that-does-not-exist',
+        CLEW_OPENCODE_URL: 'not-a-url',
+      }),
+    );
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      result.checks.map((check) => check.name),
+      ['node', 'git', 'codex', 'opencode'],
+    );
+    assert.equal(result.checks.find((check) => check.name === 'codex').ok, false);
+    assert.equal(result.checks.find((check) => check.name === 'opencode').detail, 'invalid URL');
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
