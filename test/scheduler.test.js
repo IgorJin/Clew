@@ -12,8 +12,8 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-'));
   const store = new Store(join(dir, 'state.sqlite'));
   const workspaceManager = {
-    create: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-2',
@@ -24,8 +24,8 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   });
   const result = await new Scheduler(store, workspaceManager).runTask('T-2', 'quick', 'fake');
   assert.equal(result.state, 'READY');
-  assert.equal(store.runs('T-2')[0].status, 'COMPLETED');
-  assert.ok(store.events('T-2').some((event) => event.type === 'VERIFICATION_RECORDED'));
+  assert.equal(store.listRuns('T-2')[0].status, 'COMPLETED');
+  assert.ok(store.listEvents('T-2').some((event) => event.type === 'VERIFICATION_RECORDED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -34,8 +34,8 @@ test('runs standard profile through a review decision', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-standard-'));
   const store = new Store(join(dir, 'state.sqlite'));
   const workspaceManager = {
-    create: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-4',
@@ -46,7 +46,7 @@ test('runs standard profile through a review decision', async () => {
   });
   const result = await new Scheduler(store, workspaceManager).runTask('T-4', 'standard', 'fake');
   assert.equal(result.state, 'READY');
-  assert.ok(store.events('T-4').some((event) => event.type === 'REVIEW_RECORDED'));
+  assert.ok(store.listEvents('T-4').some((event) => event.type === 'REVIEW_RECORDED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -57,8 +57,8 @@ test('routes blocking review findings into bounded retries', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-retry-'));
   const store = new Store(join(dir, 'state.sqlite'));
   const workspaceManager = {
-    create: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-5',
@@ -69,8 +69,11 @@ test('routes blocking review findings into bounded retries', async () => {
   });
   const result = await new Scheduler(store, workspaceManager).runTask('T-5', 'standard', 'fake');
   assert.equal(result.state, 'FAILED');
-  assert.equal(store.runs('T-5').length, 3);
-  assert.equal(store.events('T-5').filter((event) => event.type === 'RETRY_SCHEDULED').length, 2);
+  assert.equal(store.listRuns('T-5').length, 3);
+  assert.equal(
+    store.listEvents('T-5').filter((event) => event.type === 'RETRY_SCHEDULED').length,
+    2,
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
   if (previous === undefined) delete process.env.CLEW_FAKE_REVIEW;
@@ -81,8 +84,8 @@ test('runs deep profile through planned worker and integration stages', async ()
   const dir = mkdtempSync(join(tmpdir(), 'clew-deep-'));
   const store = new Store(join(dir, 'state.sqlite'));
   const workspaceManager = {
-    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-6',
@@ -94,11 +97,11 @@ test('runs deep profile through planned worker and integration stages', async ()
   const result = await new Scheduler(store, workspaceManager).runTask('T-6', 'deep', 'fake');
   assert.equal(result.state, 'READY');
   assert.deepEqual(
-    store.stages('T-6').map((stage) => stage.id),
+    store.listStages('T-6').map((stage) => stage.id),
     ['backend', 'frontend', 'integration'],
   );
-  assert.ok(store.events('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
-  assert.equal(store.runs('T-6').length, 3);
+  assert.ok(store.listEvents('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
+  assert.equal(store.listRuns('T-6').length, 3);
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -118,8 +121,8 @@ test('runs independent deep stages concurrently before integration', async () =>
     },
   };
   const workspaceManager = {
-    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-9',
@@ -132,7 +135,7 @@ test('runs independent deep stages concurrently before integration', async () =>
   const result = await scheduler.runTask('T-9', 'deep', 'fake');
   assert.equal(result.state, 'READY');
   assert.equal(maxActive, 2);
-  const events = store.events('T-9');
+  const events = store.listEvents('T-9');
   const integrationStart = events.findIndex((event) => event.type === 'INTEGRATION_STARTED');
   const workerCompletions = events
     .map((event, index) => ({ event, index }))
@@ -158,8 +161,8 @@ test('blocks integration when a parallel dependency fails', async () => {
     },
   };
   const workspaceManager = {
-    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
-    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+    createWorktree: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
   store.createTask({
     id: 'T-10',
@@ -171,9 +174,12 @@ test('blocks integration when a parallel dependency fails', async () => {
   const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
   await assert.rejects(() => scheduler.runTask('T-10', 'deep', 'fake'), /parallel stages failed/);
   assert.equal(store.getTask('T-10').state, 'FAILED');
-  assert.equal(store.stages('T-10').find((stage) => stage.id === 'integration').status, 'BLOCKED');
   assert.equal(
-    store.runs('T-10').some((run) => run.stage_id === 'integration'),
+    store.listStages('T-10').find((stage) => stage.id === 'integration').status,
+    'BLOCKED',
+  );
+  assert.equal(
+    store.listRuns('T-10').some((run) => run.stage_id === 'integration'),
     false,
   );
   store.close();

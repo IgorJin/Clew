@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-function git(args, cwd) {
+function runGitCommand(args, cwd) {
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf8',
@@ -24,65 +24,65 @@ export class GitWorktreeManager {
     this.projectRoot = resolve(projectRoot);
     mkdirSync(this.root, { recursive: true });
   }
-  create(taskId, stageId, baseRef = 'HEAD', attempt = 1) {
+  createWorktree(taskId, stageId, baseRef = 'HEAD', attempt = 1) {
     const suffix = attempt > 1 ? `-attempt-${attempt}` : '';
     const safe = `${taskId}-${stageId}${suffix}`.replace(/[^A-Za-z0-9_.-]/g, '-');
     const path = join(this.root, safe);
     const branch = `ai/${safe}`;
     try {
-      git(['worktree', 'add', '-b', branch, path, baseRef], this.projectRoot);
-      const baseSha = git(['rev-parse', baseRef], this.projectRoot);
+      runGitCommand(['worktree', 'add', '-b', branch, path, baseRef], this.projectRoot);
+      const baseSha = runGitCommand(['rev-parse', baseRef], this.projectRoot);
       return { path, branch, baseSha };
     } catch (error) {
       if (path.startsWith(`${this.root}/`)) rmSync(path, { recursive: true, force: true });
       throw error;
     }
   }
-  status(path) {
+  getWorktreeStatus(path) {
     return {
       path,
-      sha: git(['rev-parse', 'HEAD'], path),
-      dirty: Boolean(git(['status', '--porcelain'], path)),
+      sha: runGitCommand(['rev-parse', 'HEAD'], path),
+      dirty: Boolean(runGitCommand(['status', '--porcelain'], path)),
     };
   }
-  commit(path, message) {
-    const status = this.status(path);
+  commitWorktreeChanges(path, message) {
+    const status = this.getWorktreeStatus(path);
     if (!status.dirty) return status.sha;
-    git(['add', '--all'], path);
-    git(['commit', '-m', message], path);
-    return git(['rev-parse', 'HEAD'], path);
+    runGitCommand(['add', '--all'], path);
+    runGitCommand(['commit', '-m', message], path);
+    return runGitCommand(['rev-parse', 'HEAD'], path);
   }
-  integrate(path, commits) {
+  integrateCommits(path, commits) {
     const integrated = [];
     const skipped = [];
     for (const commit of commits) {
       try {
-        git(['merge-base', '--is-ancestor', commit, 'HEAD'], path);
+        runGitCommand(['merge-base', '--is-ancestor', commit, 'HEAD'], path);
         skipped.push(commit);
         continue;
       } catch {
         // A non-zero exit means the commit is not yet in the integration branch.
       }
       try {
-        git(['cherry-pick', commit], path);
+        runGitCommand(['cherry-pick', commit], path);
         integrated.push(commit);
       } catch (error) {
         try {
-          git(['cherry-pick', '--abort'], path);
+          runGitCommand(['cherry-pick', '--abort'], path);
         } catch {
           // Preserve the original integration error; the worktree remains inspectable.
         }
         throw new IntegrationConflictError(commit, error.stderr || error.message);
       }
     }
-    return { integrated, skipped, revision: git(['rev-parse', 'HEAD'], path) };
+    return { integrated, skipped, revision: runGitCommand(['rev-parse', 'HEAD'], path) };
   }
-  remove(path, { force = false } = {}) {
+  removeWorktree(path, { force = false } = {}) {
     const target = resolve(path);
     if (!target.startsWith(`${this.root}/`))
       throw new Error('worktree path is outside the Clew worktree root');
-    if (!force && this.status(target).dirty)
+    if (!force && this.getWorktreeStatus(target).dirty)
       throw new Error('refusing to remove a dirty worktree; pass force=true');
-    git(['worktree', 'remove', ...(force ? ['--force'] : []), target], this.projectRoot);
+    runGitCommand(['worktree', 'remove', ...(force ? ['--force'] : []), target], this.projectRoot);
   }
 }

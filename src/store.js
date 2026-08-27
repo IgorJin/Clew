@@ -21,7 +21,7 @@ export class Store {
     this.db
       .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)')
       .run(contract.id, JSON.stringify(contract), 'DRAFT', now, now);
-    this.event(contract.id, 'TASK_CREATED', { state: 'DRAFT', contract });
+    this.appendEvent(contract.id, 'TASK_CREATED', { state: 'DRAFT', contract });
   }
   getTask(id) {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
@@ -35,14 +35,14 @@ export class Store {
   setTaskState(id, state) {
     const now = new Date().toISOString();
     this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
-    this.event(id, 'TASK_STATE_CHANGED', { state });
+    this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
   }
   addStage(taskId, id, dependsOn = [], status = 'QUEUED') {
     this.db
       .prepare('INSERT OR REPLACE INTO stages VALUES (?, ?, ?, ?)')
       .run(taskId, id, status, JSON.stringify(dependsOn));
   }
-  stages(taskId) {
+  listStages(taskId) {
     return this.db
       .prepare('SELECT * FROM stages WHERE task_id=? ORDER BY rowid')
       .all(taskId)
@@ -50,7 +50,7 @@ export class Store {
   }
   setStage(taskId, id, status) {
     this.db.prepare('UPDATE stages SET status=? WHERE task_id=? AND id=?').run(status, taskId, id);
-    this.event(taskId, 'STAGE_STATE_CHANGED', { stageId: id, status });
+    this.appendEvent(taskId, 'STAGE_STATE_CHANGED', { stageId: id, status });
   }
   createRun(run) {
     this.db
@@ -77,15 +77,15 @@ export class Store {
       .prepare('UPDATE runs SET status=?,finished_at=?,commit_sha=? WHERE id=?')
       .run(status, new Date().toISOString(), commitSha, id);
   }
-  runs(taskId) {
+  listRuns(taskId) {
     return this.db.prepare('SELECT * FROM runs WHERE task_id=? ORDER BY rowid').all(taskId);
   }
-  event(taskId, type, payload) {
+  appendEvent(taskId, type, payload) {
     this.db
       .prepare('INSERT INTO events (task_id,type,payload,at) VALUES (?,?,?,?)')
       .run(taskId, type, JSON.stringify(payload), new Date().toISOString());
   }
-  events(taskId) {
+  listEvents(taskId) {
     return this.db
       .prepare('SELECT seq,task_id,type,payload,at FROM events WHERE task_id=? ORDER BY seq')
       .all(taskId)

@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateContract, assertTaskTransition, validatePlan } from '../src/domain.js';
+import {
+  validateTaskContract,
+  assertValidTaskTransition,
+  validateExecutionPlan,
+} from '../src/domain.js';
 
 test('validates and normalizes a task contract', () => {
-  const task = validateContract({
+  const task = validateTaskContract({
     id: 'AUTH-142',
     title: 'Refresh',
     goal: 'Rotate',
@@ -13,12 +17,15 @@ test('validates and normalizes a task contract', () => {
   assert.equal(task.acceptance[0].id, 'AC-1');
 });
 test('rejects invalid transitions', () => {
-  assert.throws(() => assertTaskTransition('COMPLETED', 'EXECUTING'), /invalid task transition/);
+  assert.throws(
+    () => assertValidTaskTransition('COMPLETED', 'EXECUTING'),
+    /invalid task transition/,
+  );
 });
 test('requires explicit ids for object acceptance criteria', () => {
   assert.throws(
     () =>
-      validateContract({
+      validateTaskContract({
         id: 'T-1',
         title: 'Test',
         goal: 'Test',
@@ -30,12 +37,13 @@ test('requires explicit ids for object acceptance criteria', () => {
 });
 test('validates an acyclic execution plan', () => {
   assert.equal(
-    validatePlan({ stages: [{ id: 'a' }, { id: 'b', dependsOn: ['a'] }] }).stages[1].dependsOn[0],
+    validateExecutionPlan({ stages: [{ id: 'a' }, { id: 'b', dependsOn: ['a'] }] }).stages[1]
+      .dependsOn[0],
     'a',
   );
   assert.throws(
     () =>
-      validatePlan({
+      validateExecutionPlan({
         stages: [
           { id: 'a', dependsOn: ['b'] },
           { id: 'b', dependsOn: ['a'] },

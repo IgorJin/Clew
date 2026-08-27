@@ -25,9 +25,9 @@ test('persists a task, stage, run, and event history', () => {
     status: 'RUNNING',
     harness: 'fake',
   });
-  assert.equal(store.stages('T-1')[0].id, 'worker');
-  assert.equal(store.runs('T-1')[0].id, 'run-1');
-  assert.ok(store.events('T-1').length >= 2);
+  assert.equal(store.listStages('T-1')[0].id, 'worker');
+  assert.equal(store.listRuns('T-1')[0].id, 'run-1');
+  assert.ok(store.listEvents('T-1').length >= 2);
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

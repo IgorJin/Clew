@@ -28,19 +28,20 @@ const transitions = {
   BLOCKED: ['QUEUED'],
 };
 
-export function assertTaskTransition(from, to) {
-  if (!transitions[from]?.includes(to)) throw new Error(`invalid task transition ${from} → ${to}`);
+export function assertValidTaskTransition(fromState, toState) {
+  if (!transitions[fromState]?.includes(toState))
+    throw new Error(`invalid task transition ${fromState} → ${toState}`);
 }
 
-export function validateContract(input) {
-  if (!input || typeof input !== 'object') throw new Error('task contract must be an object');
+export function validateTaskContract(contract) {
+  if (!contract || typeof contract !== 'object') throw new Error('task contract must be an object');
   for (const field of ['id', 'title', 'goal', 'profile']) {
-    if (typeof input[field] !== 'string' || !input[field].trim())
+    if (typeof contract[field] !== 'string' || !contract[field].trim())
       throw new Error(`task.${field} is required`);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$/.test(input.id))
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$/.test(contract.id))
     throw new Error('task.id must contain 2-64 safe characters');
-  const acceptance = Array.isArray(input.acceptance) ? input.acceptance : [];
+  const acceptance = Array.isArray(contract.acceptance) ? contract.acceptance : [];
   if (!acceptance.length) throw new Error('task.acceptance must contain at least one criterion');
   const ids = new Set();
   for (let i = 0; i < acceptance.length; i++) {
@@ -54,34 +55,34 @@ export function validateContract(input) {
     if (ids.has(item.id)) throw new Error(`duplicate acceptance id ${item.id}`);
     ids.add(item.id);
   }
-  if (!['quick', 'standard', 'deep'].includes(input.profile))
+  if (!['quick', 'standard', 'deep'].includes(contract.profile))
     throw new Error('task.profile must be quick, standard, or deep');
   return {
-    ...input,
-    risk: input.risk ?? 'medium',
-    base_ref: input.base_ref ?? 'HEAD',
+    ...contract,
+    risk: contract.risk ?? 'medium',
+    base_ref: contract.base_ref ?? 'HEAD',
     acceptance: acceptance.map((x, i) =>
       typeof x === 'string' ? { id: `AC-${i + 1}`, criterion: x } : x,
     ),
   };
 }
 
-export function effectiveProfile(name) {
+export function resolveProfile(profileName) {
   const common = { maxAttempts: 3, verification: 'targeted' };
-  if (name === 'quick')
+  if (profileName === 'quick')
     return {
       ...common,
-      name,
+      name: profileName,
       mode: 'direct',
       harness: 'fake',
       review: false,
       architecture: false,
       maxWorkers: 1,
     };
-  if (name === 'standard')
+  if (profileName === 'standard')
     return {
       ...common,
-      name,
+      name: profileName,
       mode: 'isolated',
       harness: 'fake',
       review: true,
@@ -90,7 +91,7 @@ export function effectiveProfile(name) {
     };
   return {
     ...common,
-    name,
+    name: profileName,
     mode: 'parallel',
     harness: 'fake',
     review: true,
@@ -100,7 +101,7 @@ export function effectiveProfile(name) {
   };
 }
 
-export function validatePlan(plan) {
+export function validateExecutionPlan(plan) {
   if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages) || !plan.stages.length)
     throw new Error('plan.stages must contain at least one stage');
   const ids = new Set();
@@ -115,17 +116,17 @@ export function validatePlan(plan) {
   const visiting = new Set();
   const visited = new Set();
   const byId = new Map(plan.stages.map((stage) => [stage.id, stage]));
-  function visit(id) {
-    if (visiting.has(id)) throw new Error('plan contains a cycle');
-    if (visited.has(id)) return;
-    const stage = byId.get(id);
-    if (!stage) throw new Error(`plan dependency not found: ${id}`);
-    visiting.add(id);
-    for (const dependency of stage.dependsOn ?? []) visit(dependency);
-    visiting.delete(id);
-    visited.add(id);
+  function visitPlanStage(stageId) {
+    if (visiting.has(stageId)) throw new Error('plan contains a cycle');
+    if (visited.has(stageId)) return;
+    const stage = byId.get(stageId);
+    if (!stage) throw new Error(`plan dependency not found: ${stageId}`);
+    visiting.add(stageId);
+    for (const dependency of stage.dependsOn ?? []) visitPlanStage(dependency);
+    visiting.delete(stageId);
+    visited.add(stageId);
   }
-  for (const stage of plan.stages) visit(stage.id);
+  for (const stage of plan.stages) visitPlanStage(stage.id);
   return {
     ...plan,
     stages: plan.stages.map((stage) => ({ ...stage, dependsOn: stage.dependsOn ?? [] })),

@@ -52,38 +52,38 @@ export class CodexHarness {
   async run({ task, cwd, onEvent, model, outputSchema, readOnly = false }) {
     const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
     const sessionId = `codex-${randomUUID()}`;
-    let nextId = 1;
-    const pending = new Map();
-    let buffer = '';
+    let nextRequestId = 1;
+    const pendingRequests = new Map();
+    let stdoutBuffer = '';
     let settled = false;
     let timer;
-    const finish = (resolve, reject, error, value) => {
+    const settleRequest = (resolve, reject, error, result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       child.kill();
-      error ? reject(error) : resolve(value);
+      error ? reject(error) : resolve(result);
     };
     const result = await new Promise((resolve, reject) => {
       timer = setTimeout(
-        () => finish(resolve, reject, new Error('Codex app-server timed out')),
+        () => settleRequest(resolve, reject, new Error('Codex app-server timed out')),
         this.timeoutMs,
       );
-      const send = (method, params) => {
-        const id = nextId++;
+      const sendRpcRequest = (method, params) => {
+        const id = nextRequestId++;
         child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
         return id;
       };
-      const notify = (method, params) =>
+      const sendRpcNotification = (method, params) =>
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
-      const handle = (message) => {
+      const handleServerMessage = (message) => {
         const method = message.method || '';
         const params = message.params || message.result || {};
         if (message.id !== undefined && !method) {
-          const resolver = pending.get(message.id);
-          pending.delete(message.id);
+          const resolver = pendingRequests.get(message.id);
+          pendingRequests.delete(message.id);
           if (message.error)
-            return finish(
+            return settleRequest(
               resolve,
               reject,
               new Error(`Codex request failed: ${message.error.message || message.error.code}`),
@@ -93,7 +93,7 @@ export class CodexHarness {
         }
         if (method === 'turn/completed') {
           onEvent({ type: 'HARNESS_COMPLETED', sessionId, raw: message });
-          return finish(resolve, reject, null, {
+          return settleRequest(resolve, reject, null, {
             sessionId,
             verification: [],
             output: message.result ?? message.params,
@@ -113,27 +113,31 @@ export class CodexHarness {
         else if (method) onEvent({ type: 'HARNESS_EVENT', sessionId, method, params });
       };
       child.stdout.on('data', (chunk) => {
-        buffer += chunk.toString();
+        stdoutBuffer += chunk.toString();
         let index;
-        while ((index = buffer.indexOf('\n')) >= 0) {
-          const line = buffer.slice(0, index).trim();
-          buffer = buffer.slice(index + 1);
+        while ((index = stdoutBuffer.indexOf('\n')) >= 0) {
+          const line = stdoutBuffer.slice(0, index).trim();
+          stdoutBuffer = stdoutBuffer.slice(index + 1);
           if (!line) continue;
           try {
-            handle(JSON.parse(line));
+            handleServerMessage(JSON.parse(line));
           } catch {
             onEvent({ type: 'HARNESS_OUTPUT', sessionId, line });
           }
         }
       });
       child.on('error', (error) =>
-        finish(resolve, reject, new Error(`failed to start Codex app-server: ${error.message}`)),
+        settleRequest(
+          resolve,
+          reject,
+          new Error(`failed to start Codex app-server: ${error.message}`),
+        ),
       );
       child.on('exit', (code) => {
         if (!settled)
-          finish(resolve, reject, new Error(`Codex app-server exited with code ${code}`));
+          settleRequest(resolve, reject, new Error(`Codex app-server exited with code ${code}`));
       });
-      const turnParams = (threadId) => ({
+      const buildTurnStartParams = (threadId) => ({
         threadId,
         model,
         outputSchema,
@@ -145,21 +149,25 @@ export class CodexHarness {
           },
         ],
       });
-      const initializeId = send('initialize', {
+      const initializeId = sendRpcRequest('initialize', {
         clientInfo: { name: 'clew', title: 'Clew', version: '0.1.0' },
       });
-      pending.set(initializeId, () => {
-        notify('initialized', {});
-        const threadId = send('thread/start', {
+      pendingRequests.set(initializeId, () => {
+        sendRpcNotification('initialized', {});
+        const threadId = sendRpcRequest('thread/start', {
           cwd,
           model,
           sandbox: readOnly ? 'read-only' : undefined,
         });
-        pending.set(threadId, (result) => {
-          const id = result.thread?.id;
-          if (!id)
-            return finish(resolve, reject, new Error('Codex thread/start returned no thread id'));
-          send('turn/start', turnParams(id));
+        pendingRequests.set(threadId, (threadResult) => {
+          const threadId = threadResult.thread?.id;
+          if (!threadId)
+            return settleRequest(
+              resolve,
+              reject,
+              new Error('Codex thread/start returned no thread id'),
+            );
+          sendRpcRequest('turn/start', buildTurnStartParams(threadId));
         });
       });
       onEvent({ type: 'SESSION_STARTED', sessionId });
@@ -179,11 +187,11 @@ export class OpenCodeHarness {
     this.timeoutMs = timeoutMs;
   }
   async run({ task, cwd, onEvent }) {
-    const session = await this.request('/session', {
+    const sessionResponse = await this.requestJson('/session', {
       method: 'POST',
       body: { title: task.title, directory: cwd },
     });
-    const sessionId = session.id || session.data?.id;
+    const sessionId = sessionResponse.id || sessionResponse.data?.id;
     if (!sessionId) throw new Error('OpenCode did not return a session id');
     onEvent({ type: 'SESSION_STARTED', sessionId });
     onEvent({ type: 'TURN_STARTED', sessionId });
@@ -208,7 +216,7 @@ export class OpenCodeHarness {
       clearTimeout(timer);
     }
   }
-  async request(path, { method = 'GET', body } = {}) {
+  async requestJson(path, { method = 'GET', body } = {}) {
     const response = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: body ? { 'content-type': 'application/json' } : undefined,

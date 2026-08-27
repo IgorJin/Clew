@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { validateContract } from './domain.js';
+import { validateTaskContract } from './domain.js';
 import { Store } from './store.js';
 import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
@@ -9,21 +9,21 @@ import { Scheduler } from './scheduler.js';
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
 const dbFile = join(stateDir, 'clew.sqlite');
-const store = () => new Store(dbFile);
-function value(args, name, fallback = undefined) {
-  const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : fallback;
+const createStore = () => new Store(dbFile);
+function getOptionValue(args, name, fallback = undefined) {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : fallback;
 }
-function repeatedValue(args, name) {
+function getOptionValues(args, name) {
   const values = [];
-  for (let i = 0; i < args.length; i++)
-    if (args[i] === name && args[i + 1]) values.push(args[i + 1]);
+  for (let index = 0; index < args.length; index++)
+    if (args[index] === name && args[index + 1]) values.push(args[index + 1]);
   return values;
 }
-function json(value) {
-  console.log(JSON.stringify(value, null, 2));
+function printJson(data) {
+  console.log(JSON.stringify(data, null, 2));
 }
-function help() {
+function printHelp() {
   console.log(
     `Clew v0.1.0-alpha.1\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew run ID [--profile PROFILE] [--harness fake]\n  clew status ID\n  clew events ID\n  clew doctor`,
   );
@@ -31,64 +31,68 @@ function help() {
 
 export async function main(args) {
   const [command, subcommand, ...rest] = args;
-  if (!command || command === '--help' || command === '-h') return help();
+  if (!command || command === '--help' || command === '-h') return printHelp();
   if (command === 'init') {
     mkdirSync(stateDir, { recursive: true });
-    const s = store();
-    s.close();
+    const store = createStore();
+    store.close();
     console.log(`Initialized ${stateDir}`);
     return;
   }
-  const s = store();
+  const store = createStore();
   try {
     if (command === 'task' && subcommand === 'create') {
       let contract;
-      const file = value(rest, '--file');
+      const file = getOptionValue(rest, '--file');
       if (file) contract = JSON.parse(readFileSync(resolve(file), 'utf8'));
       else
         contract = {
-          id: value(rest, '--id'),
-          title: value(rest, '--title'),
-          goal: value(rest, '--goal'),
-          profile: value(rest, '--profile', 'quick'),
-          risk: value(rest, '--risk', 'medium'),
-          base_ref: value(rest, '--base', 'HEAD'),
-          acceptance: repeatedValue(rest, '--accept'),
+          id: getOptionValue(rest, '--id'),
+          title: getOptionValue(rest, '--title'),
+          goal: getOptionValue(rest, '--goal'),
+          profile: getOptionValue(rest, '--profile', 'quick'),
+          risk: getOptionValue(rest, '--risk', 'medium'),
+          base_ref: getOptionValue(rest, '--base', 'HEAD'),
+          acceptance: getOptionValues(rest, '--accept'),
         };
-      contract = validateContract(contract);
-      s.createTask(contract);
+      contract = validateTaskContract(contract);
+      store.createTask(contract);
       console.log(`Created task ${contract.id}`);
       return;
     }
-    if (command === 'task' && subcommand === 'list') return json(s.listTasks());
+    if (command === 'task' && subcommand === 'list') return printJson(store.listTasks());
     if (command === 'task' && subcommand === 'show') {
-      const task = s.getTask(rest[0]);
+      const task = store.getTask(rest[0]);
       if (!task) throw new Error(`task not found: ${rest[0]}`);
-      return json({ ...task, stages: s.stages(task.id), runs: s.runs(task.id) });
+      return printJson({
+        ...task,
+        stages: store.listStages(task.id),
+        runs: store.listRuns(task.id),
+      });
     }
     if (command === 'run') {
       const id = subcommand;
       if (!id) throw new Error('task id is required');
       const manager = new GitWorktreeManager(join(stateDir, 'worktrees'));
-      const result = await new Scheduler(s, manager).runTask(
+      const result = await new Scheduler(store, manager).runTask(
         id,
-        value(rest, '--profile'),
-        value(rest, '--harness'),
-        value(rest, '--review-harness'),
+        getOptionValue(rest, '--profile'),
+        getOptionValue(rest, '--harness'),
+        getOptionValue(rest, '--review-harness'),
       );
-      return json(result);
+      return printJson(result);
     }
     if (command === 'status') {
-      const task = s.getTask(subcommand);
+      const task = store.getTask(subcommand);
       if (!task) throw new Error(`task not found: ${subcommand}`);
-      return json({
+      return printJson({
         id: task.id,
         state: task.state,
-        stages: s.stages(task.id),
-        runs: s.runs(task.id),
+        stages: store.listStages(task.id),
+        runs: store.listRuns(task.id),
       });
     }
-    if (command === 'events') return json(s.events(subcommand));
+    if (command === 'events') return printJson(store.listEvents(subcommand));
     if (command === 'doctor') {
       const checks = [
         { name: 'node', ok: Number(process.versions.node.split('.')[0]) >= 22 },
@@ -96,20 +100,20 @@ export async function main(args) {
           name: 'git',
           ok: (() => {
             try {
-              return Boolean(requireGit());
+              return Boolean(getGitVersion());
             } catch {
               return false;
             }
           })(),
         },
       ];
-      return json({ ok: checks.every((x) => x.ok), checks });
+      return printJson({ ok: checks.every((check) => check.ok), checks });
     }
-    return help();
+    return printHelp();
   } finally {
-    s.close();
+    store.close();
   }
 }
-function requireGit() {
+function getGitVersion() {
   return execFileSync('git', ['--version'], { encoding: 'utf8' });
 }
