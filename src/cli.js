@@ -74,6 +74,7 @@ export async function main(args) {
         id,
         value(rest, '--profile'),
         value(rest, '--harness'),
+        value(rest, '--review-harness'),
       );
       return json(result);
     }

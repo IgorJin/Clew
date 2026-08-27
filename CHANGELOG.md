@@ -11,6 +11,7 @@
 - Added a deterministic fake reviewer and Standard-flow review decision path.
 - Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
 - Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.
+- Added an optional native Codex reviewer route with read-only/output-schema options and a separate `--review-harness` CLI flag.
 - Documented the v0.1 release gates and implementation backlog.
 
 Known limitations:

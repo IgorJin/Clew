@@ -47,7 +47,7 @@ export class CodexHarness {
     this.args = args;
     this.timeoutMs = timeoutMs;
   }
-  async run({ task, cwd, onEvent }) {
+  async run({ task, cwd, onEvent, model, outputSchema, readOnly = false }) {
     const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     const sessionId = `codex-${randomUUID()}`;
     let nextId = 1;
@@ -68,12 +68,18 @@ export class CodexHarness {
       );
       const send = (method, params) =>
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })}\n`);
+      const notify = (method, params) =>
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
       const handle = (message) => {
         const method = message.method || '';
         const params = message.params || message.result || {};
         if (method === 'turn/completed') {
           onEvent({ type: 'HARNESS_COMPLETED', sessionId, raw: message });
-          return finish(resolve, reject, null, { sessionId, verification: [] });
+          return finish(resolve, reject, null, {
+            sessionId,
+            verification: [],
+            output: message.result ?? message.params,
+          });
         }
         if (method.includes('approval') || method.includes('permission'))
           onEvent({ type: 'APPROVAL_REQUIRED', sessionId, raw: message });
@@ -105,9 +111,13 @@ export class CodexHarness {
           finish(resolve, reject, new Error(`Codex app-server exited with code ${code}`));
       });
       send('initialize', { clientInfo: { name: 'clew', version: '0.1.0' } });
-      send('thread/start', { cwd });
+      notify('initialized', {});
+      send('thread/start', { cwd, model, sandbox: readOnly ? 'read-only' : undefined });
       send('turn/start', {
         threadId: sessionId,
+        model,
+        outputSchema,
+        cwd,
         input: [
           {
             type: 'text',

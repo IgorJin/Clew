@@ -6,14 +6,14 @@ import {
   OpenCodeHarness,
   ExternalHarnessUnavailable,
 } from './harness.js';
-import { FakeReviewer } from './review.js';
+import { FakeReviewer, CodexReviewer } from './review.js';
 
 export class Scheduler {
   constructor(store, workspaceManager) {
     this.store = store;
     this.workspaceManager = workspaceManager;
   }
-  async runTask(taskId, requestedProfile, requestedHarness = null) {
+  async runTask(taskId, requestedProfile, requestedHarness = null, requestedReviewHarness = null) {
     const row = this.store.getTask(taskId);
     if (!row) throw new Error(`task not found: ${taskId}`);
     const profile = effectiveProfile(requestedProfile || row.contract.profile);
@@ -26,7 +26,8 @@ export class Scheduler {
           : harnessName === 'opencode'
             ? new OpenCodeHarness()
             : new ExternalHarnessUnavailable(harnessName);
-    if (profile.mode === 'parallel') return this.runDeep(row, profile, harness, harnessName);
+    if (profile.mode === 'parallel')
+      return this.runDeep(row, profile, harness, harnessName, requestedReviewHarness);
     if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
       throw new Error(`task ${taskId} is already ${row.state}`);
     if (!this.store.stages(taskId).length) this.store.addStage(taskId, 'worker', [], 'QUEUED');
@@ -75,7 +76,11 @@ export class Scheduler {
       this.store.setTaskState(taskId, 'VERIFYING');
       this.store.setTaskState(taskId, profile.review ? 'REVIEWING' : 'READY');
       if (profile.review) {
-        const review = await new FakeReviewer().review({
+        const reviewer =
+          requestedReviewHarness === 'codex'
+            ? new CodexReviewer(new CodexHarness())
+            : new FakeReviewer();
+        const review = await reviewer.review({
           task: row.contract,
           evidence: result.verification,
           revision: status.sha,
@@ -93,7 +98,7 @@ export class Scheduler {
             });
             this.store.setStage(taskId, 'worker', 'QUEUED');
             this.store.setTaskState(taskId, 'QUEUED');
-            return this.runTask(taskId, requestedProfile, requestedHarness);
+            return this.runTask(taskId, requestedProfile, requestedHarness, requestedReviewHarness);
           }
         }
       }
@@ -114,7 +119,7 @@ export class Scheduler {
     }
   }
 
-  async runDeep(row, profile, harness, harnessName) {
+  async runDeep(row, profile, harness, harnessName, requestedReviewHarness = null) {
     const taskId = row.id;
     if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
       throw new Error(`task ${taskId} is already ${row.state}`);
@@ -177,7 +182,11 @@ export class Scheduler {
     this.store.event(taskId, 'INTEGRATION_COMPLETED', { result: 'passed' });
     this.store.setTaskState(taskId, 'VERIFYING');
     this.store.setTaskState(taskId, 'REVIEWING');
-    const review = await new FakeReviewer().review({
+    const reviewer =
+      requestedReviewHarness === 'codex'
+        ? new CodexReviewer(new CodexHarness())
+        : new FakeReviewer();
+    const review = await reviewer.review({
       task: row.contract,
       evidence: [{ type: 'integration', result: 'passed' }],
     });

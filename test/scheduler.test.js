@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
+import { CodexReviewer } from '../src/review.js';
 
 test('runs a quick task with a fake workspace and records evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-'));
@@ -98,4 +99,21 @@ test('runs deep profile through planned worker and integration stages', async ()
   assert.ok(store.events('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('normalizes a native reviewer output behind the reviewer boundary', async () => {
+  const reviewer = new CodexReviewer({
+    run: async () => ({ output: { verdict: 'pass', findings: [] } }),
+  });
+  const result = await reviewer.review({
+    task: {
+      id: 'T-7',
+      title: 'Review',
+      goal: 'Review',
+      acceptance: [{ id: 'AC-1', criterion: 'works' }],
+    },
+    evidence: [],
+    revision: 'abc',
+  });
+  assert.equal(result.verdict, 'pass');
 });

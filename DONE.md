@@ -64,6 +64,14 @@ ai/<task-id>-worker
 
 `fake` — единственный harness, который гарантированно работает без внешней настройки. Codex/OpenCode требуют запущенного сервера, авторизации и совместимого протокола; их live-совместимость должна быть проверена в конкретной среде.
 
+Для Standard/Deep review можно отдельно выбрать native Codex reviewer:
+
+```sh
+node bin/clew.js run TASK-ID --profile standard --harness fake --review-harness codex
+```
+
+В этом режиме worker остаётся fake (удобно для проверки orchestration), а review-запрос отправляется в Codex app-server с read-only sandbox и `outputSchema`. Без доступного app-server запуск завершится диагностируемой ошибкой.
+
 ### State semantics
 
 Clew различает:
