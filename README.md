@@ -49,9 +49,9 @@ Implemented in the first product slice:
 - versioned Deep plan persistence and restart recovery without rerunning completed stages;
 - fake and read-only Codex architect routes with schema-constrained plans;
 - transactional audited plan approval/rejection before any Deep worktree allocation;
-- CLI task lifecycle, plan inspection/approval, interrupt requests, JSON output, status, events, and diagnostics.
+- CLI task lifecycle, plan inspection/approval, native harness approval decisions, interrupt requests, JSON output, status, events, and diagnostics.
 
-The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including live validation, native session reconnect, interactive approval routing, human-assisted conflict resolution, and hardening.
+The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including live validation, native session reconnect, human-assisted conflict resolution, and hardening.
 
 ## Design boundary
 

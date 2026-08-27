@@ -19,6 +19,7 @@
 - Added an optional native Codex reviewer route with read-only/output-schema options and a separate `--review-harness` CLI flag.
 - Added a shared harness conformance suite covering correlated lifecycle events, native identity, approval decisions, interruption, and timeout behavior for Fake, Codex, and OpenCode adapters.
 - Updated the Codex adapter to persist native thread/turn IDs, route server approval requests through an explicit callback, and interrupt active turns through the official `turn/interrupt` protocol.
+- Added persisted native harness approval gates with auditable decisions and `approve-run`/`reject-run` CLI commands for a second operator process.
 
 ## 0.1.0-alpha.1 — initial product slice
 

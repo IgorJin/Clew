@@ -32,6 +32,8 @@ export class Scheduler {
       requirePlanApproval = true,
       signal = null,
       interruptPollMs = 250,
+      approvalPollMs = 250,
+      approvalTimeoutMs = 30 * 60_000,
     } = {},
   ) {
     this.store = store;
@@ -43,6 +45,8 @@ export class Scheduler {
     this.requirePlanApproval = requirePlanApproval;
     this.signal = signal;
     this.interruptPollMs = interruptPollMs;
+    this.approvalPollMs = approvalPollMs;
+    this.approvalTimeoutMs = approvalTimeoutMs;
     this.taskSignals = new Map();
     this.resumeSessions = new Map();
   }
@@ -142,6 +146,7 @@ export class Scheduler {
         cwd: workspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal: taskSignal,
+        onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
       });
 
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
@@ -724,6 +729,7 @@ export class Scheduler {
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal,
         resumeSessionId,
+        onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, signal),
       });
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -803,6 +809,47 @@ export class Scheduler {
     clearInterval(entry.pollTimer);
     this.signal?.removeEventListener('abort', entry.onExternalAbort);
     this.taskSignals.delete(taskId);
+  }
+
+  awaitHarnessApproval(taskId, runId, request, signal) {
+    const approvalId = `${taskId}:${runId}:${request.id}`;
+
+    this.store.createHarnessApproval({
+      id: approvalId,
+      taskId,
+      runId,
+      method: request.method,
+      params: request.params,
+    });
+
+    return new Promise((resolve, reject) => {
+      let pollTimer;
+      const timeoutTimer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`harness approval timed out: ${approvalId}`));
+      }, this.approvalTimeoutMs);
+      const cleanup = () => {
+        clearInterval(pollTimer);
+        clearTimeout(timeoutTimer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(new HarnessInterruptedError('harness approval'));
+      };
+      const poll = () => {
+        const approval = this.store.getHarnessApproval(approvalId);
+
+        if (!approval?.decision) return;
+        cleanup();
+        resolve(approval.decision);
+      };
+
+      signal?.addEventListener('abort', onAbort, { once: true });
+      pollTimer = setInterval(poll, this.approvalPollMs);
+      pollTimer.unref?.();
+      poll();
+    });
   }
 
   recordHarnessEvent(taskId, event, runId = null) {

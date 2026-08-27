@@ -14,6 +14,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'APPROVED', created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
       CREATE TABLE IF NOT EXISTS approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, plan_version INTEGER NOT NULL, gate_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT, actor TEXT NOT NULL, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS interrupt_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, actor TEXT NOT NULL, requested_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS harness_approvals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT NOT NULL, method TEXT NOT NULL, params TEXT NOT NULL, decision TEXT, actor TEXT, requested_at TEXT NOT NULL, decided_at TEXT);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, turn_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
     const planColumns = this.db.prepare('PRAGMA table_info(plans)').all();
@@ -84,6 +85,60 @@ export class Store {
   }
   clearInterruptRequest(taskId) {
     this.db.prepare('DELETE FROM interrupt_requests WHERE task_id=?').run(taskId);
+  }
+  createHarnessApproval({ id, taskId, runId, method, params }) {
+    return this.runInTransaction(() => {
+      const requestedAt = new Date().toISOString();
+
+      this.db
+        .prepare(
+          'INSERT INTO harness_approvals (id,task_id,run_id,method,params,requested_at) VALUES (?,?,?,?,?,?)',
+        )
+        .run(id, taskId, runId, method, JSON.stringify(params), requestedAt);
+      this.appendEvent(taskId, 'HARNESS_APPROVAL_REQUESTED', {
+        approvalId: id,
+        runId,
+        method,
+        requestedAt,
+      });
+
+      return { id, taskId, runId, method, params, requestedAt };
+    });
+  }
+  getHarnessApproval(id) {
+    const row = this.db.prepare('SELECT * FROM harness_approvals WHERE id=?').get(id);
+
+    return row ? { ...row, params: JSON.parse(row.params) } : null;
+  }
+  decideHarnessApproval(id, decision, actor = 'local-user') {
+    if (!['accept', 'acceptForSession', 'decline', 'cancel'].includes(decision))
+      throw new Error(`unsupported harness approval decision: ${decision}`);
+
+    return this.runInTransaction(() => {
+      const approval = this.getHarnessApproval(id);
+
+      if (!approval) throw new Error(`harness approval not found: ${id}`);
+      if (approval.decision) throw new Error(`harness approval ${id} is already decided`);
+      const decidedAt = new Date().toISOString();
+
+      this.db
+        .prepare('UPDATE harness_approvals SET decision=?,actor=?,decided_at=? WHERE id=?')
+        .run(decision, actor, decidedAt, id);
+      this.appendEvent(approval.task_id, 'HARNESS_APPROVAL_DECIDED', {
+        approvalId: id,
+        decision,
+        actor,
+        decidedAt,
+      });
+
+      return { ...approval, decision, actor, decidedAt };
+    });
+  }
+  listHarnessApprovals(taskId) {
+    return this.db
+      .prepare('SELECT * FROM harness_approvals WHERE task_id=? ORDER BY requested_at')
+      .all(taskId)
+      .map((row) => ({ ...row, params: JSON.parse(row.params) }));
   }
   addStage(taskId, id, dependsOn = [], status = STAGE_STATUS.QUEUED) {
     this.db

@@ -2,6 +2,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { validateTaskContract, PROFILE_NAME, PLAN_STATUS, TASK_STATE } from './domain.js';
+import { APPROVAL_DECISION } from './harness.js';
 import { Store } from './store.js';
 import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
@@ -29,7 +30,7 @@ function printJson(data) {
 }
 function printHelp() {
   console.log(
-    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew interrupt ID [--actor ACTOR]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
+    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
   );
 }
 
@@ -80,6 +81,7 @@ export async function main(args) {
         ...task,
         plan: store.getLatestPlan(task.id),
         approvals: store.listApprovals(task.id),
+        harnessApprovals: store.listHarnessApprovals(task.id),
         stages: store.listStages(task.id),
         runs: store.listRuns(task.id),
       });
@@ -104,6 +106,21 @@ export async function main(args) {
       });
 
       return printJson(result);
+    }
+    if (command === 'approve-run' || command === 'reject-run') {
+      const approvalId = subcommand;
+
+      if (!approvalId) throw new Error('harness approval id is required');
+      const decision =
+        command === 'approve-run' ? APPROVAL_DECISION.ACCEPT : APPROVAL_DECISION.DECLINE;
+
+      return printJson(
+        store.decideHarnessApproval(
+          approvalId,
+          decision,
+          getOptionValue(rest, '--actor', process.env.USER || 'local-user'),
+        ),
+      );
     }
     if (command === 'interrupt') {
       const id = subcommand;
@@ -157,6 +174,7 @@ export async function main(args) {
         state: task.state,
         plan: store.getLatestPlan(task.id),
         approvals: store.listApprovals(task.id),
+        harnessApprovals: store.listHarnessApprovals(task.id),
         stages: store.listStages(task.id),
         runs: store.listRuns(task.id),
       });

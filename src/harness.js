@@ -315,7 +315,15 @@ export class CodexHarness {
               });
             })
             .catch((error) =>
-              settleRequest(resolve, reject, error, null, HARNESS_EVENT_TYPE.HARNESS_FAILED),
+              settleRequest(
+                resolve,
+                reject,
+                error,
+                null,
+                error.code === 'HARNESS_INTERRUPTED'
+                  ? HARNESS_EVENT_TYPE.HARNESS_INTERRUPTED
+                  : HARNESS_EVENT_TYPE.HARNESS_FAILED,
+              ),
             );
         } else if (isApprovalNotification(method))
           onEvent({

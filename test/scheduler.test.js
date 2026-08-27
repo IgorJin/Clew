@@ -4,10 +4,16 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, URL } from 'node:url';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { CodexReviewer } from '../src/review.js';
-import { CodexHarness, FakeHarness, HarnessInterruptedError } from '../src/harness.js';
+import {
+  APPROVAL_DECISION,
+  CodexHarness,
+  FakeHarness,
+  HarnessInterruptedError,
+} from '../src/harness.js';
 import { GitWorktreeManager, IntegrationConflictError } from '../src/workspace.js';
 
 function runGitCommand(args, cwd) {
@@ -17,6 +23,8 @@ function runGitCommand(args, cwd) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
+
+const codexFixture = fileURLToPath(new URL('../fixtures/fake-codex-server.js', import.meta.url));
 
 test('runs a quick task with a fake workspace and records evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-'));
@@ -821,4 +829,46 @@ test('Codex adapter follows the app-server handshake and completion event', asyn
   assert.equal(result.sessionId, 'thr_fixture');
   assert.equal(result.turnId, 'turn_fixture');
   assert.ok(events.some((event) => event.type === 'HARNESS_COMPLETED'));
+});
+
+test('scheduler waits for a persisted native approval decision', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-native-approval-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-APP',
+    title: 'Native approval',
+    goal: 'Wait for an external decision',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'approval is recorded' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () =>
+      new CodexHarness({
+        command: process.execPath,
+        args: [codexFixture, 'approval'],
+        timeoutMs: 2_000,
+      }),
+    approvalPollMs: 5,
+  });
+  const run = scheduler.runTask('T-APP', 'quick', 'codex');
+  let approval;
+
+  for (let attempt = 0; attempt < 100 && !approval; attempt++) {
+    approval = store.listHarnessApprovals('T-APP')[0];
+    if (!approval) await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(approval);
+  store.decideHarnessApproval(approval.id, APPROVAL_DECISION.ACCEPT, 'fixture-user');
+  const result = await run;
+
+  assert.equal(result.state, 'READY');
+  assert.equal(store.listHarnessApprovals('T-APP')[0].decision, APPROVAL_DECISION.ACCEPT);
+  assert.ok(store.listEvents('T-APP').some((event) => event.type === 'HARNESS_APPROVAL_DECIDED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
 });

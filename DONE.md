@@ -74,7 +74,14 @@ ai/<task-id>-worker
 
 `fake` — единственный harness, который гарантированно работает без внешней настройки. Codex/OpenCode требуют запущенного сервера, авторизации и совместимого протокола; их live-совместимость должна быть проверена в конкретной среде.
 
-Общий conformance suite проверяет для всех трёх adapters порядок и correlation lifecycle events. Codex fixture дополнительно проверяет native `threadId`/`turnId`, server-initiated approval с явным решением, официальный `turn/interrupt` и нормализованный timeout. Эти native IDs сохраняются в записи run. По умолчанию Clew безопасно отвечает `decline` на Codex approval; интерактивная CLI-маршрутизация approval будет отдельным шагом.
+Общий conformance suite проверяет для всех трёх adapters порядок и correlation lifecycle events. Codex fixture дополнительно проверяет native `threadId`/`turnId`, server-initiated approval с явным решением, официальный `turn/interrupt` и нормализованный timeout. Эти native IDs сохраняются в записи run. Approval-запросы native harness сохраняются в SQLite и видны через `status`, `show` и `events`; пока run ждёт решения, его можно подтвердить или отклонить из второго процесса:
+
+```sh
+node bin/clew.js approve-run TASK-ID:RUN-ID:900 --actor your-name
+node bin/clew.js reject-run TASK-ID:RUN-ID:900 --actor your-name
+```
+
+При прямом использовании `CodexHarness` без callback по-прежнему действует безопасное решение `decline`.
 
 Для Standard/Deep review можно отдельно выбрать native Codex reviewer:
 
@@ -280,7 +287,7 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
 - live-валидация native Codex architect на зафиксированной версии app-server; fake architect и protocol boundary уже покрыты тестами;
-- остальные human gates кроме подтверждения Deep plan, включая approvals от harness tools;
+- остальные human gates кроме подтверждения Deep plan и native harness approvals;
 - reconnect/resume активной OpenCode session и возобновление именно прерванного Codex turn; Deep recovery уже переиспользует сохранённый Codex thread через `thread/resume` и начинает новый turn;
 - автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
@@ -301,4 +308,4 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Проверить native architect и reviewer на реальном Codex app-server.
 
-Следующий крупный шаг для orchestration core — довести OpenCode reconnect/resume и интерактивную маршрутизацию Codex approvals через human gates.
+Следующий крупный шаг для orchestration core — довести OpenCode reconnect/resume и единую классификацию failures для retry policy.
