@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { CodexReviewer } from '../src/review.js';
+import { CodexHarness } from '../src/harness.js';
 
 test('runs a quick task with a fake workspace and records evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-'));
@@ -116,4 +117,25 @@ test('normalizes a native reviewer output behind the reviewer boundary', async (
     revision: 'abc',
   });
   assert.equal(result.verdict, 'pass');
+});
+
+test('Codex adapter follows the app-server handshake and completion event', async () => {
+  const harness = new CodexHarness({
+    command: process.execPath,
+    args: ['fixtures/fake-codex-server.js'],
+    timeoutMs: 2000,
+  });
+  const events = [];
+  const result = await harness.run({
+    task: {
+      id: 'T-8',
+      title: 'Fixture',
+      goal: 'Test protocol',
+      acceptance: [{ id: 'AC-1', criterion: 'works' }],
+    },
+    cwd: process.cwd(),
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(result.sessionId.startsWith('codex-'), true);
+  assert.ok(events.some((event) => event.type === 'HARNESS_COMPLETED'));
 });

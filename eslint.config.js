@@ -6,7 +6,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ['bin/**/*.js', 'src/**/*.js', 'test/**/*.js'],
+    files: ['bin/**/*.js', 'src/**/*.js', 'test/**/*.js', 'fixtures/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

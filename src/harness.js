@@ -48,9 +48,10 @@ export class CodexHarness {
     this.timeoutMs = timeoutMs;
   }
   async run({ task, cwd, onEvent, model, outputSchema, readOnly = false }) {
-    const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
     const sessionId = `codex-${randomUUID()}`;
     let nextId = 1;
+    const pending = new Map();
     let buffer = '';
     let settled = false;
     let timer;
@@ -66,13 +67,28 @@ export class CodexHarness {
         () => finish(resolve, reject, new Error('Codex app-server timed out')),
         this.timeoutMs,
       );
-      const send = (method, params) =>
-        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })}\n`);
+      const send = (method, params) => {
+        const id = nextId++;
+        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+        return id;
+      };
       const notify = (method, params) =>
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
       const handle = (message) => {
         const method = message.method || '';
         const params = message.params || message.result || {};
+        if (message.id !== undefined && !method) {
+          const resolver = pending.get(message.id);
+          pending.delete(message.id);
+          if (message.error)
+            return finish(
+              resolve,
+              reject,
+              new Error(`Codex request failed: ${message.error.message || message.error.code}`),
+            );
+          resolver?.(message.result ?? {});
+          return;
+        }
         if (method === 'turn/completed') {
           onEvent({ type: 'HARNESS_COMPLETED', sessionId, raw: message });
           return finish(resolve, reject, null, {
@@ -81,7 +97,12 @@ export class CodexHarness {
             output: message.result ?? message.params,
           });
         }
-        if (method.includes('approval') || method.includes('permission'))
+        if (message.id !== undefined && method.includes('approval')) {
+          child.stdin.write(
+            `${JSON.stringify({ id: message.id, result: { decision: 'decline' } })}\n`,
+          );
+          onEvent({ type: 'APPROVAL_REQUIRED', sessionId, raw: message });
+        } else if (method.includes('approval') || method.includes('permission'))
           onEvent({ type: 'APPROVAL_REQUIRED', sessionId, raw: message });
         else if (method.includes('item/started') || method.includes('tool/started'))
           onEvent({ type: 'TOOL_STARTED', sessionId, raw: message });
@@ -110,11 +131,8 @@ export class CodexHarness {
         if (!settled)
           finish(resolve, reject, new Error(`Codex app-server exited with code ${code}`));
       });
-      send('initialize', { clientInfo: { name: 'clew', version: '0.1.0' } });
-      notify('initialized', {});
-      send('thread/start', { cwd, model, sandbox: readOnly ? 'read-only' : undefined });
-      send('turn/start', {
-        threadId: sessionId,
+      const turnParams = (threadId) => ({
+        threadId,
         model,
         outputSchema,
         cwd,
@@ -124,6 +142,23 @@ export class CodexHarness {
             text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((x) => `- ${x.id}: ${x.criterion}`).join('\n')}`,
           },
         ],
+      });
+      const initializeId = send('initialize', {
+        clientInfo: { name: 'clew', title: 'Clew', version: '0.1.0' },
+      });
+      pending.set(initializeId, () => {
+        notify('initialized', {});
+        const threadId = send('thread/start', {
+          cwd,
+          model,
+          sandbox: readOnly ? 'read-only' : undefined,
+        });
+        pending.set(threadId, (result) => {
+          const id = result.thread?.id;
+          if (!id)
+            return finish(resolve, reject, new Error('Codex thread/start returned no thread id'));
+          send('turn/start', turnParams(id));
+        });
       });
       onEvent({ type: 'SESSION_STARTED', sessionId });
       onEvent({ type: 'TURN_STARTED', sessionId });
