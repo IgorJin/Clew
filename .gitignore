@@ -1,0 +1,3 @@
+.clew/
+node_modules/
+*.log

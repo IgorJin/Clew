@@ -1,6 +1,6 @@
 # Clew v0.1 release plan
 
-**Release status:** Planned — implementation not started
+**Release status:** Alpha implementation in progress
 
 **Release goal:** prove that Clew can keep one task thread across native harness execution, Git worktrees, verification, review, and retry.
 
