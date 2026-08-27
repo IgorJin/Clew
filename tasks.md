@@ -1,6 +1,6 @@
 # Clew — implementation backlog
 
-**Status:** Draft 0.1
+**Status:** v0.1.0-rc.1 implementation record
 
 **Source:** [`spec.md`](./spec.md)
 
@@ -17,6 +17,20 @@ This backlog is ordered by risk reduction and vertical product value. A task is 
 - A spike produces a reproducible fixture, findings, and a go/change/stop decision; throwaway code alone is not a result.
 - Tasks should land as independently reviewable changes. IDs are stable and may later become GitHub issue identifiers.
 
+## v0.1 completion record
+
+| Range          | Status      | Release evidence                                                                                          |
+| -------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `CLEW-001–005` | Complete    | Toolchain ADR, Node.js project gates, versioned schemas/fixtures, runtime validators, config precedence   |
+| `CLEW-006`     | Complete    | Codex fixture conformance plus successful real `0.148.0` worktree/evidence/commit smoke                   |
+| `CLEW-007`     | Conditional | OpenCode `1.18.23` live session/SSE/failure path proven; successful model completion awaits a provider    |
+| `CLEW-008–022` | Complete    | Worktree isolation, durable engine, Quick CLI/acceptance, verification correlation, recovery and watch    |
+| `CLEW-023–028` | Complete    | Persisted policy, native reviewer smoke, feedback/session retry routing, human gates, Standard acceptance |
+| `CLEW-029–036` | Complete    | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
+| `CLEW-037–041` | Complete    | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
+
+All implementation work through `CLEW-041` is present. The only remaining final-tag sign-off is external: rerun `npm run smoke:opencode` with a working provider and record a passing command evidence item. This does not add a code task; it closes the conditional live check for `CLEW-007`.
+
 ## Milestone 0 — Repository foundation
 
 Exit condition: the project installs and runs locally, quality checks run with one command, and versioned domain contracts can be imported without infrastructure dependencies.
@@ -24,8 +38,8 @@ Exit condition: the project installs and runs locally, quality checks run with o
 | ID       | Pri | Size | Task                                       | Depends on | Done when                                                                                                                                      |
 | -------- | --- | ---- | ------------------------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | CLEW-001 | P0  | S    | Record the initial toolchain ADR           | —          | Runtime, package manager, project layout, test stack, CLI approach, and SQLite migration strategy are selected with rationale.                 |
-| CLEW-002 | P0  | M    | Scaffold the TypeScript project            | 001        | Install, build, test, lint, type-check, and a placeholder `clew --help` work from a clean checkout.                                            |
-| CLEW-003 | P1  | S    | Add repository quality gates               | 002        | CI runs formatting/lint, type-check, unit tests, and build; local commands match CI.                                                           |
+| CLEW-002 | P0  | M    | Scaffold the Node.js project               | 001        | Install, syntax-check, test, lint, and `clew --help` work from a clean checkout.                                                               |
+| CLEW-003 | P1  | S    | Add repository quality gates               | 002        | CI runs formatting/lint, syntax checks and unit tests; local commands match CI.                                                                |
 | CLEW-004 | P0  | M    | Define versioned core schemas              | 002        | Task contract, profile, plan, review result, verification report, and normalized event schemas have runtime validation and fixtures.           |
 | CLEW-005 | P1  | S    | Implement config and local path resolution | 002        | CLI flags/project/user/default precedence works; local state and worktree roots are resolved safely; secrets are excluded from project config. |
 
@@ -141,7 +155,7 @@ OpenCode (`007 → 009 → 029 → 035`) runs alongside the Codex/core path and 
 Start with these tasks, in this order:
 
 1. **CLEW-001:** make the minimum toolchain decisions needed to write executable POCs.
-2. **CLEW-002:** establish a runnable TypeScript skeleton.
+2. **CLEW-002:** establish the runnable dependency-free Node.js skeleton selected by ADR-0001.
 3. **CLEW-004:** define stable contracts before adapters leak protocol concepts upward.
 4. **CLEW-006:** prove the highest-value native harness boundary.
 5. **CLEW-008:** prove workspace isolation independently of the harness.

@@ -1,47 +1,32 @@
 # Changelog
 
-## 0.1.0-alpha.3 — execution and review iteration
+## 0.1.0-rc.1 — complete v0.1 release candidate
 
-- Added versioned transactional SQLite migrations with a recorded schema version and release SQL artifacts.
-- Added persisted-event secret redaction plus strict Git-ref and plan-stage identifier validation.
-- Added `clew interrupt ID` and Ctrl-C propagation through scheduler and harnesses; interrupted tasks become `CANCELLED` with an auditable `INTERRUPTED` run.
-- Added persisted interrupt requests so a second CLI process can safely signal an active scheduler.
-- Added Codex thread resume during Deep recovery: persisted native session IDs are reused through `thread/resume` before a new turn starts.
-- Added a deterministic fake reviewer and Standard-flow review decision path.
-- Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
-- Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.
-- Added concurrent execution for independent Deep stages, dependency-gated integration, and explicit blocked/failed states.
-- Added a general local DAG executor that starts stages only after successful dependencies, enforces the profile concurrency limit, and propagates blocked states.
-- Added deterministic transitive commit integration so downstream stages receive the complete output of their ancestor stages.
-- Added versioned persisted Deep plans and restart reconciliation that reuses completed stages, interrupts abandoned runs, and resumes unfinished DAG work.
-- Added fake and native read-only Codex architect routes with schema-constrained plan output.
-- Added transactional, audited Deep plan approval/rejection and `plan`, `approve`, and `reject` CLI commands; no worktree is allocated before approval.
-- Added Git commit capture for worker outputs and deterministic cherry-pick integration into a dedicated integration worktree.
-- Added explicit integration-conflict diagnostics with a safe cherry-pick abort and inspectable failed state.
-- Added an optional native Codex reviewer route with read-only/output-schema options and a separate `--review-harness` CLI flag.
-- Added a shared harness conformance suite covering correlated lifecycle events, native identity, approval decisions, interruption, and timeout behavior for Fake, Codex, and OpenCode adapters.
-- Updated the Codex adapter to persist native thread/turn IDs, route server approval requests through an explicit callback, and interrupt active turns through the official `turn/interrupt` protocol.
-- Added persisted native harness approval gates with auditable decisions and `approve-run`/`reject-run` CLI commands for a second operator process.
-- Added explicit failure classes to run events and bounded retries for timed-out worker attempts.
-- Added OpenCode session resume support and persisted turn/output identity in the harness boundary.
-- Added a clean-checkout CLI acceptance fixture covering Quick, Standard, and Deep fake flows.
-- Timed-out retries now reuse the persisted native session when the adapter supports session resume.
-
-## 0.1.0-alpha.1 — initial product slice
-
-- Added a runnable Node.js CLI with `init`, task creation/list/show, `run`, `status`, `events`, and `doctor` commands.
-- Added validated task contracts, profile resolution, SQLite persistence, stage/run records, and append-only task events.
-- Added explicit task and stage state transitions, including the distinction between harness completion and task readiness.
-- Added native Git worktree allocation and revision tracking.
-- Added a deterministic fake harness and tests for the first Quick flow.
-- Documented the v0.1 release gates and implementation backlog.
-
-The Codex app-server and OpenCode adapter boundaries were introduced during the alpha execution iterations and remain experimental.
+- Added versioned task/profile/plan/review/verification/event schemas, fixtures, runtime validation, and seven transactional SQLite migrations.
+- Added deterministic Quick, Standard, and Deep acceptance flows with isolated worktrees, passing-evidence completion policy, structured review, bounded retries, human approvals, and auditable events.
+- Added native Codex app-server lifecycle, command evidence extraction, thread/turn persistence, approvals, interrupt, timeout, and session resume. A real Codex `0.148.0` smoke reached `READY` while leaving the primary checkout untouched.
+- Added OpenCode `1.18.23` HTTP/SSE lifecycle with session correlation, tool evidence, permissions, abort, resume, completion and provider-failure diagnostics. Live transport/session/SSE/failure behavior was verified against a local server.
+- Added Deep DAG execution with bounded concurrency, per-stage harness routing, routed timeout retry, transitive commit integration, explicit conflicts, integration verification, final review, and restart reconciliation.
+- Added review feedback delivery to the resumed worker session. The first retry reuses context; repeated timeout/review failures start a fresh session.
+- Added exact adapter version/auth/health diagnostics, config precedence and command overrides, secret rejection/redaction, safe IDs/refs/paths, unique run-attempt enforcement, and projection rebuilding from the event log.
+- Added `status --watch`, SIGINT/SIGTERM propagation, persisted cross-process interrupt requests, worktree list/remove/prune, and active/dirty worktree protection.
+- Added reproducible live-adapter smoke scripts, a ten-criterion acceptance matrix, compatibility and troubleshooting guides, and clean-install instructions.
 
 Known limitations:
 
-- Codex and OpenCode adapters are experimental: their normalized lifecycle is fixture-tested, while live version compatibility, Codex reconnect, and OpenCode SSE consumption still require validation.
-- Native reviewer/retry is not production-ready; fake review/retry is available for deterministic tests.
-- Arbitrary validated DAG execution, plan approval, and local restart recovery are implemented; native Codex architect compatibility and live OpenCode reconnect still need validation, while automatic conflict resolution is not implemented.
-- Worktrees are retained for inspection; cleanup policy is not automatic yet.
+- OpenCode successful model execution depends on the provider configured inside OpenCode. The release-signoff server's `omlx` provider was unreachable; Clew correctly recorded the streamed retries and external failure instead of reporting `READY`.
+- Clew resumes a native session/thread with a new tracked turn; it does not continue midway through an interrupted turn.
+- Merge conflicts require manual resolution; Clew never applies a destructive automatic fallback.
+- Runtime namespaces for ports, databases, queues, and containers are not isolated.
 - Node's built-in SQLite API is experimental in the supported runtime.
+- Dashboard, telemetry/cost aggregation, PR automation, and remote scheduling are post-v0.1 work.
+
+## 0.1.0-alpha.3 — execution and review iteration
+
+- Added deterministic fake review, bounded retries, Deep DAG execution, plan approvals, commit integration, conflict diagnostics, restart recovery, native adapter conformance tests, interrupts, native IDs, and approval gates.
+- Added strict Git/worktree boundaries, persisted event redaction, migrations, lint/format gates, and clean-checkout acceptance fixtures.
+
+## 0.1.0-alpha.1 — initial product slice
+
+- Added a runnable Node.js CLI with task CRUD, `run`, `status`, `events`, and `doctor`.
+- Added validated task contracts, profile resolution, SQLite persistence, stage/run records, append-only task events, Git worktree allocation, and the deterministic Quick fake flow.

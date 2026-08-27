@@ -129,7 +129,7 @@ Primary use cases:
                                         task readiness
 ```
 
-The initial implementation is a local Node.js/TypeScript application composed of:
+The initial implementation is a local Node.js ECMAScript-module application with runtime-validated boundaries, composed of:
 
 - a domain and application layer;
 - a small persistent scheduler;
@@ -197,7 +197,7 @@ profile: deep
 base_ref: main
 ```
 
-Minimum required fields are `id`, `title`, `goal`, at least one acceptance criterion, `risk`, `profile`, and `base_ref`.
+Minimum input fields are `id`, `title`, `goal`, at least one acceptance criterion, and `profile`. Normalization always materializes `risk` (default `medium`) and `base_ref` (default `HEAD`) before persistence.
 
 Acceptance criteria have stable IDs so verification evidence and reviewer findings can reference them.
 
@@ -665,17 +665,14 @@ v0.1 is accepted when:
 
 ## 26. Deferred decisions
 
-The following are deliberately left open until the POCs provide evidence:
+The following remain deliberately open beyond v0.1:
 
-- final Node framework and package structure;
-- exact supported Codex/OpenCode protocol versions;
-- session reconnection behavior after a harness process crash;
-- commit and integration strategy for parallel stage output;
 - runtime isolation for ports, databases, queues, and containers;
 - exact verification freshness/trust rules;
-- whether worktree cleanup is automatic or retention-based;
 - PR provider and merge automation;
 - dashboard technology and information architecture;
 - packaging and distribution (`brew`, npm, standalone binary, or other).
+
+The v0.1 POCs resolved the local toolchain, supported adapter versions, session resume behavior, deterministic commit integration, and retention-based worktree cleanup; those decisions are recorded in ADR/release/compatibility documents.
 
 These decisions must not weaken the core boundary: Clew owns the task lifecycle; native harnesses own coding intelligence.

@@ -1,6 +1,6 @@
 # Clew: что уже можно делать
 
-Это практическая инструкция для текущей версии `v0.1.0-alpha.3`. Здесь описано не всё, что задумано в архитектуре, а то, что уже можно запустить и проверить сегодня.
+Это практическая инструкция для release candidate `v0.1.0-rc.1`. Здесь описано только фактически реализованное и проверяемое поведение.
 
 ## Коротко
 
@@ -62,7 +62,17 @@ Quick run не работает в основном checkout. Clew создаё�
 ai/<task-id>-worker
 ```
 
-и worktree внутри `.clew/worktrees/`. В результат запуска попадают путь, branch, base SHA и текущий revision. Результат worker stage фиксируется отдельным Git commit. В Deep flow commits независимых workers последовательно переносятся через cherry-pick в integration worktree. Worktree можно проверить и удалить через `GitWorktreeManager` из кода; CLI-команды для ручной уборки пока не добавлены.
+и worktree внутри `.clew/worktrees/`. В результат запуска попадают путь, branch, base SHA и текущий revision. Результат worker stage фиксируется отдельным Git commit. В Deep flow commits независимых workers последовательно переносятся через cherry-pick в integration worktree.
+
+Worktrees можно обслуживать из CLI:
+
+```sh
+node bin/clew.js worktree list
+node bin/clew.js worktree remove /absolute/owned/path
+node bin/clew.js worktree prune
+```
+
+`prune` удаляет только clean inactive worktrees. Активные run paths и dirty worktrees сохраняются.
 
 Если commits конфликтуют, Clew прерывает cherry-pick, оставляет integration worktree в чистом диагностируемом состоянии, записывает событие `INTEGRATION_CONFLICT` и переводит integration stage и задачу в `FAILED`. Автоматического разрешения конфликтов пока нет.
 
@@ -237,7 +247,9 @@ npm test -- --test-name-pattern="worktree"
 node bin/clew.js doctor
 ```
 
-`doctor` проверяет подходящий Node.js, Git, наличие Codex CLI и доступность OpenCode endpoint (timeout 1 секунда). Внешние Codex/OpenCode проверки считаются optional: `ok: false` там не блокирует локальный fake-flow, но показывает, что native запуск в этой среде не готов.
+`doctor` проверяет Node.js, Git, точную совместимую версию CLI, Codex login и OpenCode `/global/health`. Без `--harness` native-проверки информационные; с `--harness codex|opencode` они обязательны и влияют на итоговый `ok`.
+
+Поддерживаемые версии release candidate: Codex CLI/app-server `0.148.0`, OpenCode CLI/server `1.18.23`.
 
 ## Сценарий 6: создать и подтвердить Deep plan
 
@@ -272,42 +284,41 @@ node bin/clew.js reject TASK-ID --reason "Разделить backend на два
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                                                       |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                         |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                               |
-| `deep`     | fake или read-only Codex architect создаёт versioned plan; обязательный approval gate предшествует worktrees; scheduler исполняет DAG с `maxWorkers`, переносит commits и восстанавливается после рестарта |
+| Profile    | Сейчас можно ожидать                                                                                                                                                        |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | один worker; fake, Codex или OpenCode; `READY` требует passing verification evidence                                                                                        |
+| `standard` | отдельный structured reviewer; blocking findings передаются в retry prompt; первый retry возобновляет session, повторный failure начинает fresh session                     |
+| `deep`     | versioned architect plan, approval gate, DAG с `maxWorkers`, isolated worktrees, per-stage harness route, integration, broad verification, review, retry и restart recovery |
 
-Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
+Для полностью детерминированной демонстрации используйте `quick --harness fake`; для реальной разработки сначала запустите соответствующий `doctor`.
 
-## Что пока не следует считать готовым
+## Конфигурация и хранение данных
 
-Следующие возможности описаны в спецификации, но ещё не являются стабильной частью продукта:
+Приоритет настроек: command flag → environment → project `.clew.json` → `~/.config/clew/config.json` → defaults. Поддерживаются `codexBin`, `openCodeBin`, `openCodeUrl`, `worktreeRoot`; соответствующие environment keys — `CLEW_CODEX_BIN`, `CLEW_OPENCODE_BIN`, `CLEW_OPENCODE_URL`, `CLEW_WORKTREE_ROOT`. Для разового запуска доступны `--codex-bin`, `--opencode-bin`, `--opencode-url`, `--worktree-root`.
 
-- полноценный Codex app-server lifecycle с production-grade reconnect/resume;
-- live OpenCode session/event stream во всех поддерживаемых версиях;
-- native reviewer и structured review findings;
-- retry routing по общей классификации failures; timeout worker уже классифицируется, повторяется в пределах `maxAttempts` и передаёт сохранённую native session в resume-capable adapter, остальные классы требуют отдельной policy;
-- live-валидация native Codex architect на зафиксированной версии app-server; fake architect и protocol boundary уже покрыты тестами;
-- остальные human gates кроме подтверждения Deep plan и native harness approvals;
-- production-grade reconnect/resume активной OpenCode session и возобновление именно прерванного Codex turn; базовый OpenCode `resumeSessionId` и Deep-переиспользование Codex thread через `thread/resume` уже реализованы;
-- автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
-- автоматическая cleanup policy для worktrees;
+Secrets запрещены даже во вложенных полях project config. Event payloads рекурсивно редактируются перед SQLite. База и raw normalized events остаются локальными до ручного удаления `.clew/`; clean inactive worktrees удаляются командой `worktree prune`, dirty и active сохраняются.
+
+Следить за выполняющейся задачей можно без отдельного UI:
+
+```sh
+node bin/clew.js status TASK-ID --watch --interval 1000
+```
+
+## Явные ограничения v0.1
+
+- автоматическое или human-assisted разрешение merge conflicts;
+- автоматический выбор произвольной retry policy для неизвестных failure classes;
+- возобновление середины уже прерванного native turn: Clew возобновляет session/thread и создаёт новый учтённый turn;
+- автоматический запуск и управление жизненным циклом внешнего OpenCode server;
 - dashboard UI;
 - OpenTelemetry/Phoenix;
 - PR/merge automation;
 - runtime isolation портов, баз данных и контейнеров.
 
-Это не скрытые ограничения: они вынесены в [RELEASE.md](./RELEASE.md) и [tasks.md](./tasks.md) как release gates или post-v0.1 backlog.
+OpenCode transport `1.18.23` прошёл live create/session/SSE/failure проверку. Успешный model turn зависит от provider, настроенного внутри OpenCode; в release-signoff окружении provider `omlx` был недоступен, и Clew корректно сохранил внешний failure вместо ложного `READY`.
+
+Это не скрытые ограничения: они вынесены в [RELEASE.md](./RELEASE.md) и post-v0.1 секцию [tasks.md](./tasks.md).
 
 ## Как развивать проект дальше
 
-Рекомендуемый порядок:
-
-1. Запустить `npm run check` и Quick fixture.
-2. Проверить Codex app-server в конкретном локальном окружении.
-3. Проверить OpenCode endpoint и зафиксировать поддерживаемую версию.
-4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
-5. Проверить native architect и reviewer на реальном Codex app-server.
-
-Следующий крупный шаг для orchestration core — довести OpenCode reconnect/resume и единую классификацию failures для retry policy.
+После `npm run check` выберите реальный use case и начните с `quick --harness codex`. Standard имеет смысл, когда нужен независимый review; Deep — когда работа действительно делится на несколько изолированных stages. Post-v0.1 идеи находятся в конце [`tasks.md`](./tasks.md).

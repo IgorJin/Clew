@@ -1,58 +1,105 @@
 # Clew
 
-Clew is a local, task-centric control plane for AI-assisted development. It keeps the thread across task contracts, native coding harnesses, Git worktrees, verification, review, retries, and human approvals.
+Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
 
-For a human-oriented guide with concrete use cases and current limitations, see [`DONE.md`](./DONE.md).
-
-Clew v0.1 starts with a deterministic local engine and a Quick vertical slice. The `fake` harness is included so the product can be exercised without external credentials; Codex and OpenCode adapters are isolated behind the same interface and are enabled as their machine-facing protocols are configured.
+This repository contains the `v0.1.0-rc.1` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
 
 ## Requirements
 
-- Node.js 22.5 or newer (uses the built-in `node:sqlite` module)
-- Git 2.30 or newer
+- macOS or Linux;
+- Node.js 22.5 or newer (Clew uses the built-in `node:sqlite` module);
+- Git 2.30 or newer;
+- for native flows: Codex CLI `0.148.0` and/or OpenCode CLI/server `1.18.23`.
 
-## Quick start
+Windows has not been validated for v0.1.
+
+## Clean install and quality gate
 
 ```sh
-npm test
-node bin/clew.js init
-node bin/clew.js task create \
+git clone https://github.com/IgorJin/Clew.git
+cd Clew
+npm ci
+npm run check
+node bin/clew.js --help
+```
+
+`npm run check` runs Prettier, ESLint, the automated test suite, and syntax checks. Runtime dependencies are zero; ESLint and Prettier are development-only dependencies.
+
+## Quick start without external credentials
+
+Run this inside a Git repository that has at least one commit:
+
+```sh
+node /path/to/Clew/bin/clew.js init
+node /path/to/Clew/bin/clew.js task create \
   --id DEMO-1 \
   --title "First Clew task" \
   --goal "Prove task-centric execution" \
   --accept "the fixture verification passes" \
   --profile quick
-node bin/clew.js run DEMO-1 --harness fake
-node bin/clew.js status DEMO-1
-node bin/clew.js events DEMO-1
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness fake
+node /path/to/Clew/bin/clew.js status DEMO-1
+node /path/to/Clew/bin/clew.js events DEMO-1
 ```
 
-Task state is stored in `.clew/clew.sqlite`; owned worktrees are stored in `.clew/worktrees/`. Both are ignored by Git.
+State is stored in `.clew/clew.sqlite`; owned worktrees are stored under `.clew/worktrees/`. The fake harness is deterministic and requires no account.
 
-Contracts can also be supplied as JSON:
+The product profiles default to native Codex as specified; `--harness fake` is an explicit deterministic test/demo route.
+
+## Native harnesses
+
+Diagnose the exact supported boundary before running it:
 
 ```sh
-node bin/clew.js task create --file task.json
+node bin/clew.js doctor --harness codex
+node bin/clew.js doctor --harness opencode
 ```
 
-## Current release boundary
+Then select the adapter explicitly:
 
-Implemented in the first product slice:
+```sh
+node bin/clew.js run DEMO-1 --harness codex
+node bin/clew.js run DEMO-1 --harness opencode
+```
 
-- validated task contracts and Quick/Standard/Deep profile names;
-- SQLite persistence for tasks, stages, runs, and immutable events;
-- state transitions and truthful `HARNESS_COMPLETED` vs task `READY` semantics;
-- local Git worktree allocation and revision evidence;
-- deterministic fake harness for end-to-end testing;
-- deterministic fake reviewer for Standard-flow testing;
-- arbitrary validated Deep DAG execution with bounded concurrency, blocked-state propagation, transitive commit integration, conflict diagnostics, and review;
-- versioned Deep plan persistence and restart recovery without rerunning completed stages;
-- fake and read-only Codex architect routes with schema-constrained plans;
-- transactional audited plan approval/rejection before any Deep worktree allocation;
-- CLI task lifecycle, plan inspection/approval, native harness approval decisions, interrupt requests, JSON output, status, events, and diagnostics.
+OpenCode requires a running server, normally `opencode serve --hostname 127.0.0.1 --port 4096`. Codex uses `codex app-server` over JSON-RPC stdio. Native completion alone is insufficient for `READY`: Clew requires at least one passing command evidence item.
 
-The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including live validation, native session reconnect, human-assisted conflict resolution, and hardening.
+## Standard and Deep flows
 
-## Design boundary
+Standard adds structured review and bounded retry. Blocking findings are added to the worker prompt; the first retry resumes its native session and a repeated failure starts fresh.
 
-Clew does not implement a coding-agent loop. Native harnesses own tools, context, shell/browser behavior, sandboxing, and approvals. Clew owns the task lifecycle above them.
+Deep adds a schema-valid DAG, approval gate, bounded parallel worktrees, deterministic commit integration, optional per-stage harness routing, broad verification, review, and restart recovery:
+
+```sh
+node bin/clew.js run DEMO-DEEP --profile deep --harness fake --architect fake
+node bin/clew.js plan DEMO-DEEP
+node bin/clew.js approve DEMO-DEEP --actor your-name
+node bin/clew.js run DEMO-DEEP --profile deep --harness fake
+```
+
+## Operations
+
+```sh
+node bin/clew.js status DEMO-1 --watch
+node bin/clew.js interrupt DEMO-1 --actor your-name
+node bin/clew.js worktree list
+node bin/clew.js worktree prune
+```
+
+`worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
+
+Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
+
+## Release evidence
+
+- [`spec.md`](./spec.md) — product and technical contract;
+- [`tasks.md`](./tasks.md) — implementation record and post-v0.1 backlog;
+- [`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md) — mapping of all ten acceptance criteria;
+- [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
+- [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
+
+## Intentional v0.1 limits
+
+Clew has no dashboard, remote scheduler, PR/merge automation, runtime namespace isolation for ports/databases/containers, or automatic merge-conflict resolution. Node's built-in SQLite API is still marked experimental by Node.js. These are explicit post-v0.1 boundaries, not hidden dependencies.
+
+Clew does not implement a model loop: native harnesses own coding intelligence and tools; Clew owns the durable task lifecycle above them.
