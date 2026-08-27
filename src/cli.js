@@ -31,7 +31,7 @@ function printJson(data) {
 }
 function printHelp() {
   console.log(
-    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
+    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew worktree list | remove PATH [--force]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
   );
 }
 
@@ -181,6 +181,19 @@ export async function main(args) {
       });
     }
     if (command === 'events') return printJson(store.listEvents(subcommand));
+    if (command === 'worktree') {
+      const manager = new GitWorktreeManager(join(stateDir, 'worktrees'));
+
+      if (subcommand === 'list') return printJson(manager.listWorktrees());
+      if (subcommand === 'remove') {
+        const path = rest[0];
+
+        if (!path) throw new Error('worktree path is required');
+        manager.removeWorktree(resolve(path), { force: rest.includes('--force') });
+
+        return printJson({ removed: resolve(path) });
+      }
+    }
     if (command === 'doctor') {
       const codexCommand = process.env.CLEW_CODEX_BIN || 'codex';
       const openCodeUrl = process.env.CLEW_OPENCODE_URL || 'http://127.0.0.1:4096';

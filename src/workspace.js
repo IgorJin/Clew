@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 function runGitCommand(args, cwd) {
@@ -46,6 +46,28 @@ export class GitWorktreeManager {
       sha: runGitCommand(['rev-parse', 'HEAD'], path),
       dirty: Boolean(runGitCommand(['status', '--porcelain'], path)),
     };
+  }
+  listWorktrees() {
+    const entries = runGitCommand(['worktree', 'list', '--porcelain'], this.projectRoot)
+      .split('\n\n')
+      .filter(Boolean)
+      .map((entry) => {
+        const lines = entry.split('\n');
+        const path = lines.find((line) => line.startsWith('worktree '))?.slice(9);
+        const sha = lines.find((line) => line.startsWith('HEAD '))?.slice(5);
+        const branch = lines.find((line) => line.startsWith('branch '))?.slice(7);
+
+        return path ? { path, sha, branch: branch?.replace('refs/heads/', '') } : null;
+      })
+      .filter(Boolean);
+
+    const canonicalRoot = realpathSync(this.root);
+
+    return entries
+      .map((entry) => ({ ...entry, path: realpathSync(resolve(entry.path)) }))
+      .filter(
+        (entry) => entry.path === canonicalRoot || entry.path.startsWith(`${canonicalRoot}/`),
+      );
   }
   commitWorktreeChanges(path, message) {
     const status = this.getWorktreeStatus(path);
