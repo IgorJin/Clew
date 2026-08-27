@@ -98,6 +98,84 @@ test('runs deep profile through planned worker and integration stages', async ()
     ['backend', 'frontend', 'integration'],
   );
   assert.ok(store.events('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
+  assert.equal(store.runs('T-6').length, 3);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('runs independent deep stages concurrently before integration', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-concurrency-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let active = 0;
+  let maxActive = 0;
+  const harness = {
+    run: async ({ stageId }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, stageId === 'integration' ? 5 : 30));
+      active -= 1;
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const workspaceManager = {
+    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  store.createTask({
+    id: 'T-9',
+    title: 'Parallel',
+    goal: 'Parallel',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
+  const result = await scheduler.runTask('T-9', 'deep', 'fake');
+  assert.equal(result.state, 'READY');
+  assert.equal(maxActive, 2);
+  const events = store.events('T-9');
+  const integrationStart = events.findIndex((event) => event.type === 'INTEGRATION_STARTED');
+  const workerCompletions = events
+    .map((event, index) => ({ event, index }))
+    .filter(
+      ({ event }) => event.type === 'STAGE_STATE_CHANGED' && event.payload.status === 'COMPLETED',
+    );
+  assert.ok(
+    workerCompletions
+      .filter(({ event }) => event.payload.stageId !== 'integration')
+      .every(({ index }) => index < integrationStart),
+  );
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('blocks integration when a parallel dependency fails', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-blocked-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const harness = {
+    run: async ({ stageId }) => {
+      if (stageId === 'frontend') throw new Error('frontend failed');
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const workspaceManager = {
+    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  store.createTask({
+    id: 'T-10',
+    title: 'Blocked',
+    goal: 'Blocked',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
+  await assert.rejects(() => scheduler.runTask('T-10', 'deep', 'fake'), /parallel stages failed/);
+  assert.equal(store.getTask('T-10').state, 'FAILED');
+  assert.equal(store.stages('T-10').find((stage) => stage.id === 'integration').status, 'BLOCKED');
+  assert.equal(
+    store.runs('T-10').some((run) => run.stage_id === 'integration'),
+    false,
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

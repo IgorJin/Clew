@@ -204,11 +204,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                           |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены |
-| `deep`     | fake plan валидируется как DAG, запускаются backend/frontend stages, затем integration и review; native architect/parallel integration пока не завершены                     |
+| Profile    | Сейчас можно ожидать                                                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                         |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены               |
+| `deep`     | fake plan валидируется как DAG, backend/frontend выполняются конкурентно, integration ждёт обе зависимости, затем запускается review; native architect/merge integration пока не завершены |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -221,7 +221,7 @@ node bin/clew.js doctor
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
 - native architect plan с human approval;
-- настоящий concurrent multi-stage DAG и production merge integration;
+- произвольный multi-stage DAG с concurrency limits, recovery и production merge integration;
 - интеграция результатов worktrees и merge-conflict workflow;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;

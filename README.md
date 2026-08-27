@@ -45,10 +45,10 @@ Implemented in the first product slice:
 - local Git worktree allocation and revision evidence;
 - deterministic fake harness for end-to-end testing;
 - deterministic fake reviewer for Standard-flow testing;
-- deterministic Deep plan, worker, integration, and review fixture;
+- concurrent Deep worker stages with dependency-gated integration and review;
 - CLI task lifecycle, JSON output, status, events, and diagnostics.
 
-The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including production Codex/OpenCode protocol adapters, reviewer/retry orchestration, parallel integration, and hardening.
+The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including production Codex/OpenCode protocol adapters, native reviewer/retry orchestration, production merge integration, and hardening.
 
 ## Design boundary
 

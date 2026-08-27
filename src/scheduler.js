@@ -9,23 +9,18 @@ import {
 import { FakeReviewer, CodexReviewer } from './review.js';
 
 export class Scheduler {
-  constructor(store, workspaceManager) {
+  constructor(store, workspaceManager, { harnessFactory = null, reviewerFactory = null } = {}) {
     this.store = store;
     this.workspaceManager = workspaceManager;
+    this.harnessFactory = harnessFactory;
+    this.reviewerFactory = reviewerFactory;
   }
   async runTask(taskId, requestedProfile, requestedHarness = null, requestedReviewHarness = null) {
     const row = this.store.getTask(taskId);
     if (!row) throw new Error(`task not found: ${taskId}`);
     const profile = effectiveProfile(requestedProfile || row.contract.profile);
     const harnessName = requestedHarness || profile.harness;
-    const harness =
-      harnessName === 'fake'
-        ? new FakeHarness()
-        : harnessName === 'codex'
-          ? new CodexHarness()
-          : harnessName === 'opencode'
-            ? new OpenCodeHarness()
-            : new ExternalHarnessUnavailable(harnessName);
+    const harness = this.createHarness(harnessName);
     if (profile.mode === 'parallel')
       return this.runDeep(row, profile, harness, harnessName, requestedReviewHarness);
     if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
@@ -76,10 +71,7 @@ export class Scheduler {
       this.store.setTaskState(taskId, 'VERIFYING');
       this.store.setTaskState(taskId, profile.review ? 'REVIEWING' : 'READY');
       if (profile.review) {
-        const reviewer =
-          requestedReviewHarness === 'codex'
-            ? new CodexReviewer(new CodexHarness())
-            : new FakeReviewer();
+        const reviewer = this.createReviewer(requestedReviewHarness);
         const review = await reviewer.review({
           task: row.contract,
           evidence: result.verification,
@@ -140,28 +132,85 @@ export class Scheduler {
     this.store.setTaskState(taskId, 'EXECUTING');
     for (const stage of plan.stages)
       this.store.addStage(taskId, stage.id, stage.dependsOn, 'QUEUED');
-    for (const stage of plan.stages.filter((stage) => stage.id !== 'integration')) {
-      this.store.setStage(taskId, stage.id, 'RUNNING');
-      const workspace = this.workspaceManager.create(taskId, stage.id, row.contract.base_ref, 1);
-      const runId = randomUUID();
-      const run = {
-        id: runId,
-        taskId,
-        stageId: stage.id,
-        attempt: 1,
-        status: 'RUNNING',
-        harness: harnessName,
-        workspace: workspace.path,
-        startedAt: new Date().toISOString(),
-      };
-      this.store.createRun(run);
-      this.store.event(taskId, 'STAGE_RUN_STARTED', {
-        ...run,
-        branch: workspace.branch,
-        baseSha: workspace.baseSha,
+    const workerStages = plan.stages.filter((stage) => stage.id !== 'integration');
+    const workerResults = await Promise.allSettled(
+      workerStages.map((stage) =>
+        this.runStage({ task: row.contract, stage, harness, harnessName, attempt: 1 }),
+      ),
+    );
+    const failures = workerResults.filter((result) => result.status === 'rejected');
+    if (failures.length) {
+      this.store.setStage(taskId, 'integration', 'BLOCKED');
+      this.store.event(taskId, 'INTEGRATION_BLOCKED', {
+        failedStages: workerStages
+          .filter((_, index) => workerResults[index].status === 'rejected')
+          .map((stage) => stage.id),
       });
+      this.store.setTaskState(taskId, 'FAILED');
+      throw new Error('one or more parallel stages failed');
+    }
+    this.store.event(taskId, 'INTEGRATION_STARTED', { dependencies: ['backend', 'frontend'] });
+    const integration = plan.stages.find((stage) => stage.id === 'integration');
+    let integrationResult;
+    try {
+      integrationResult = await this.runStage({
+        task: row.contract,
+        stage: integration,
+        harness,
+        harnessName,
+        attempt: 1,
+      });
+    } catch (error) {
+      this.store.setTaskState(taskId, 'FAILED');
+      this.store.event(taskId, 'INTEGRATION_FAILED', { message: error.message });
+      throw error;
+    }
+    this.store.event(taskId, 'INTEGRATION_COMPLETED', {
+      result: 'passed',
+      revision: integrationResult.revision,
+    });
+    this.store.setTaskState(taskId, 'VERIFYING');
+    this.store.setTaskState(taskId, 'REVIEWING');
+    const reviewer = this.createReviewer(requestedReviewHarness);
+    const review = await reviewer.review({
+      task: row.contract,
+      evidence: integrationResult.evidence,
+      revision: integrationResult.revision,
+    });
+    this.store.event(taskId, 'REVIEW_RECORDED', review);
+    this.store.setTaskState(taskId, review.verdict === 'pass' ? 'READY' : 'FAILED');
+    return {
+      taskId,
+      plan,
+      state: this.store.getTask(taskId).state,
+      stages: this.store.stages(taskId),
+    };
+  }
+
+  async runStage({ task, stage, harness, harnessName, attempt }) {
+    const taskId = task.id;
+    const runId = randomUUID();
+    this.store.setStage(taskId, stage.id, 'RUNNING');
+    const workspace = this.workspaceManager.create(taskId, stage.id, task.base_ref, attempt);
+    const run = {
+      id: runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      status: 'RUNNING',
+      harness: harnessName,
+      workspace: workspace.path,
+      startedAt: new Date().toISOString(),
+    };
+    this.store.createRun(run);
+    this.store.event(taskId, 'STAGE_RUN_STARTED', {
+      ...run,
+      branch: workspace.branch,
+      baseSha: workspace.baseSha,
+    });
+    try {
       const result = await harness.run({
-        task: { ...row.contract, title: stage.goal },
+        task: { ...task, title: stage.goal },
         stageId: stage.id,
         cwd: workspace.path,
         onEvent: (event) => this.store.event(taskId, `HARNESS_${event.type}`, event),
@@ -175,28 +224,31 @@ export class Scheduler {
         evidence: result.verification,
         revision: status.sha,
       });
+      return {
+        runId,
+        stageId: stage.id,
+        workspace,
+        revision: status.sha,
+        evidence: result.verification,
+      };
+    } catch (error) {
+      this.store.finishRun(runId, 'FAILED');
+      this.store.setStage(taskId, stage.id, 'FAILED');
+      this.store.event(taskId, 'STAGE_RUN_FAILED', { stageId: stage.id, message: error.message });
+      throw error;
     }
-    this.store.setStage(taskId, 'integration', 'RUNNING');
-    this.store.event(taskId, 'INTEGRATION_STARTED', { dependencies: ['backend', 'frontend'] });
-    this.store.setStage(taskId, 'integration', 'COMPLETED');
-    this.store.event(taskId, 'INTEGRATION_COMPLETED', { result: 'passed' });
-    this.store.setTaskState(taskId, 'VERIFYING');
-    this.store.setTaskState(taskId, 'REVIEWING');
-    const reviewer =
-      requestedReviewHarness === 'codex'
-        ? new CodexReviewer(new CodexHarness())
-        : new FakeReviewer();
-    const review = await reviewer.review({
-      task: row.contract,
-      evidence: [{ type: 'integration', result: 'passed' }],
-    });
-    this.store.event(taskId, 'REVIEW_RECORDED', review);
-    this.store.setTaskState(taskId, review.verdict === 'pass' ? 'READY' : 'FAILED');
-    return {
-      taskId,
-      plan,
-      state: this.store.getTask(taskId).state,
-      stages: this.store.stages(taskId),
-    };
+  }
+
+  createHarness(name) {
+    if (this.harnessFactory) return this.harnessFactory(name);
+    if (name === 'fake') return new FakeHarness();
+    if (name === 'codex') return new CodexHarness();
+    if (name === 'opencode') return new OpenCodeHarness();
+    return new ExternalHarnessUnavailable(name);
+  }
+
+  createReviewer(name) {
+    if (this.reviewerFactory) return this.reviewerFactory(name);
+    return name === 'codex' ? new CodexReviewer(new CodexHarness()) : new FakeReviewer();
   }
 }
