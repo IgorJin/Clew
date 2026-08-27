@@ -15,3 +15,16 @@ test('validates and normalizes a task contract', () => {
 test('rejects invalid transitions', () => {
   assert.throws(() => assertTaskTransition('COMPLETED', 'EXECUTING'), /invalid task transition/);
 });
+test('requires explicit ids for object acceptance criteria', () => {
+  assert.throws(
+    () =>
+      validateContract({
+        id: 'T-1',
+        title: 'Test',
+        goal: 'Test',
+        profile: 'quick',
+        acceptance: [{ criterion: 'works' }],
+      }),
+    /acceptance\[0\]\.id is required/,
+  );
+});

@@ -71,7 +71,7 @@ export class CodexHarness {
       const handle = (message) => {
         const method = message.method || '';
         const params = message.params || message.result || {};
-        if (method === 'turn/completed' || method === 'turn/completed') {
+        if (method === 'turn/completed') {
           onEvent({ type: 'HARNESS_COMPLETED', sessionId, raw: message });
           return finish(resolve, reject, null, { sessionId, verification: [] });
         }

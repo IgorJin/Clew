@@ -49,6 +49,8 @@ export function validateContract(input) {
         ? { id: `AC-${i + 1}`, criterion: acceptance[i] }
         : acceptance[i];
     if (!item?.criterion) throw new Error(`task.acceptance[${i}].criterion is required`);
+    if (typeof item.id !== 'string' || !item.id.trim())
+      throw new Error(`task.acceptance[${i}].id is required`);
     if (ids.has(item.id)) throw new Error(`duplicate acceptance id ${item.id}`);
     ids.add(item.id);
   }
