@@ -21,6 +21,8 @@ test('rejects invalid transitions', () => {
     () => assertValidTaskTransition('COMPLETED', 'EXECUTING'),
     /invalid task transition/,
   );
+  assert.doesNotThrow(() => assertValidTaskTransition('EXECUTING', 'RECOVERING'));
+  assert.doesNotThrow(() => assertValidTaskTransition('RECOVERING', 'EXECUTING'));
 });
 test('requires explicit ids for object acceptance criteria', () => {
   assert.throws(

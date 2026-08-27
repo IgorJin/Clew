@@ -44,6 +44,8 @@ Clew сейчас — локальный CLI, который связывает 
 
 Event history append-only по смыслу: создание задачи, смена состояния, запуск harness, обнаруженное verification и ошибка сохраняются отдельно. Это позволяет объяснить, что происходило, без доступа к истории чата агента.
 
+Deep plan сохраняется в SQLite с номером версии до запуска stages. Если процесс Clew завершился посередине DAG, повторный `clew run TASK-ID --profile deep` переводит задачу в `RECOVERING`: завершённые stages восстанавливаются по persisted run/revision/evidence, оставшиеся `RUNNING` attempts получают статус `INTERRUPTED`, а незавершённая часть плана ставится в очередь заново.
+
 ### Git worktree isolation
 
 Quick run не работает в основном checkout. Clew создаёт отдельную ветку вида:
@@ -83,6 +85,14 @@ HARNESS_COMPLETED → VERIFYING → READY
 ```
 
 Завершение turn означает только, что harness закончил работу. Задача становится `READY` после сохранения verification evidence и применения completion policy.
+
+После перезапуска для Deep flow появляется отдельный переход:
+
+```text
+EXECUTING/FAILED → RECOVERING → EXECUTING
+```
+
+`STAGE_RECOVERED` означает, что Clew нашёл доказуемо завершённый run с revision и не запускал stage повторно. Если у stage нет сохранённого revision, recovery останавливается в `BLOCKED`, а не дублирует работу молча.
 
 ## Установка и первая проверка
 
@@ -206,11 +216,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                                                                   |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                                                                     |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                                                                           |
-| `deep`     | scheduler исполняет произвольный валидный DAG, запускает готовые stages с лимитом `maxWorkers`, переносит транзитивные commits предков в downstream worktrees, блокирует зависимые stages после failure и завершает обязательными integration и review; native architect пока не готов |
+| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                      |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                        |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                              |
+| `deep`     | scheduler исполняет произвольный валидный DAG, запускает готовые stages с лимитом `maxWorkers`, переносит транзитивные commits, блокирует зависимости и восстанавливает незавершённый план после рестарта; native architect пока не готов |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -223,7 +233,7 @@ node bin/clew.js doctor
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
 - native architect plan, его сохранение и human approval;
-- восстановление незавершённого DAG после перезапуска процесса;
+- reconnect/resume активной native Codex/OpenCode session; локальный Deep recovery сейчас создаёт новую попытку после `INTERRUPTED`;
 - автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;
@@ -243,4 +253,4 @@ node bin/clew.js doctor
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Подключить native architect и persisted plan к уже работающему DAG executor.
 
-Следующий крупный шаг для orchestration core — `CLEW-014`: классификация незавершённых runs и безопасное восстановление после перезапуска без повторного запуска уже завершённых stages.
+Следующий крупный шаг для orchestration core — native architect и persisted plan approval: получить DAG из read-only Codex, показать его человеку и запретить execution до явного approve.

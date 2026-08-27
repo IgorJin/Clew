@@ -406,6 +406,203 @@ test('records an integration conflict as an explicit failed stage', async () => 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('resumes a persisted DAG without rerunning completed stages', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-resume-'));
+  const databaseFile = join(dir, 'state.sqlite');
+  const plan = {
+    parallelizable: true,
+    stages: [
+      { id: 'foundation', goal: 'Foundation', dependsOn: [] },
+      { id: 'feature', goal: 'Feature', dependsOn: ['foundation'] },
+      {
+        id: 'integration',
+        kind: 'integration',
+        goal: 'Integration',
+        dependsOn: ['feature'],
+      },
+    ],
+  };
+  const workspaceManager = {
+    createWorktree: (_task, stage, _baseRef, attempt) => ({
+      path: dir,
+      branch: `test-${stage}-${attempt}`,
+      baseSha: 'abc',
+    }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  let store = new Store(databaseFile);
+  store.createTask({
+    id: 'T-17',
+    title: 'Resume',
+    goal: 'Resume',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const failingHarness = {
+    run: async ({ stageId }) => {
+      if (stageId === 'feature') throw new Error('fixture crash');
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const firstScheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => failingHarness,
+    planFactory: () => plan,
+  });
+  await assert.rejects(() => firstScheduler.runTask('T-17', 'deep', 'fake'), /plan stages failed/);
+  store.close();
+
+  store = new Store(databaseFile);
+  const resumedStages = [];
+  const resumedHarness = {
+    run: async ({ stageId }) => {
+      resumedStages.push(stageId);
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const resumedScheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => resumedHarness,
+    planFactory: () => {
+      throw new Error('persisted plan was not reused');
+    },
+  });
+
+  const result = await resumedScheduler.runTask('T-17', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.deepEqual(resumedStages, ['feature', 'integration']);
+  assert.equal(store.getLatestPlan('T-17').version, 1);
+  assert.equal(store.listRuns('T-17').filter((run) => run.stage_id === 'foundation').length, 1);
+  assert.equal(store.listRuns('T-17').filter((run) => run.stage_id === 'feature').length, 2);
+  assert.ok(store.listEvents('T-17').some((event) => event.type === 'TASK_RECOVERY_STARTED'));
+  assert.ok(
+    store
+      .listEvents('T-17')
+      .some((event) => event.type === 'STAGE_RECOVERED' && event.payload.stageId === 'foundation'),
+  );
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('interrupts a persisted running attempt before resuming it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-interrupted-'));
+  const databaseFile = join(dir, 'state.sqlite');
+  let store = new Store(databaseFile);
+  store.createTask({
+    id: 'T-18',
+    title: 'Interrupted',
+    goal: 'Interrupted',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  store.savePlan('T-18', {
+    parallelizable: false,
+    stages: [
+      { id: 'worker', goal: 'Worker', dependsOn: [] },
+      {
+        id: 'integration',
+        kind: 'integration',
+        goal: 'Integration',
+        dependsOn: ['worker'],
+      },
+    ],
+  });
+  store.addStage('T-18', 'worker', [], 'RUNNING');
+  store.addStage('T-18', 'integration', ['worker'], 'QUEUED');
+  store.setTaskState('T-18', 'QUEUED');
+  store.setTaskState('T-18', 'EXECUTING');
+  store.createRun({
+    id: 'abandoned-run',
+    taskId: 'T-18',
+    stageId: 'worker',
+    attempt: 1,
+    status: 'RUNNING',
+    harness: 'fake',
+    workspace: dir,
+    startedAt: new Date().toISOString(),
+  });
+  store.close();
+
+  store = new Store(databaseFile);
+  const workspaceManager = {
+    createWorktree: (_task, stage, _baseRef, attempt) => ({
+      path: dir,
+      branch: `test-${stage}-${attempt}`,
+      baseSha: 'abc',
+    }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  const scheduler = new Scheduler(store, workspaceManager);
+
+  const result = await scheduler.runTask('T-18', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  const workerRuns = store.listRuns('T-18').filter((run) => run.stage_id === 'worker');
+  assert.deepEqual(
+    workerRuns.map((run) => [run.attempt, run.status]),
+    [
+      [1, 'INTERRUPTED'],
+      [2, 'COMPLETED'],
+    ],
+  );
+  assert.ok(store.listEvents('T-18').some((event) => event.type === 'RUN_INTERRUPTED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('blocks recovery when a completed stage has no persisted revision', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-recovery-blocked-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  store.createTask({
+    id: 'T-19',
+    title: 'Blocked recovery',
+    goal: 'Blocked recovery',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  store.savePlan('T-19', {
+    parallelizable: false,
+    stages: [
+      { id: 'worker', goal: 'Worker', dependsOn: [] },
+      {
+        id: 'integration',
+        kind: 'integration',
+        goal: 'Integration',
+        dependsOn: ['worker'],
+      },
+    ],
+  });
+  store.addStage('T-19', 'worker', [], 'COMPLETED');
+  store.addStage('T-19', 'integration', ['worker'], 'QUEUED');
+  store.setTaskState('T-19', 'QUEUED');
+  store.setTaskState('T-19', 'EXECUTING');
+  store.createRun({
+    id: 'unverifiable-run',
+    taskId: 'T-19',
+    stageId: 'worker',
+    attempt: 1,
+    status: 'COMPLETED',
+    harness: 'fake',
+    workspace: dir,
+    startedAt: new Date().toISOString(),
+  });
+  const scheduler = new Scheduler(store, {
+    createWorktree: () => {
+      throw new Error('recovery must stop before allocating a worktree');
+    },
+  });
+
+  await assert.rejects(
+    () => scheduler.runTask('T-19', 'deep', 'fake'),
+    /without a persisted revision/,
+  );
+
+  assert.equal(store.getTask('T-19').state, 'BLOCKED');
+  assert.equal(store.listRuns('T-19').length, 1);
+  assert.ok(store.listEvents('T-19').some((event) => event.type === 'RECOVERY_BLOCKED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('normalizes a native reviewer output behind the reviewer boundary', async () => {
   const reviewer = new CodexReviewer({
     run: async () => ({ output: { verdict: 'pass', findings: [] } }),

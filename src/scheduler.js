@@ -129,21 +129,62 @@ export class Scheduler {
 
   async runDeep(row, profile, harness, harnessName, requestedReviewHarness = null) {
     const taskId = row.id;
-    if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
+    if (
+      ![
+        'DRAFT',
+        'QUEUED',
+        'RECOVERING',
+        'EXECUTING',
+        'VERIFYING',
+        'REVIEWING',
+        'READY',
+        'FAILED',
+        'BLOCKED',
+      ].includes(row.state)
+    )
       throw new Error(`task ${taskId} is already ${row.state}`);
-    const proposedPlan = this.planFactory
-      ? await this.planFactory(row.contract, profile)
-      : this.createDefaultDeepPlan(row.contract);
+    const persistedPlan = this.store.getLatestPlan(taskId);
+    const proposedPlan = persistedPlan
+      ? persistedPlan.plan
+      : this.planFactory
+        ? await this.planFactory(row.contract, profile)
+        : this.createDefaultDeepPlan(row.contract);
     const plan = validateExecutionPlan(proposedPlan);
     const integrationStage = this.getIntegrationStage(plan);
-    this.store.appendEvent(taskId, 'PLAN_VALIDATED', { plan });
-    if (row.state !== 'QUEUED') {
-      assertValidTaskTransition(row.state, 'QUEUED');
-      this.store.setTaskState(taskId, 'QUEUED');
-    }
-    this.store.setTaskState(taskId, 'EXECUTING');
+    const planRecord = persistedPlan ?? this.store.savePlan(taskId, plan);
+    this.store.appendEvent(taskId, 'PLAN_VALIDATED', {
+      version: planRecord.version,
+      plan,
+    });
+    const existingStages = this.store.listStages(taskId);
     for (const stage of plan.stages)
       this.store.addStage(taskId, stage.id, stage.dependsOn, 'QUEUED');
+
+    const isRecovery =
+      existingStages.length > 0 &&
+      ['QUEUED', 'RECOVERING', 'EXECUTING', 'VERIFYING', 'REVIEWING', 'FAILED', 'BLOCKED'].includes(
+        row.state,
+      );
+    let recoveredStages = new Map();
+    if (isRecovery) {
+      if (row.state !== 'RECOVERING') {
+        assertValidTaskTransition(row.state, 'RECOVERING');
+        this.store.setTaskState(taskId, 'RECOVERING');
+      }
+      this.store.appendEvent(taskId, 'TASK_RECOVERY_STARTED', {
+        planVersion: planRecord.version,
+        previousState: row.state,
+      });
+      recoveredStages = this.reconcilePlanStages(taskId, plan);
+      this.store.setTaskState(taskId, 'EXECUTING');
+    } else {
+      for (const stage of plan.stages) this.store.setStage(taskId, stage.id, 'QUEUED');
+      if (row.state !== 'QUEUED') {
+        assertValidTaskTransition(row.state, 'QUEUED');
+        this.store.setTaskState(taskId, 'QUEUED');
+      }
+      this.store.setTaskState(taskId, 'EXECUTING');
+    }
     const execution = await this.executePlan({
       task: row.contract,
       plan,
@@ -151,6 +192,7 @@ export class Scheduler {
       harnessName,
       maxWorkers: profile.maxWorkers,
       integrationStageId: integrationStage.id,
+      initialCompleted: recoveredStages,
     });
     if (execution.failures.size) {
       this.store.setTaskState(taskId, 'FAILED');
@@ -208,6 +250,77 @@ export class Scheduler {
     };
   }
 
+  reconcilePlanStages(taskId, plan) {
+    const stageRecords = new Map(this.store.listStages(taskId).map((stage) => [stage.id, stage]));
+    const runs = this.store.listRuns(taskId);
+    const events = this.store.listEvents(taskId);
+    const recoveredStages = new Map();
+    const interruptRun = (run) => {
+      this.store.finishRun(run.id, 'INTERRUPTED', run.commit_sha);
+      this.store.appendEvent(taskId, 'RUN_INTERRUPTED', {
+        stageId: run.stage_id,
+        runId: run.id,
+        reason: 'scheduler process restarted before terminal run state',
+      });
+    };
+
+    for (const stage of plan.stages) {
+      const stageRecord = stageRecords.get(stage.id);
+      const stageRuns = runs.filter((run) => run.stage_id === stage.id);
+      const latestRun = stageRuns.at(-1);
+      const runningStageRuns = stageRuns.filter((run) => run.status === 'RUNNING');
+      const canRecoverCompletedRun =
+        stageRecord?.status === 'COMPLETED' ||
+        (stageRecord?.status === 'RUNNING' && latestRun?.status === 'COMPLETED');
+
+      if (canRecoverCompletedRun) {
+        for (const runningRun of runningStageRuns) interruptRun(runningRun);
+        if (!latestRun?.commit_sha) {
+          this.store.setStage(taskId, stage.id, 'BLOCKED');
+          this.store.setTaskState(taskId, 'BLOCKED');
+          this.store.appendEvent(taskId, 'RECOVERY_BLOCKED', {
+            stageId: stage.id,
+            reason: 'completed stage has no persisted revision',
+          });
+          throw new Error(`cannot recover stage ${stage.id} without a persisted revision`);
+        }
+        const verificationEvent = events
+          .toReversed()
+          .find(
+            (event) =>
+              event.type === 'VERIFICATION_RECORDED' &&
+              event.payload.stageId === stage.id &&
+              event.payload.revision === latestRun.commit_sha,
+          );
+        this.store.setStage(taskId, stage.id, 'COMPLETED');
+        recoveredStages.set(stage.id, {
+          runId: latestRun.id,
+          stageId: stage.id,
+          workspace: { path: latestRun.workspace },
+          revision: latestRun.commit_sha,
+          evidence: verificationEvent?.payload.evidence ?? [],
+        });
+        this.store.appendEvent(taskId, 'STAGE_RECOVERED', {
+          stageId: stage.id,
+          runId: latestRun.id,
+          revision: latestRun.commit_sha,
+        });
+        continue;
+      }
+
+      for (const runningRun of runningStageRuns) interruptRun(runningRun);
+      if (stageRecord?.status !== 'QUEUED') {
+        this.store.setStage(taskId, stage.id, 'QUEUED');
+        this.store.appendEvent(taskId, 'STAGE_REQUEUED', {
+          stageId: stage.id,
+          previousStatus: stageRecord?.status,
+        });
+      }
+    }
+
+    return recoveredStages;
+  }
+
   getIntegrationStage(plan) {
     const integrationStages = plan.stages.filter(
       (stage) => stage.kind === 'integration' || stage.id === 'integration',
@@ -233,10 +346,22 @@ export class Scheduler {
     return integrationStage;
   }
 
-  async executePlan({ task, plan, harness, harnessName, maxWorkers, integrationStageId }) {
-    const pending = new Map(plan.stages.map((stage) => [stage.id, stage]));
+  async executePlan({
+    task,
+    plan,
+    harness,
+    harnessName,
+    maxWorkers,
+    integrationStageId,
+    initialCompleted = new Map(),
+  }) {
+    const pending = new Map(
+      plan.stages
+        .filter((stage) => !initialCompleted.has(stage.id))
+        .map((stage) => [stage.id, stage]),
+    );
     const running = new Map();
-    const completed = new Map();
+    const completed = new Map(initialCompleted);
     const failures = new Map();
     const blocked = [];
     const concurrencyLimit = Math.max(1, Number(maxWorkers) || 1);

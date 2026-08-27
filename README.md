@@ -46,9 +46,10 @@ Implemented in the first product slice:
 - deterministic fake harness for end-to-end testing;
 - deterministic fake reviewer for Standard-flow testing;
 - arbitrary validated Deep DAG execution with bounded concurrency, blocked-state propagation, transitive commit integration, conflict diagnostics, and review;
+- versioned Deep plan persistence and restart recovery without rerunning completed stages;
 - CLI task lifecycle, JSON output, status, events, and diagnostics.
 
-The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including production Codex/OpenCode protocol adapters, native and persisted plan input, restart recovery, human-assisted conflict resolution, and hardening.
+The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including production Codex/OpenCode protocol adapters, native plan generation and approval, live harness reconnection, human-assisted conflict resolution, and hardening.
 
 ## Design boundary
 

@@ -10,6 +10,7 @@ export class Store {
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, contract TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS stages (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, id TEXT NOT NULL, status TEXT NOT NULL, depends_on TEXT NOT NULL, PRIMARY KEY(task_id,id));
+      CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
   }
@@ -39,8 +40,23 @@ export class Store {
   }
   addStage(taskId, id, dependsOn = [], status = 'QUEUED') {
     this.db
-      .prepare('INSERT OR REPLACE INTO stages VALUES (?, ?, ?, ?)')
+      .prepare('INSERT OR IGNORE INTO stages VALUES (?, ?, ?, ?)')
       .run(taskId, id, status, JSON.stringify(dependsOn));
+  }
+  savePlan(taskId, plan) {
+    const latestPlan = this.getLatestPlan(taskId);
+    const version = (latestPlan?.version ?? 0) + 1;
+    this.db
+      .prepare('INSERT INTO plans (task_id,version,plan,created_at) VALUES (?,?,?,?)')
+      .run(taskId, version, JSON.stringify(plan), new Date().toISOString());
+    this.appendEvent(taskId, 'PLAN_PERSISTED', { version, plan });
+    return { version, plan };
+  }
+  getLatestPlan(taskId) {
+    const row = this.db
+      .prepare('SELECT * FROM plans WHERE task_id=? ORDER BY version DESC LIMIT 1')
+      .get(taskId);
+    return row ? { ...row, plan: JSON.parse(row.plan) } : null;
   }
   listStages(taskId) {
     return this.db
