@@ -116,4 +116,26 @@ export class GitWorktreeManager {
       throw new Error('refusing to remove a dirty worktree; pass force=true');
     runGitCommand(['worktree', 'remove', ...(force ? ['--force'] : []), target], this.projectRoot);
   }
+  pruneWorktrees({ protectedPaths = [] } = {}) {
+    const protectedSet = new Set(protectedPaths.map((path) => resolve(path)));
+    const removed = [];
+    const skipped = [];
+
+    for (const worktree of this.listWorktrees()) {
+      if (protectedSet.has(worktree.path)) {
+        skipped.push({ ...worktree, reason: 'active run' });
+        continue;
+      }
+      const status = this.getWorktreeStatus(worktree.path);
+
+      if (status.dirty) {
+        skipped.push({ ...worktree, reason: 'dirty' });
+        continue;
+      }
+      this.removeWorktree(worktree.path);
+      removed.push(worktree);
+    }
+
+    return { removed, skipped };
+  }
 }

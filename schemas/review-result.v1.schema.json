@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/review-result.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings"],
+  "properties": {
+    "verdict": { "enum": ["pass", "request_changes", "needs_human"] },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "criterion", "reason"],
+        "properties": {
+          "severity": { "enum": ["blocking", "warning"] },
+          "criterion": { "type": "string" },
+          "reason": { "type": "string" },
+          "evidence": {},
+          "target": { "type": "string" }
+        }
+      }
+    }
+  }
+}

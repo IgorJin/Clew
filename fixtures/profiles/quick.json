@@ -1,0 +1,10 @@
+{
+  "name": "quick",
+  "mode": "direct",
+  "harness": "codex",
+  "review": false,
+  "architecture": false,
+  "maxWorkers": 1,
+  "maxAttempts": 3,
+  "verification": "targeted"
+}

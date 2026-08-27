@@ -1,0 +1,9 @@
+{
+  "id": "FIXTURE-QUICK",
+  "title": "Quick acceptance fixture",
+  "goal": "Exercise the deterministic Quick flow",
+  "acceptance": [{ "id": "AC-1", "criterion": "the task reaches READY" }],
+  "risk": "low",
+  "profile": "quick",
+  "base_ref": "HEAD"
+}

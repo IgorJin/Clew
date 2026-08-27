@@ -35,6 +35,35 @@ test('creates, inspects, and removes an isolated worktree', () => {
   }
 });
 
+test('prunes only clean inactive owned worktrees', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clew-worktree-prune-'));
+  const worktrees = join(root, 'worktrees');
+
+  try {
+    runGitCommand(['init', '-b', 'main'], root);
+    runGitCommand(['config', 'user.email', 'test@example.com'], root);
+    runGitCommand(['config', 'user.name', 'Clew Test'], root);
+    writeFileSync(join(root, 'README.md'), 'fixture\n');
+    runGitCommand(['add', 'README.md'], root);
+    runGitCommand(['commit', '-m', 'fixture'], root);
+    const manager = new GitWorktreeManager(worktrees, root);
+    const active = manager.createWorktree('T-PRUNE', 'active');
+    const clean = manager.createWorktree('T-PRUNE', 'clean');
+    const dirty = manager.createWorktree('T-PRUNE', 'dirty');
+
+    writeFileSync(join(dirty.path, 'dirty.txt'), 'uncommitted\n');
+    const result = manager.pruneWorktrees({ protectedPaths: [active.path] });
+
+    assert.deepEqual(
+      result.removed.map((entry) => entry.path),
+      [clean.path],
+    );
+    assert.deepEqual(result.skipped.map((entry) => entry.reason).sort(), ['active run', 'dirty']);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('commits worker outputs and integrates them into a target worktree', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-integration-'));
   const worktrees = join(root, 'worktrees');

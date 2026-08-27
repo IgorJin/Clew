@@ -50,6 +50,41 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('does not mark a harness completion READY without passing verification evidence', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-missing-verification-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-NO-EVIDENCE',
+    title: 'Require evidence',
+    goal: 'Do not trust completion alone',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'evidence exists' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => ({
+      run: async () => ({ sessionId: 'empty-session', verification: [] }),
+    }),
+  });
+
+  await assert.rejects(
+    () => scheduler.runTask('T-NO-EVIDENCE', 'quick', 'fake'),
+    /without verification evidence/,
+  );
+  assert.equal(store.getTask('T-NO-EVIDENCE').state, 'FAILED');
+  assert.equal(
+    store.listEvents('T-NO-EVIDENCE').find((event) => event.type === 'RUN_FAILED').payload
+      .failureClass,
+    'verification',
+  );
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('retries a timed-out worker within the profile attempt limit', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-timeout-retry-'));
   const store = new Store(join(dir, 'state.sqlite'));
@@ -90,6 +125,96 @@ test('retries a timed-out worker within the profile attempt limit', async () => 
   assert.equal(store.listRuns('T-TIMEOUT').length, 2);
   assert.equal(resumedSession, 'timeout-session');
   assert.ok(store.listEvents('T-TIMEOUT').some((event) => event.type === 'RETRY_SCHEDULED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('starts a fresh session after a repeated timeout', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-timeout-fresh-session-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const resumeSessions = [];
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-TIMEOUT-FRESH',
+    title: 'Fresh session',
+    goal: 'Stop reusing a repeatedly failing context',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'third attempt is fresh' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => ({
+      run: async (options) => {
+        resumeSessions.push(options.resumeSessionId);
+        options.onEvent({
+          type: 'SESSION_STARTED',
+          sessionId: `timeout-${resumeSessions.length}`,
+        });
+        const error = new Error('repeated timeout');
+
+        error.code = 'HARNESS_TIMED_OUT';
+        throw error;
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => scheduler.runTask('T-TIMEOUT-FRESH', 'quick', 'fake'),
+    /repeated timeout/,
+  );
+  assert.deepEqual(resumeSessions, [null, 'timeout-1', null]);
+  assert.equal(store.listRuns('T-TIMEOUT-FRESH').length, 3);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('recovers an abandoned single-worker run and resumes its native session', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-single-recovery-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let resumedSession;
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-RECOVER',
+    title: 'Recover',
+    goal: 'Recover abandoned worker',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'resumes safely' }],
+  });
+  store.addStage('T-RECOVER', 'worker', [], 'RUNNING');
+  store.setTaskState('T-RECOVER', 'QUEUED');
+  store.setTaskState('T-RECOVER', 'EXECUTING');
+  store.createRun({
+    id: 'abandoned-run',
+    taskId: 'T-RECOVER',
+    stageId: 'worker',
+    attempt: 1,
+    status: 'RUNNING',
+    harness: 'fake',
+    sessionId: 'persisted-session',
+    workspace: dir,
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => ({
+      run: async (options) => {
+        resumedSession = options.resumeSessionId;
+
+        return new FakeHarness().run(options);
+      },
+    }),
+  });
+  const result = await scheduler.runTask('T-RECOVER', 'quick', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(resumedSession, 'persisted-session');
+  assert.equal(store.listRuns('T-RECOVER')[0].status, 'INTERRUPTED');
+  assert.ok(store.listEvents('T-RECOVER').some((event) => event.type === 'RUN_INTERRUPTED'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -181,6 +306,62 @@ test('routes blocking review findings into bounded retries', async () => {
   else process.env.CLEW_FAKE_REVIEW = previous;
 });
 
+test('resumes the worker session with structured review feedback', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-review-feedback-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const calls = [];
+  let reviews = 0;
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-FEEDBACK',
+    title: 'Feedback',
+    goal: 'Implement carefully',
+    profile: 'standard',
+    acceptance: [{ id: 'AC-1', criterion: 'handles feedback' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => ({
+      run: async (options) => {
+        calls.push(options);
+
+        return {
+          sessionId: 'worker-session',
+          verification: [{ result: 'passed' }],
+        };
+      },
+    }),
+    reviewerFactory: () => ({
+      review: async () => {
+        reviews += 1;
+
+        return reviews === 1
+          ? {
+              verdict: 'request_changes',
+              findings: [
+                {
+                  severity: 'blocking',
+                  criterion: 'AC-1',
+                  reason: 'Add the missing edge case',
+                },
+              ],
+            }
+          : { verdict: 'pass', findings: [] };
+      },
+    }),
+  });
+  const result = await scheduler.runTask('T-FEEDBACK', 'standard', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(calls[1].resumeSessionId, 'worker-session');
+  assert.match(calls[1].task.goal, /Add the missing edge case/);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('runs deep profile through planned worker and integration stages', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-deep-'));
   const store = new Store(join(dir, 'state.sqlite'));
@@ -207,6 +388,59 @@ test('runs deep profile through planned worker and integration stages', async ()
   );
   assert.ok(store.listEvents('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
   assert.equal(store.listRuns('T-6').length, 3);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('retries a timed-out Deep stage and resumes its session before integration', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-deep-retry-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const attempts = new Map();
+  let resumedSession;
+  const harness = {
+    run: async (options) => {
+      const attempt = (attempts.get(options.stageId) ?? 0) + 1;
+
+      attempts.set(options.stageId, attempt);
+      if (options.stageId === 'backend' && attempt === 1) {
+        options.onEvent({ type: 'SESSION_STARTED', sessionId: 'deep-backend-session' });
+        const error = new Error('transient Deep timeout');
+
+        error.code = 'HARNESS_TIMED_OUT';
+        throw error;
+      }
+      if (options.stageId === 'backend') resumedSession = options.resumeSessionId;
+
+      return {
+        sessionId: `session-${options.stageId}`,
+        verification: [{ result: 'passed' }],
+      };
+    },
+  };
+  const workspaceManager = {
+    createWorktree: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-DEEP-RETRY',
+    title: 'Deep retry',
+    goal: 'Retry one routed stage',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'reaches integration' }],
+  });
+  const result = await new Scheduler(store, workspaceManager, {
+    harnessFactory: () => harness,
+    requirePlanApproval: false,
+  }).runTask('T-DEEP-RETRY', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(attempts.get('backend'), 2);
+  assert.equal(resumedSession, 'deep-backend-session');
+  assert.ok(store.listEvents('T-DEEP-RETRY').some((event) => event.type === 'RETRY_SCHEDULED'));
+  assert.ok(
+    store.listEvents('T-DEEP-RETRY').some((event) => event.type === 'INTEGRATION_COMPLETED'),
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -440,6 +674,57 @@ test('runs an arbitrary multi-level DAG in dependency order', async () => {
   assert.ok(started.indexOf('docs') > completed.indexOf('api'));
   assert.equal(started.at(-1), 'integration');
   assert.equal(store.listRuns('T-13').length, 5);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('routes an optional Deep QA stage to its configured harness', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-qa-route-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const routedHarnesses = [];
+  const workspaceManager = {
+    createWorktree: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-QA-ROUTE',
+    title: 'QA route',
+    goal: 'Route QA independently',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'QA uses OpenCode' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    planFactory: () => ({
+      parallelizable: true,
+      stages: [
+        { id: 'worker', goal: 'Implement', dependsOn: [] },
+        { id: 'qa', kind: 'qa', harness: 'opencode', goal: 'Check', dependsOn: ['worker'] },
+        {
+          id: 'integration',
+          kind: 'integration',
+          goal: 'Integrate',
+          dependsOn: ['qa'],
+        },
+      ],
+    }),
+    harnessFactory: (harnessName) => ({
+      run: async ({ stageId }) => {
+        routedHarnesses.push([stageId, harnessName]);
+
+        return { sessionId: `${harnessName}-${stageId}`, verification: [{ result: 'passed' }] };
+      },
+    }),
+    requirePlanApproval: false,
+  });
+  const result = await scheduler.runTask('T-QA-ROUTE', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.deepEqual(routedHarnesses, [
+    ['worker', 'fake'],
+    ['qa', 'opencode'],
+    ['integration', 'fake'],
+  ]);
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -748,7 +1033,11 @@ test('interrupts a persisted running attempt before resuming it', async () => {
       run: async ({ resumeSessionId }) => {
         resumedSessionIds.push(resumeSessionId);
 
-        return { sessionId: 'thread-resumed', turnId: 'turn-resumed', verification: [] };
+        return {
+          sessionId: 'thread-resumed',
+          turnId: 'turn-resumed',
+          verification: [{ result: 'passed' }],
+        };
       },
     }),
   });
@@ -835,8 +1124,13 @@ test('blocks recovery when a completed stage has no persisted revision', async (
 });
 
 test('normalizes a native reviewer output behind the reviewer boundary', async () => {
+  let request;
   const reviewer = new CodexReviewer({
-    run: async () => ({ output: { verdict: 'pass', findings: [] } }),
+    run: async (input) => {
+      request = input;
+
+      return { output: { verdict: 'pass', findings: [] } };
+    },
   });
   const result = await reviewer.review({
     task: {
@@ -847,9 +1141,14 @@ test('normalizes a native reviewer output behind the reviewer boundary', async (
     },
     evidence: [],
     revision: 'abc',
+    cwd: '/review-worktree',
   });
 
   assert.equal(result.verdict, 'pass');
+  assert.equal(request.cwd, '/review-worktree');
+  assert.equal(request.readOnly, true);
+  assert.equal(request.outputSchema.additionalProperties, false);
+  assert.equal(request.outputSchema.properties.findings.items.additionalProperties, false);
 });
 
 test('Codex adapter follows the app-server handshake and completion event', async () => {

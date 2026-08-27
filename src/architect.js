@@ -10,10 +10,11 @@ export const PLAN_OUTPUT_SCHEMA = {
         properties: {
           id: { type: 'string' },
           kind: { type: 'string' },
+          harness: { enum: ['codex', 'opencode', null] },
           goal: { type: 'string' },
           dependsOn: { type: 'array', items: { type: 'string' } },
         },
-        required: ['id', 'kind', 'goal', 'dependsOn'],
+        required: ['id', 'kind', 'harness', 'goal', 'dependsOn'],
         additionalProperties: false,
       },
     },
@@ -53,15 +54,15 @@ export class CodexArchitect {
         goal: `${task.goal}\n\nProduce an implementation DAG. Every stage must feed one terminal integration stage with kind=integration. Do not modify files.`,
       },
       cwd,
-      model: process.env.CLEW_ARCHITECT_MODEL || 'sol',
+      model: process.env.CLEW_ARCHITECT_MODEL,
       readOnly: true,
       outputSchema: PLAN_OUTPUT_SCHEMA,
       onEvent: () => {},
     });
     const plan = result.output?.output ?? result.output;
 
-    if (!plan || typeof plan !== 'object')
-      throw new Error('Codex architect did not return a structured plan');
+    if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages))
+      throw new Error(`Codex architect did not return a structured plan: ${JSON.stringify(plan)}`);
 
     return plan;
   }

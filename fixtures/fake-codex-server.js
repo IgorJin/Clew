@@ -21,7 +21,8 @@ rl.on('line', (line) => {
       process.stdout.write(
         `${JSON.stringify({ id: approvalRequestId, method: 'item/commandExecution/requestApproval', params: { threadId, turnId, itemId: 'item_fixture', command: ['npm', 'test'] } })}\n`,
       );
-    else if (mode === 'complete') completeTurn('completed');
+    else if (['complete', 'structured-item'].includes(mode)) completeTurn('completed');
+    else if (mode === 'failed') completeTurn('failed');
   }
   if (message.method === 'turn/interrupt') {
     sendRpcResponse(message.id, {});
@@ -35,7 +36,16 @@ function sendRpcResponse(id, result) {
 }
 
 function completeTurn(status) {
-  process.stdout.write(
-    `${JSON.stringify({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status }, output: { verdict: 'pass', findings: [] } } })}\n`,
-  );
+  if (status === 'completed' && mode === 'structured-item')
+    process.stdout.write(
+      `${JSON.stringify({ method: 'item/completed', params: { threadId, turnId, completedAtMs: Date.now(), item: { id: 'message_fixture', type: 'agentMessage', text: '{"verdict":"pass","findings":[]}' } } })}\n`,
+    );
+  else if (status === 'completed')
+    process.stdout.write(
+      `${JSON.stringify({ method: 'item/completed', params: { threadId, turnId, completedAtMs: Date.now(), item: { id: 'command_fixture', type: 'commandExecution', command: 'npm test', commandActions: [], cwd: process.cwd(), status: 'completed', exitCode: 0, aggregatedOutput: 'tests passed' } } })}\n`,
+    );
+  const params = { threadId, turn: { id: turnId, status } };
+
+  if (mode !== 'structured-item') params.output = { verdict: 'pass', findings: [] };
+  process.stdout.write(`${JSON.stringify({ method: 'turn/completed', params })}\n`);
 }

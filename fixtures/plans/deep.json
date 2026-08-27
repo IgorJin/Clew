@@ -1,0 +1,13 @@
+{
+  "parallelizable": true,
+  "stages": [
+    { "id": "backend", "kind": "worker", "goal": "Backend fixture", "dependsOn": [] },
+    { "id": "frontend", "kind": "worker", "goal": "Frontend fixture", "dependsOn": [] },
+    {
+      "id": "integration",
+      "kind": "integration",
+      "goal": "Integrate fixture outputs",
+      "dependsOn": ["backend", "frontend"]
+    }
+  ]
+}

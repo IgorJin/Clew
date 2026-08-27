@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ReadableStream } from 'node:stream/web';
+import { TextEncoder } from 'node:util';
 import {
   APPROVAL_DECISION,
   CodexHarness,
@@ -25,6 +27,21 @@ function createJsonResponse(data, status = 200) {
     ok: status >= 200 && status < 300,
     status,
     json: async () => data,
+  };
+}
+
+function createSseResponse(events) {
+  const encoder = new TextEncoder();
+
+  return {
+    ok: true,
+    status: 200,
+    body: new ReadableStream({
+      start(controller) {
+        for (const event of events)
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      },
+    }),
   };
 }
 
@@ -92,6 +109,31 @@ test('Fake harness exposes deterministic AbortSignal interruption', async () => 
   rmSync(directory, { recursive: true, force: true });
 });
 
+test('Fake harness scripts approvals, events, verification and failures', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'clew-harness-script-'));
+  const events = [];
+  const scriptedError = new Error('scripted failure');
+  const harness = new FakeHarness({
+    approval: { id: 'approval-1', method: 'fixture/requestApproval', params: {} },
+    events: [{ type: HARNESS_EVENT_TYPE.TOOL_STARTED, tool: 'fixture-tool' }],
+    failures: [null, scriptedError],
+    verification: [{ type: 'targeted', result: 'passed', command: 'fixture check' }],
+  });
+  const options = {
+    task: fixtureTask,
+    stageId: 'worker',
+    cwd: directory,
+    onApproval: () => APPROVAL_DECISION.ACCEPT,
+    onEvent: (event) => events.push(event),
+  };
+  const first = await harness.run(options);
+
+  assert.equal(first.verification[0].command, 'fixture check');
+  assert.ok(events.some((event) => event.type === HARNESS_EVENT_TYPE.APPROVAL_DECIDED));
+  await assert.rejects(harness.run(options), /scripted failure/);
+  rmSync(directory, { recursive: true, force: true });
+});
+
 test('Codex harness conforms and persists native thread and turn identity', async () => {
   const harness = new CodexHarness({
     command: process.execPath,
@@ -102,6 +144,34 @@ test('Codex harness conforms and persists native thread and turn identity', asyn
 
   assert.equal(result.sessionId, 'thr_fixture');
   assert.equal(result.turnId, 'turn_fixture');
+});
+
+test('Codex harness parses structured output from the completed agent message item', async () => {
+  const harness = new CodexHarness({
+    command: process.execPath,
+    args: ['fixtures/fake-codex-server.js', 'structured-item'],
+    timeoutMs: 2_000,
+  });
+  const result = await harness.run({
+    task: fixtureTask,
+    cwd: process.cwd(),
+    onEvent: () => {},
+  });
+
+  assert.deepEqual(result.output, { verdict: 'pass', findings: [] });
+});
+
+test('Codex harness rejects a failed native turn', async () => {
+  const harness = new CodexHarness({
+    command: process.execPath,
+    args: ['fixtures/fake-codex-server.js', 'failed'],
+    timeoutMs: 2_000,
+  });
+
+  await assert.rejects(
+    harness.run({ task: fixtureTask, cwd: process.cwd(), onEvent: () => {} }),
+    /Codex turn failed/,
+  );
 });
 
 test('Codex harness resumes an existing thread before starting a new turn', async () => {
@@ -188,7 +258,7 @@ test('Codex harness reports timeout as a normalized terminal failure', async () 
 
 test('OpenCode harness conforms to the normalized successful lifecycle', async () => {
   const fetchImpl = async (url) =>
-    url.endsWith('/session')
+    url.includes('/session?directory=')
       ? createJsonResponse({ id: 'opencode_fixture' })
       : createJsonResponse({});
   const harness = new OpenCodeHarness({ fetchImpl });
@@ -214,14 +284,119 @@ test('OpenCode harness resumes a persisted session without creating a new one', 
   });
 
   assert.equal(result.sessionId, 'opencode_existing');
-  assert.equal(requests.length, 1);
-  assert.match(requests[0].url, /session\/opencode_existing\/message$/);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /\/event\?/);
+  assert.match(requests[1].url, /session\/opencode_existing\/message$/);
   assert.equal(events[0].type, HARNESS_EVENT_TYPE.SESSION_RESUMED);
+});
+
+test('OpenCode harness streams and correlates tool and completion events', async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes('/session?directory=')) return createJsonResponse({ id: 'opencode_stream' });
+    if (url.includes('/event?'))
+      return createSseResponse([
+        { type: 'server.connected', properties: {} },
+        {
+          type: 'session.status',
+          properties: { sessionID: 'opencode_stream', status: { type: 'idle' } },
+        },
+        {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              sessionID: 'other-session',
+              type: 'tool',
+              tool: 'ignored',
+              state: { status: 'completed' },
+            },
+          },
+        },
+        {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              sessionID: 'opencode_stream',
+              messageID: 'message-1',
+              type: 'tool',
+              tool: 'bash',
+              state: { status: 'running' },
+            },
+          },
+        },
+        {
+          type: 'message.part.updated',
+          properties: {
+            part: {
+              sessionID: 'opencode_stream',
+              messageID: 'message-1',
+              type: 'tool',
+              tool: 'bash',
+              state: { status: 'completed' },
+            },
+          },
+        },
+        {
+          type: 'session.status',
+          properties: { sessionID: 'opencode_stream', status: { type: 'idle' } },
+        },
+      ]);
+
+    return createJsonResponse({}, 204);
+  };
+  const events = [];
+  const result = await new OpenCodeHarness({ fetchImpl }).run({
+    task: fixtureTask,
+    cwd: process.cwd(),
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(result.turnId, 'message-1');
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === HARNESS_EVENT_TYPE.TOOL_STARTED)
+      .map((event) => event.tool),
+    ['bash'],
+  );
+  assert.equal(
+    events.filter((event) => event.type === HARNESS_EVENT_TYPE.TOOL_COMPLETED).length,
+    1,
+  );
+  assert.equal(events.at(-1).type, HARNESS_EVENT_TYPE.HARNESS_COMPLETED);
+});
+
+test('OpenCode harness preserves provider failure diagnostics from the event stream', async () => {
+  const fetchImpl = async (url) => {
+    if (url.includes('/session?directory=')) return createJsonResponse({ id: 'opencode_failure' });
+    if (url.includes('/event?'))
+      return createSseResponse([
+        {
+          type: 'session.status',
+          properties: {
+            sessionID: 'opencode_failure',
+            status: { type: 'retry', message: 'Cannot connect to provider API' },
+          },
+        },
+        { type: 'session.error', properties: { sessionID: 'opencode_failure' } },
+      ]);
+
+    return createJsonResponse({}, 204);
+  };
+
+  await assert.rejects(
+    new OpenCodeHarness({ fetchImpl }).run({
+      task: fixtureTask,
+      cwd: process.cwd(),
+      onEvent: () => {},
+    }),
+    (error) =>
+      error.code === 'EXTERNAL_HARNESS_UNAVAILABLE' &&
+      error.message === 'Cannot connect to provider API',
+  );
 });
 
 test('OpenCode harness exposes AbortSignal interruption', async () => {
   const fetchImpl = (url, options) => {
-    if (url.endsWith('/session'))
+    if (url.includes('/session?directory='))
       return Promise.resolve(createJsonResponse({ id: 'opencode_interrupt_fixture' }));
 
     return new Promise((_resolve, reject) => {

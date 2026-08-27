@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/task-contract.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "goal", "acceptance", "risk", "profile", "base_ref"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$" },
+    "title": { "type": "string", "minLength": 1 },
+    "goal": { "type": "string", "minLength": 1 },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "criterion"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "criterion": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "risk": { "enum": ["low", "medium", "high"] },
+    "profile": { "enum": ["quick", "standard", "deep"] },
+    "base_ref": { "type": "string", "minLength": 1 }
+  }
+}

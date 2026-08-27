@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { TextDecoder } from 'node:util';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -30,6 +31,7 @@ export const APPROVAL_DECISION = Object.freeze({
 
 export const TURN_STATUS = Object.freeze({
   COMPLETED: 'completed',
+  FAILED: 'failed',
   INTERRUPTED: 'interrupted',
   IN_PROGRESS: 'inProgress',
 });
@@ -44,6 +46,10 @@ function isInterruptedTurn(status, interruptRequested) {
   return status === TURN_STATUS.INTERRUPTED || interruptRequested;
 }
 
+function isFailedTurn(status) {
+  return status === TURN_STATUS.FAILED;
+}
+
 function getTurnId(params, currentTurnId) {
   return params.turnId || currentTurnId;
 }
@@ -56,6 +62,20 @@ function isApprovalNotification(method) {
   const normalizedMethod = method.toLowerCase();
 
   return normalizedMethod.includes('approval') || method.includes('permission');
+}
+
+function parseAgentMessageOutput(message) {
+  if (!message) return null;
+  const trimmedMessage = message.trim();
+  const jsonText = trimmedMessage.startsWith('```')
+    ? trimmedMessage.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    : trimmedMessage;
+
+  try {
+    return JSON.parse(jsonText);
+  } catch {
+    return message;
+  }
 }
 
 export class HarnessInterruptedError extends Error {
@@ -93,21 +113,79 @@ function waitForDelay(delayMs, signal, harnessName) {
 }
 
 export class FakeHarness {
-  constructor({ delayMs = 0 } = {}) {
+  constructor({
+    delayMs = 0,
+    events = [],
+    failures = [],
+    approval = null,
+    verification = null,
+    skippedChecks = [],
+  } = {}) {
     this.delayMs = delayMs;
+    this.events = events;
+    this.failures = failures;
+    this.approval = approval;
+    this.verification = verification;
+    this.skippedChecks = skippedChecks;
+    this.runCount = 0;
   }
 
-  async run({ task, stageId, cwd, onEvent, signal }) {
-    const sessionId = `fake-${randomUUID()}`;
+  async run({
+    task,
+    stageId,
+    cwd,
+    onEvent,
+    signal,
+    resumeSessionId = null,
+    onApproval = () => APPROVAL_DECISION.DECLINE,
+  }) {
+    this.runCount += 1;
+    const sessionId = resumeSessionId ?? `fake-${task.id}-${stageId}-${this.runCount}`;
 
     if (signal?.aborted) throw new HarnessInterruptedError('Fake harness');
-    onEvent({ type: HARNESS_EVENT_TYPE.SESSION_STARTED, sessionId, stageId });
+    onEvent({
+      type: resumeSessionId
+        ? HARNESS_EVENT_TYPE.SESSION_RESUMED
+        : HARNESS_EVENT_TYPE.SESSION_STARTED,
+      sessionId,
+      stageId,
+    });
     onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId });
     try {
       await waitForDelay(this.delayMs, signal, 'Fake harness');
     } catch (error) {
       onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_INTERRUPTED, sessionId });
       throw error;
+    }
+    if (this.approval) {
+      onEvent({
+        type: HARNESS_EVENT_TYPE.APPROVAL_REQUIRED,
+        sessionId,
+        approvalId: this.approval.id,
+        method: this.approval.method,
+        params: this.approval.params ?? {},
+      });
+      const decision = await onApproval(this.approval);
+
+      onEvent({
+        type: HARNESS_EVENT_TYPE.APPROVAL_DECIDED,
+        sessionId,
+        approvalId: this.approval.id,
+        decision,
+      });
+      if (![APPROVAL_DECISION.ACCEPT, APPROVAL_DECISION.ACCEPT_FOR_SESSION].includes(decision))
+        throw new Error('Fake harness approval was declined');
+    }
+    for (const event of this.events) onEvent({ ...event, sessionId });
+    const scriptedFailure = this.failures[this.runCount - 1];
+
+    if (scriptedFailure) {
+      onEvent({
+        type: HARNESS_EVENT_TYPE.HARNESS_FAILED,
+        sessionId,
+        error: scriptedFailure.message,
+      });
+      throw scriptedFailure;
     }
     const evidenceDir = join(cwd, '.clew-runs');
 
@@ -127,9 +205,15 @@ export class FakeHarness {
     });
     onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId });
 
+    const verification = this.verification ?? [
+      { type: 'targeted', result: 'passed', command: 'clew fixture verification' },
+    ];
+
     return {
       sessionId,
-      verification: [{ type: 'targeted', result: 'passed', command: 'clew fixture verification' }],
+      verification,
+      rationale: 'Deterministic fake harness completed its scripted verification',
+      skippedChecks: this.skippedChecks,
     };
   }
 }
@@ -186,6 +270,8 @@ export class CodexHarness {
     let threadId;
     let turnId;
     let interruptRequested = false;
+    const verification = [];
+    let finalAgentMessage = null;
     let requestInterrupt = () => {};
     const getSessionId = () => threadId || correlationId;
     const settleRequest = (resolve, reject, error, result, terminalEvent) => {
@@ -280,6 +366,18 @@ export class CodexHarness {
               null,
               HARNESS_EVENT_TYPE.HARNESS_INTERRUPTED,
             );
+          if (isFailedTurn(status)) {
+            const failureMessage =
+              params.turn?.error?.message ?? params.error?.message ?? 'Codex turn failed';
+
+            return settleRequest(
+              resolve,
+              reject,
+              new Error(failureMessage),
+              null,
+              HARNESS_EVENT_TYPE.HARNESS_FAILED,
+            );
+          }
 
           return settleRequest(
             resolve,
@@ -288,8 +386,12 @@ export class CodexHarness {
             {
               sessionId: getSessionId(),
               turnId,
-              verification: [],
-              output: params.output ?? params.turn?.output ?? params,
+              verification,
+              output:
+                params.output ??
+                params.turn?.output ??
+                parseAgentMessageOutput(finalAgentMessage) ??
+                params,
             },
             HARNESS_EVENT_TYPE.HARNESS_COMPLETED,
           );
@@ -340,7 +442,33 @@ export class CodexHarness {
             sessionId: getSessionId(),
             raw: message,
           });
-        else if (method.includes('item/completed') || method.includes('tool/completed'))
+        else if (method === 'item/completed') {
+          const item = params.item ?? {};
+
+          if (item.type === 'agentMessage') finalAgentMessage = item.text;
+          else if (item.type === 'commandExecution') {
+            const evidence = {
+              type: 'command',
+              command: item.command,
+              result: item.exitCode === 0 ? 'passed' : 'failed',
+              exitCode: item.exitCode,
+              output: item.aggregatedOutput,
+            };
+
+            verification.push(evidence);
+            onEvent({
+              type: HARNESS_EVENT_TYPE.VERIFICATION_DETECTED,
+              sessionId: getSessionId(),
+              turnId,
+              ...evidence,
+            });
+          }
+          onEvent({
+            type: HARNESS_EVENT_TYPE.TOOL_COMPLETED,
+            sessionId: getSessionId(),
+            raw: message,
+          });
+        } else if (method.includes('tool/completed'))
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_COMPLETED,
             sessionId: getSessionId(),
@@ -398,7 +526,7 @@ export class CodexHarness {
         input: [
           {
             type: 'text',
-            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((x) => `- ${x.id}: ${x.criterion}`).join('\n')}`,
+            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`,
           },
         ],
       });
@@ -411,7 +539,7 @@ export class CodexHarness {
         const threadMethod = resumeSessionId ? 'thread/resume' : 'thread/start';
         const threadParams = resumeSessionId
           ? { threadId: resumeSessionId }
-          : { cwd, model, sandbox: readOnly ? 'readOnly' : undefined };
+          : { cwd, model, sandbox: readOnly ? 'read-only' : undefined };
         const threadRequestId = sendRpcRequest(threadMethod, threadParams);
 
         pendingRequests.set(threadRequestId, (threadResult) => {
@@ -465,20 +593,32 @@ export class OpenCodeHarness {
     this.timeoutMs = timeoutMs;
     this.fetch = fetchImpl;
   }
-  async run({ task, cwd, onEvent, signal, resumeSessionId = null }) {
+  async run({
+    task,
+    cwd,
+    onEvent,
+    signal,
+    resumeSessionId = null,
+    onApproval = () => APPROVAL_DECISION.DECLINE,
+  }) {
     if (signal?.aborted) throw new HarnessInterruptedError('OpenCode');
     const sessionResponse = resumeSessionId
       ? null
-      : await this.requestJson('/session', {
+      : await this.requestJson(`/session?directory=${encodeURIComponent(cwd)}`, {
           method: 'POST',
-          body: { title: task.title, directory: cwd },
+          body: { title: task.title },
         });
     const sessionId = resumeSessionId || sessionResponse.id || sessionResponse.data?.id;
 
     if (!sessionId) throw new Error('OpenCode did not return a session id');
     const controller = new AbortController();
     let timedOut = false;
-    const interrupt = () => controller.abort();
+    const interrupt = () => {
+      void this.fetch(`${this.baseUrl}/session/${encodeURIComponent(sessionId)}/abort`, {
+        method: 'POST',
+      }).catch(() => {});
+      controller.abort();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
@@ -494,13 +634,31 @@ export class OpenCodeHarness {
     onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId });
     if (signal?.aborted) controller.abort();
     try {
+      const eventResponse = await this.fetch(
+        `${this.baseUrl}/event?directory=${encodeURIComponent(cwd)}`,
+        {
+          headers: { accept: 'text/event-stream' },
+          signal: controller.signal,
+        },
+      );
+
+      if (eventResponse.ok && eventResponse.body?.getReader)
+        return await this.runStreamingTurn({
+          task,
+          cwd,
+          sessionId,
+          eventResponse,
+          controller,
+          onEvent,
+          onApproval,
+        });
       const response = await this.fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            parts: [{ type: 'text', text: `${task.title}\n\n${task.goal}` }],
+            parts: [{ type: 'text', text: this.buildPrompt(task) }],
           }),
           signal: controller.signal,
         },
@@ -512,7 +670,12 @@ export class OpenCodeHarness {
 
       onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId });
 
-      return { sessionId, turnId, verification: [], output: responseBody };
+      return {
+        sessionId,
+        turnId,
+        verification: this.extractVerification(responseBody),
+        output: responseBody,
+      };
     } catch (error) {
       if (timedOut) {
         const timeoutError = new HarnessTimeoutError('OpenCode');
@@ -536,6 +699,186 @@ export class OpenCodeHarness {
       clearTimeout(timer);
       signal?.removeEventListener('abort', interrupt);
     }
+  }
+  async runStreamingTurn({ task, sessionId, eventResponse, controller, onEvent, onApproval }) {
+    const promptResponse = await this.fetch(
+      `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          parts: [{ type: 'text', text: this.buildPrompt(task) }],
+        }),
+        signal: controller.signal,
+      },
+    );
+
+    if (!promptResponse.ok)
+      throw new Error(`OpenCode prompt failed: HTTP ${promptResponse.status}`);
+    const reader = eventResponse.body.getReader();
+    const decoder = new TextDecoder();
+    const output = [];
+    const verification = [];
+    let buffer = '';
+    let turnId = null;
+    let lastStatusMessage = null;
+    let turnObserved = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) throw new Error('OpenCode event stream ended before session completion');
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\r?\n\r?\n/);
+
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) {
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).trim())
+          .join('\n');
+
+        if (!data) continue;
+        const event = JSON.parse(data);
+
+        if (!this.isSessionEvent(event, sessionId)) continue;
+        const properties = event.properties ?? {};
+
+        if (event.type.startsWith('message.')) {
+          turnObserved = true;
+          turnId ??=
+            properties.messageID ?? properties.info?.id ?? properties.part?.messageID ?? null;
+        }
+        if (event.type === 'message.part.updated') {
+          const part = properties.part ?? {};
+
+          turnObserved = true;
+
+          if (part.type === 'tool') {
+            const terminalToolStates = ['completed', 'error'];
+            const eventType = terminalToolStates.includes(part.state?.status)
+              ? HARNESS_EVENT_TYPE.TOOL_COMPLETED
+              : HARNESS_EVENT_TYPE.TOOL_STARTED;
+
+            onEvent({ type: eventType, sessionId, turnId, tool: part.tool, raw: event });
+            if (eventType === HARNESS_EVENT_TYPE.TOOL_COMPLETED) {
+              const evidence = {
+                type: 'command',
+                command: part.state?.input?.command ?? part.state?.title ?? part.tool,
+                result: part.state?.status === 'completed' ? 'passed' : 'failed',
+                output: part.state?.output,
+              };
+
+              verification.push(evidence);
+              onEvent({
+                type: HARNESS_EVENT_TYPE.VERIFICATION_DETECTED,
+                sessionId,
+                turnId,
+                ...evidence,
+              });
+            }
+          } else if (part.type === 'text' && part.text) output.push(part.text);
+        } else if (event.type.includes('permission')) {
+          const approvalId = properties.id ?? properties.permissionID;
+
+          onEvent({
+            type: HARNESS_EVENT_TYPE.APPROVAL_REQUIRED,
+            sessionId,
+            turnId,
+            approvalId,
+            raw: event,
+          });
+          if (approvalId) {
+            const decision = await onApproval({
+              id: approvalId,
+              method: event.type,
+              params: properties,
+            });
+            const response =
+              decision === APPROVAL_DECISION.ACCEPT
+                ? 'once'
+                : decision === APPROVAL_DECISION.ACCEPT_FOR_SESSION
+                  ? 'always'
+                  : 'reject';
+
+            await this.requestJson(
+              `/session/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(approvalId)}`,
+              { method: 'POST', body: { response } },
+            );
+            onEvent({
+              type: HARNESS_EVENT_TYPE.APPROVAL_DECIDED,
+              sessionId,
+              turnId,
+              approvalId,
+              decision,
+            });
+          }
+        } else if (event.type === 'session.status') {
+          lastStatusMessage = properties.status?.message ?? lastStatusMessage;
+          if (['busy', 'retry'].includes(properties.status?.type)) turnObserved = true;
+          if (properties.status?.type === 'idle' && turnObserved) {
+            onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId, turnId });
+            controller.abort();
+
+            return { sessionId, turnId, verification, output: output.join('') };
+          }
+          onEvent({
+            type: HARNESS_EVENT_TYPE.HARNESS_EVENT,
+            sessionId,
+            turnId,
+            method: event.type,
+            params: properties,
+          });
+        } else if (event.type === 'session.error') {
+          const message =
+            properties.error?.data?.message ??
+            properties.error?.message ??
+            properties.message ??
+            lastStatusMessage ??
+            'OpenCode session failed';
+          const error = new Error(message);
+
+          if (/connect|provider|api/i.test(message)) error.code = 'EXTERNAL_HARNESS_UNAVAILABLE';
+          throw error;
+        } else if (event.type === 'session.idle') {
+          if (!turnObserved) continue;
+          onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId, turnId });
+          controller.abort();
+
+          return { sessionId, turnId, verification, output: output.join('') };
+        } else if (event.type !== 'server.connected') {
+          onEvent({
+            type: HARNESS_EVENT_TYPE.HARNESS_EVENT,
+            sessionId,
+            turnId,
+            method: event.type,
+            params: properties,
+          });
+        }
+      }
+    }
+  }
+  isSessionEvent(event, sessionId) {
+    if (event.type === 'server.connected') return false;
+    const properties = event.properties ?? {};
+    const eventSessionId =
+      properties.sessionID ?? properties.info?.sessionID ?? properties.part?.sessionID;
+
+    return eventSessionId === sessionId;
+  }
+  extractVerification(responseBody) {
+    return (responseBody.parts ?? responseBody.data?.parts ?? [])
+      .filter((part) => part.type === 'tool' && ['completed', 'error'].includes(part.state?.status))
+      .map((part) => ({
+        type: 'command',
+        command: part.state?.input?.command ?? part.state?.title ?? part.tool,
+        result: part.state.status === 'completed' ? 'passed' : 'failed',
+        output: part.state?.output,
+      }));
+  }
+  buildPrompt(task) {
+    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`;
   }
   async requestJson(path, { method = 'GET', body } = {}) {
     const response = await this.fetch(`${this.baseUrl}${path}`, {

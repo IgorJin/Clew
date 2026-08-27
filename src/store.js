@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { TASK_STATE, STAGE_STATUS, PLAN_STATUS } from './domain.js';
+import { TASK_STATE, STAGE_STATUS, PLAN_STATUS, validateNormalizedEvent } from './domain.js';
 import { applyMigrations } from './migrations.js';
 import { redactSecrets } from './security.js';
 
@@ -9,6 +9,7 @@ export class Store {
   constructor(file) {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
+    this.transactionDepth = 0;
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     applyMigrations(this.db);
   }
@@ -16,7 +17,9 @@ export class Store {
     this.db.close();
   }
   runInTransaction(operation) {
+    if (this.transactionDepth > 0) return operation();
     this.db.exec('BEGIN IMMEDIATE');
+    this.transactionDepth += 1;
     try {
       const result = operation();
 
@@ -26,15 +29,19 @@ export class Store {
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
+    } finally {
+      this.transactionDepth -= 1;
     }
   }
   createTask(contract) {
-    const now = new Date().toISOString();
+    return this.runInTransaction(() => {
+      const now = new Date().toISOString();
 
-    this.db
-      .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)')
-      .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now);
-    this.appendEvent(contract.id, 'TASK_CREATED', { state: TASK_STATE.DRAFT, contract });
+      this.db
+        .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)')
+        .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now);
+      this.appendEvent(contract.id, 'TASK_CREATED', { state: TASK_STATE.DRAFT, contract });
+    });
   }
   getTask(id) {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
@@ -47,22 +54,26 @@ export class Store {
       .all();
   }
   setTaskState(id, state) {
-    const now = new Date().toISOString();
+    return this.runInTransaction(() => {
+      const now = new Date().toISOString();
 
-    this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
-    this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
+      this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
+      this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
+    });
   }
   requestInterrupt(taskId, actor = 'local-user') {
-    const requestedAt = new Date().toISOString();
+    return this.runInTransaction(() => {
+      const requestedAt = new Date().toISOString();
 
-    this.db
-      .prepare(
-        'INSERT INTO interrupt_requests (task_id,actor,requested_at) VALUES (?,?,?) ON CONFLICT(task_id) DO UPDATE SET actor=excluded.actor,requested_at=excluded.requested_at',
-      )
-      .run(taskId, actor, requestedAt);
-    this.appendEvent(taskId, 'INTERRUPT_REQUESTED', { actor, requestedAt });
+      this.db
+        .prepare(
+          'INSERT INTO interrupt_requests (task_id,actor,requested_at) VALUES (?,?,?) ON CONFLICT(task_id) DO UPDATE SET actor=excluded.actor,requested_at=excluded.requested_at',
+        )
+        .run(taskId, actor, requestedAt);
+      this.appendEvent(taskId, 'INTERRUPT_REQUESTED', { actor, requestedAt });
 
-    return { taskId, actor, requestedAt };
+      return { taskId, actor, requestedAt };
+    });
   }
   isInterruptRequested(taskId) {
     return Boolean(
@@ -206,16 +217,20 @@ export class Store {
     return this.db
       .prepare('SELECT * FROM stages WHERE task_id=? ORDER BY rowid')
       .all(taskId)
-      .map((x) => ({ ...x, depends_on: JSON.parse(x.depends_on) }));
+      .map((stageRow) => ({ ...stageRow, depends_on: JSON.parse(stageRow.depends_on) }));
   }
   setStage(taskId, id, status) {
-    this.db.prepare('UPDATE stages SET status=? WHERE task_id=? AND id=?').run(status, taskId, id);
-    this.appendEvent(taskId, 'STAGE_STATE_CHANGED', { stageId: id, status });
+    return this.runInTransaction(() => {
+      this.db
+        .prepare('UPDATE stages SET status=? WHERE task_id=? AND id=?')
+        .run(status, taskId, id);
+      this.appendEvent(taskId, 'STAGE_STATE_CHANGED', { stageId: id, status });
+    });
   }
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -228,6 +243,8 @@ export class Store {
         run.turnId ?? null,
         run.workspace ?? null,
         run.startedAt ?? null,
+        run.profile ?? null,
+        run.policy ? JSON.stringify(run.policy) : null,
       );
   }
   setRunIdentity(id, sessionId, turnId = null) {
@@ -239,19 +256,71 @@ export class Store {
       .run(status, new Date().toISOString(), commitSha, id);
   }
   listRuns(taskId) {
-    return this.db.prepare('SELECT * FROM runs WHERE task_id=? ORDER BY rowid').all(taskId);
+    return this.db
+      .prepare('SELECT * FROM runs WHERE task_id=? ORDER BY rowid')
+      .all(taskId)
+      .map(parseRun);
+  }
+  listAllRuns() {
+    return this.db.prepare('SELECT * FROM runs ORDER BY rowid').all().map(parseRun);
   }
   appendEvent(taskId, type, payload) {
     const safePayload = redactSecrets(payload);
+    const event = validateNormalizedEvent({
+      task_id: taskId,
+      type,
+      payload: safePayload,
+      at: new Date().toISOString(),
+      version: 1,
+    });
 
     this.db
-      .prepare('INSERT INTO events (task_id,type,payload,at) VALUES (?,?,?,?)')
-      .run(taskId, type, JSON.stringify(safePayload), new Date().toISOString());
+      .prepare('INSERT INTO events (task_id,type,payload,at,version) VALUES (?,?,?,?,1)')
+      .run(event.task_id, event.type, JSON.stringify(event.payload), event.at);
   }
   listEvents(taskId) {
     return this.db
-      .prepare('SELECT seq,task_id,type,payload,at FROM events WHERE task_id=? ORDER BY seq')
+      .prepare(
+        'SELECT seq,task_id,type,payload,at,version FROM events WHERE task_id=? ORDER BY seq',
+      )
       .all(taskId)
-      .map((x) => ({ ...x, payload: JSON.parse(x.payload) }));
+      .map((eventRow) => ({ ...eventRow, payload: JSON.parse(eventRow.payload) }));
   }
+  rebuildTaskProjection(taskId) {
+    const task = this.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const events = this.listEvents(taskId);
+    const taskState = events.filter((event) => event.type === 'TASK_STATE_CHANGED').at(-1)
+      ?.payload.state;
+    const stageStates = new Map();
+
+    for (const event of events)
+      if (event.type === 'STAGE_STATE_CHANGED')
+        stageStates.set(event.payload.stageId, event.payload.status);
+
+    return this.runInTransaction(() => {
+      if (taskState)
+        this.db
+          .prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?')
+          .run(taskState, new Date().toISOString(), taskId);
+      for (const [stageId, status] of stageStates)
+        this.db
+          .prepare('UPDATE stages SET status=? WHERE task_id=? AND id=?')
+          .run(status, taskId, stageId);
+      this.appendEvent(taskId, 'PROJECTION_REBUILT', {
+        taskState: taskState ?? task.state,
+        stageStates: Object.fromEntries(stageStates),
+      });
+
+      return {
+        taskState: taskState ?? task.state,
+        stageStates: Object.fromEntries(stageStates),
+      };
+    });
+  }
+}
+
+function parseRun(run) {
+  return { ...run, policy: run.policy ? JSON.parse(run.policy) : null };
 }

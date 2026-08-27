@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -39,6 +39,34 @@ const MIGRATIONS = Object.freeze([
         CREATE TABLE IF NOT EXISTS interrupt_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, actor TEXT NOT NULL, requested_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS harness_approvals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT NOT NULL, method TEXT NOT NULL, params TEXT NOT NULL, decision TEXT, actor TEXT, requested_at TEXT NOT NULL, decided_at TEXT);
       `);
+    },
+  },
+  {
+    version: 5,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(events)').all();
+
+      if (!columns.some((column) => column.name === 'version'))
+        db.exec('ALTER TABLE events ADD COLUMN version INTEGER NOT NULL DEFAULT 1');
+    },
+  },
+  {
+    version: 6,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(runs)').all();
+
+      if (!columns.some((column) => column.name === 'profile'))
+        db.exec('ALTER TABLE runs ADD COLUMN profile TEXT');
+      if (!columns.some((column) => column.name === 'policy'))
+        db.exec('ALTER TABLE runs ADD COLUMN policy TEXT');
+    },
+  },
+  {
+    version: 7,
+    apply(db) {
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS runs_task_stage_attempt ON runs(task_id,stage_id,attempt)',
+      );
     },
   },
 ]);

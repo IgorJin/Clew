@@ -31,15 +31,39 @@ test('persists a task, stage, run, and event history', () => {
     attempt: 1,
     status: 'RUNNING',
     harness: 'fake',
+    profile: 'quick',
+    policy: { maxAttempts: 3 },
   });
   store.setRunIdentity('run-1', 'thread-1', 'turn-1');
+  assert.throws(
+    () =>
+      store.createRun({
+        id: 'run-duplicate-attempt',
+        taskId: 'T-1',
+        stageId: 'worker',
+        attempt: 1,
+        status: 'RUNNING',
+        harness: 'fake',
+      }),
+    /UNIQUE constraint failed/,
+  );
   assert.equal(store.listStages('T-1')[0].id, 'worker');
   assert.equal(savedPlan.version, 1);
   assert.equal(store.getLatestPlan('T-1').plan.stages[0].id, 'worker');
   assert.equal(store.listRuns('T-1')[0].id, 'run-1');
   assert.equal(store.listRuns('T-1')[0].session_id, 'thread-1');
   assert.equal(store.listRuns('T-1')[0].turn_id, 'turn-1');
+  assert.equal(store.listRuns('T-1')[0].profile, 'quick');
+  assert.equal(store.listRuns('T-1')[0].policy.maxAttempts, 3);
   assert.ok(store.listEvents('T-1').length >= 2);
+  store.setStage('T-1', 'worker', 'COMPLETED');
+  store.db.prepare("UPDATE tasks SET state='FAILED' WHERE id='T-1'").run();
+  store.db.prepare("UPDATE stages SET status='FAILED' WHERE task_id='T-1'").run();
+  const rebuilt = store.rebuildTaskProjection('T-1');
+
+  assert.equal(rebuilt.taskState, 'QUEUED');
+  assert.equal(store.getTask('T-1').state, 'QUEUED');
+  assert.equal(store.listStages('T-1')[0].status, 'COMPLETED');
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/verification-report.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "stageId", "runId", "attempt", "workspace", "revision", "evidence"],
+  "properties": {
+    "taskId": { "type": "string" },
+    "stageId": { "type": "string" },
+    "runId": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "workspace": { "type": "string" },
+    "revision": { "type": "string" },
+    "evidence": { "type": "array" },
+    "rationale": { "type": "string" },
+    "skippedChecks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["check", "reason"],
+        "properties": {
+          "check": { "type": "string" },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

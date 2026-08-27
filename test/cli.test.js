@@ -117,6 +117,7 @@ test('doctor reports optional native adapter readiness without failing fake setu
     const result = JSON.parse(
       runCommand(process.execPath, [cliFile, 'doctor'], repo, {
         CLEW_CODEX_BIN: 'clew-command-that-does-not-exist',
+        CLEW_OPENCODE_BIN: 'clew-command-that-does-not-exist',
         CLEW_OPENCODE_URL: 'not-a-url',
       }),
     );
@@ -124,10 +125,23 @@ test('doctor reports optional native adapter readiness without failing fake setu
     assert.equal(result.ok, true);
     assert.deepEqual(
       result.checks.map((check) => check.name),
-      ['node', 'git', 'codex', 'opencode'],
+      ['node', 'git', 'codex-cli', 'codex-auth', 'opencode-cli', 'opencode-endpoint'],
     );
-    assert.equal(result.checks.find((check) => check.name === 'codex').ok, false);
-    assert.equal(result.checks.find((check) => check.name === 'opencode').detail, 'invalid URL');
+    assert.equal(result.checks.find((check) => check.name === 'codex-cli').ok, false);
+    assert.equal(
+      result.checks.find((check) => check.name === 'opencode-endpoint').detail,
+      'invalid URL',
+    );
+
+    const required = JSON.parse(
+      runCommand(process.execPath, [cliFile, 'doctor', '--harness', 'codex'], repo, {
+        CLEW_CODEX_BIN: 'clew-command-that-does-not-exist',
+        CLEW_OPENCODE_BIN: 'clew-command-that-does-not-exist',
+        CLEW_OPENCODE_URL: 'not-a-url',
+      }),
+    );
+
+    assert.equal(required.ok, false);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

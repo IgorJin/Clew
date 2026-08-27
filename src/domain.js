@@ -37,6 +37,7 @@ export const FAILURE_CLASS = Object.freeze({
   TIMEOUT: 'timeout',
   EXTERNAL_UNAVAILABLE: 'external_unavailable',
   WORKSPACE: 'workspace',
+  VERIFICATION: 'verification',
   REVIEW: 'review',
   UNKNOWN: 'unknown',
 });
@@ -45,6 +46,23 @@ export const PLAN_STATUS = Object.freeze({
   PENDING_APPROVAL: 'PENDING_APPROVAL',
   APPROVED: 'APPROVED',
   REJECTED: 'REJECTED',
+});
+
+export const REVIEW_VERDICT = Object.freeze({
+  PASS: 'pass',
+  REQUEST_CHANGES: 'request_changes',
+  NEEDS_HUMAN: 'needs_human',
+});
+
+export const FINDING_SEVERITY = Object.freeze({
+  BLOCKING: 'blocking',
+  WARNING: 'warning',
+});
+
+export const RISK_LEVEL = Object.freeze({
+  LOW: 'low',
+  MEDIUM: 'medium',
+  HIGH: 'high',
 });
 
 export const PROFILE_NAME = Object.freeze({
@@ -72,6 +90,7 @@ export function classifyFailure(error) {
   if (error.code === 'EXTERNAL_HARNESS_UNAVAILABLE') return FAILURE_CLASS.EXTERNAL_UNAVAILABLE;
   if (error.name === 'IntegrationConflictError' || error.code === 'WORKSPACE_ERROR')
     return FAILURE_CLASS.WORKSPACE;
+  if (error.code === 'VERIFICATION_FAILED') return FAILURE_CLASS.VERIFICATION;
   if (error.code === 'REVIEW_FAILED' || error.name === 'ReviewError') return FAILURE_CLASS.REVIEW;
 
   return FAILURE_CLASS.UNKNOWN;
@@ -87,6 +106,7 @@ const transitions = {
     TASK_STATE.CANCELLED,
   ],
   [TASK_STATE.RECOVERING]: [
+    TASK_STATE.QUEUED,
     TASK_STATE.EXECUTING,
     TASK_STATE.FAILED,
     TASK_STATE.BLOCKED,
@@ -150,30 +170,40 @@ export function validateTaskContract(contract) {
   if (!acceptance.length) throw new Error('task.acceptance must contain at least one criterion');
   const ids = new Set();
 
-  for (let i = 0; i < acceptance.length; i++) {
+  for (let acceptanceIndex = 0; acceptanceIndex < acceptance.length; acceptanceIndex++) {
     const item =
-      typeof acceptance[i] === 'string'
-        ? { id: `AC-${i + 1}`, criterion: acceptance[i] }
-        : acceptance[i];
+      typeof acceptance[acceptanceIndex] === 'string'
+        ? { id: `AC-${acceptanceIndex + 1}`, criterion: acceptance[acceptanceIndex] }
+        : acceptance[acceptanceIndex];
 
-    if (!item?.criterion) throw new Error(`task.acceptance[${i}].criterion is required`);
+    if (!item?.criterion)
+      throw new Error(`task.acceptance[${acceptanceIndex}].criterion is required`);
     if (typeof item.id !== 'string' || !item.id.trim())
-      throw new Error(`task.acceptance[${i}].id is required`);
+      throw new Error(`task.acceptance[${acceptanceIndex}].id is required`);
     if (ids.has(item.id)) throw new Error(`duplicate acceptance id ${item.id}`);
     ids.add(item.id);
   }
   if (!Object.values(PROFILE_NAME).includes(contract.profile))
     throw new Error('task.profile must be quick, standard, or deep');
+  const risk = contract.risk ?? RISK_LEVEL.MEDIUM;
+
+  if (!Object.values(RISK_LEVEL).includes(risk))
+    throw new Error('task.risk must be low, medium, or high');
   const baseRef = contract.base_ref ?? 'HEAD';
 
   if (!isSafeGitRef(baseRef)) throw new Error('task.base_ref must be a safe Git ref');
 
   return {
-    ...contract,
-    risk: contract.risk ?? 'medium',
+    id: contract.id,
+    title: contract.title,
+    goal: contract.goal,
+    profile: contract.profile,
+    risk,
     base_ref: baseRef,
-    acceptance: acceptance.map((x, i) =>
-      typeof x === 'string' ? { id: `AC-${i + 1}`, criterion: x } : x,
+    acceptance: acceptance.map((acceptanceItem, acceptanceIndex) =>
+      typeof acceptanceItem === 'string'
+        ? { id: `AC-${acceptanceIndex + 1}`, criterion: acceptanceItem }
+        : acceptanceItem,
     ),
   };
 }
@@ -186,7 +216,7 @@ export function resolveProfile(profileName) {
       ...common,
       name: profileName,
       mode: EXECUTION_MODE.DIRECT,
-      harness: HARNESS_NAME.FAKE,
+      harness: HARNESS_NAME.CODEX,
       review: false,
       architecture: false,
       maxWorkers: 1,
@@ -196,8 +226,9 @@ export function resolveProfile(profileName) {
       ...common,
       name: profileName,
       mode: EXECUTION_MODE.ISOLATED,
-      harness: HARNESS_NAME.FAKE,
+      harness: HARNESS_NAME.CODEX,
       review: true,
+      reviewHarness: HARNESS_NAME.CODEX,
       architecture: false,
       maxWorkers: 1,
     };
@@ -206,11 +237,14 @@ export function resolveProfile(profileName) {
     ...common,
     name: profileName,
     mode: EXECUTION_MODE.PARALLEL,
-    harness: HARNESS_NAME.FAKE,
+    harness: HARNESS_NAME.CODEX,
     review: true,
+    reviewHarness: HARNESS_NAME.CODEX,
     architecture: true,
+    architectHarness: HARNESS_NAME.CODEX,
     integration: true,
     maxWorkers: 3,
+    verification: 'broad',
   };
 }
 
@@ -232,15 +266,21 @@ export function validateExecutionPlan(plan) {
     ids.add(stage.id);
     if (stage.dependsOn !== undefined && !Array.isArray(stage.dependsOn))
       throw new Error(`plan stage ${stage.id}.dependsOn must be an array`);
+    if (
+      stage.harness !== undefined &&
+      stage.harness !== null &&
+      !Object.values(HARNESS_NAME).includes(stage.harness)
+    )
+      throw new Error(`plan stage ${stage.id}.harness is invalid`);
   }
   const visiting = new Set();
   const visited = new Set();
-  const byId = new Map(plan.stages.map((stage) => [stage.id, stage]));
+  const stagesById = new Map(plan.stages.map((stage) => [stage.id, stage]));
 
   function visitPlanStage(stageId) {
     if (visiting.has(stageId)) throw new Error('plan contains a cycle');
     if (visited.has(stageId)) return;
-    const stage = byId.get(stageId);
+    const stage = stagesById.get(stageId);
 
     if (!stage) throw new Error(`plan dependency not found: ${stageId}`);
     visiting.add(stageId);
@@ -252,8 +292,67 @@ export function validateExecutionPlan(plan) {
 
   return {
     ...plan,
-    stages: plan.stages.map((stage) => ({ ...stage, dependsOn: stage.dependsOn ?? [] })),
+    stages: plan.stages.map((stage) => {
+      const normalizedStage = { ...stage, dependsOn: stage.dependsOn ?? [] };
+
+      if (normalizedStage.harness === null) delete normalizedStage.harness;
+
+      return normalizedStage;
+    }),
   };
+}
+
+export function validateReviewResult(review) {
+  if (!review || typeof review !== 'object') throw new Error('review result must be an object');
+  if (!Object.values(REVIEW_VERDICT).includes(review.verdict))
+    throw new Error('review verdict is invalid');
+  if (!Array.isArray(review.findings)) throw new Error('review findings must be an array');
+
+  for (const [index, finding] of review.findings.entries()) {
+    if (!Object.values(FINDING_SEVERITY).includes(finding?.severity))
+      throw new Error(`review finding ${index}.severity is invalid`);
+    if (typeof finding.criterion !== 'string' || !finding.criterion.trim())
+      throw new Error(`review finding ${index}.criterion is required`);
+    if (typeof finding.reason !== 'string' || !finding.reason.trim())
+      throw new Error(`review finding ${index}.reason is required`);
+  }
+
+  return review;
+}
+
+export function validateVerificationReport(report) {
+  if (!report || typeof report !== 'object')
+    throw new Error('verification report must be an object');
+  for (const field of ['taskId', 'stageId', 'runId', 'workspace', 'revision'])
+    if (typeof report[field] !== 'string' || !report[field].trim())
+      throw new Error(`verification.${field} is required`);
+  if (!Number.isInteger(report.attempt) || report.attempt < 1)
+    throw new Error('verification.attempt must be a positive integer');
+  if (!Array.isArray(report.evidence)) throw new Error('verification.evidence must be an array');
+  if (report.rationale !== undefined && typeof report.rationale !== 'string')
+    throw new Error('verification.rationale must be a string');
+  if (report.skippedChecks !== undefined && !Array.isArray(report.skippedChecks))
+    throw new Error('verification.skippedChecks must be an array');
+  for (const skippedCheck of report.skippedChecks ?? [])
+    if (typeof skippedCheck?.reason !== 'string' || !skippedCheck.reason.trim())
+      throw new Error('every skipped verification check requires a reason');
+
+  return report;
+}
+
+export function validateNormalizedEvent(event) {
+  if (!event || typeof event !== 'object') throw new Error('event must be an object');
+  if (event.version !== 1) throw new Error('event.version must be 1');
+  if (typeof event.task_id !== 'string' || !event.task_id.trim())
+    throw new Error('event.task_id is required');
+  if (typeof event.type !== 'string' || !event.type.trim())
+    throw new Error('event.type is required');
+  if (!event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload))
+    throw new Error('event.payload must be an object');
+  if (typeof event.at !== 'string' || Number.isNaN(Date.parse(event.at)))
+    throw new Error('event.at must be an ISO date-time');
+
+  return event;
 }
 
 export function isSafeGitRef(value) {

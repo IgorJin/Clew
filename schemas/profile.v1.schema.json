@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/profile.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "mode",
+    "harness",
+    "review",
+    "architecture",
+    "maxWorkers",
+    "maxAttempts",
+    "verification"
+  ],
+  "properties": {
+    "name": { "enum": ["quick", "standard", "deep"] },
+    "mode": { "enum": ["direct", "isolated", "parallel"] },
+    "harness": { "enum": ["fake", "codex", "opencode"] },
+    "reviewHarness": { "enum": ["fake", "codex", "opencode"] },
+    "architectHarness": { "enum": ["fake", "codex"] },
+    "review": { "type": "boolean" },
+    "architecture": { "type": "boolean" },
+    "integration": { "type": "boolean" },
+    "maxWorkers": { "type": "integer", "minimum": 1 },
+    "maxAttempts": { "type": "integer", "minimum": 1 },
+    "verification": { "enum": ["targeted", "broad"] }
+  }
+}

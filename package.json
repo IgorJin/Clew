@@ -1,22 +1,53 @@
 {
   "name": "clew",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-rc.1",
   "description": "A local task-centric control plane for native AI coding harnesses",
   "type": "module",
   "bin": {
     "clew": "bin/clew.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "schemas/",
+    "migrations/",
+    "scripts/",
+    "fixtures/contracts/",
+    "fixtures/plans/",
+    "fixtures/profiles/",
+    "fixtures/reviews/",
+    "docs/",
+    "CHANGELOG.md",
+    "DONE.md",
+    "RELEASE.md",
+    "spec.md",
+    "tasks.md"
+  ],
   "scripts": {
     "test": "node --test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "check": "npm run format:check && npm run lint && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
+    "check": "npm run format:check && npm run lint && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/compatibility.js && node --check src/config.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
+    "smoke:codex": "node scripts/live-adapter-smoke.js codex",
+    "smoke:codex-roles": "node scripts/live-codex-roles-smoke.js",
+    "smoke:opencode": "node scripts/live-adapter-smoke.js opencode",
     "start": "node bin/clew.js"
   },
   "engines": {
     "node": ">=22.5"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IgorJin/Clew.git"
+  },
+  "keywords": [
+    "ai",
+    "codex",
+    "opencode",
+    "orchestration",
+    "worktree"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@eslint/js": "^10.0.1",

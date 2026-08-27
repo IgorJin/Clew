@@ -7,6 +7,10 @@ import {
   FAILURE_CLASS,
   isSafeGitRef,
   validateExecutionPlan,
+  validateReviewResult,
+  validateVerificationReport,
+  validateNormalizedEvent,
+  resolveProfile,
 } from '../src/domain.js';
 
 test('validates and normalizes a task contract', () => {
@@ -19,6 +23,28 @@ test('validates and normalizes a task contract', () => {
   });
 
   assert.equal(task.acceptance[0].id, 'AC-1');
+  assert.equal(task.risk, 'medium');
+  assert.equal('authorization' in task, false);
+});
+test('rejects unsupported task risk levels', () => {
+  assert.throws(
+    () =>
+      validateTaskContract({
+        id: 'T-RISK',
+        title: 'Risk',
+        goal: 'Validate risk',
+        profile: 'quick',
+        risk: 'critical',
+        acceptance: ['safe'],
+      }),
+    /task.risk must be/,
+  );
+});
+test('resolves native product defaults and Deep verification policy', () => {
+  assert.equal(resolveProfile('quick').harness, 'codex');
+  assert.equal(resolveProfile('standard').reviewHarness, 'codex');
+  assert.equal(resolveProfile('deep').architectHarness, 'codex');
+  assert.equal(resolveProfile('deep').verification, 'broad');
 });
 test('rejects invalid transitions', () => {
   assert.throws(
@@ -96,5 +122,51 @@ test('validates an acyclic execution plan', () => {
         ],
       }),
     /cycle/,
+  );
+});
+test('validates structured review findings', () => {
+  assert.doesNotThrow(() => validateReviewResult({ verdict: 'pass', findings: [] }));
+  assert.throws(
+    () =>
+      validateReviewResult({
+        verdict: 'request_changes',
+        findings: [{ severity: 'blocking', criterion: 'AC-1' }],
+      }),
+    /reason is required/,
+  );
+});
+test('validates versioned verification reports and normalized events', () => {
+  assert.doesNotThrow(() =>
+    validateVerificationReport({
+      taskId: 'T-1',
+      stageId: 'worker',
+      runId: 'run-1',
+      attempt: 1,
+      workspace: '/tmp/worktree',
+      revision: 'abc123',
+      evidence: [],
+    }),
+  );
+  assert.throws(
+    () =>
+      validateVerificationReport({
+        taskId: 'T-1',
+        stageId: 'worker',
+        runId: 'run-1',
+        attempt: 0,
+        workspace: '/tmp/worktree',
+        revision: 'abc123',
+        evidence: [],
+      }),
+    /positive integer/,
+  );
+  assert.doesNotThrow(() =>
+    validateNormalizedEvent({
+      version: 1,
+      task_id: 'T-1',
+      type: 'TASK_CREATED',
+      payload: {},
+      at: new Date().toISOString(),
+    }),
   );
 });

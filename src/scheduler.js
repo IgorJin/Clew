@@ -3,10 +3,12 @@ import {
   resolveProfile,
   assertValidTaskTransition,
   validateExecutionPlan,
+  validateVerificationReport,
   TASK_STATE,
   STAGE_STATUS,
   RUN_STATUS,
   PLAN_STATUS,
+  REVIEW_VERDICT,
   FAILURE_CLASS,
   classifyFailure,
   HARNESS_NAME,
@@ -36,6 +38,7 @@ export class Scheduler {
       interruptPollMs = 250,
       approvalPollMs = 250,
       approvalTimeoutMs = 30 * 60_000,
+      adapterConfig = {},
     } = {},
   ) {
     this.store = store;
@@ -49,6 +52,7 @@ export class Scheduler {
     this.interruptPollMs = interruptPollMs;
     this.approvalPollMs = approvalPollMs;
     this.approvalTimeoutMs = approvalTimeoutMs;
+    this.adapterConfig = adapterConfig;
     this.taskSignals = new Map();
     this.resumeSessions = new Map();
   }
@@ -59,6 +63,7 @@ export class Scheduler {
     requestedReviewHarness = null,
     requestedArchitect = null,
     resumeSessionId = null,
+    retryFeedback = [],
   ) {
     const taskSignal = this.getTaskSignal(taskId);
 
@@ -71,6 +76,7 @@ export class Scheduler {
         requestedArchitect,
         taskSignal,
         resumeSessionId,
+        retryFeedback,
       );
     } finally {
       this.releaseTaskSignal(taskId);
@@ -84,12 +90,14 @@ export class Scheduler {
     requestedArchitect = null,
     taskSignal = this.getTaskSignal(taskId),
     resumeSessionId = null,
+    retryFeedback = [],
   ) {
     const row = this.store.getTask(taskId);
 
     if (!row) throw new Error(`task not found: ${taskId}`);
-    const profile = resolveProfile(requestedProfile || row.contract.profile);
-    const harnessName = requestedHarness || profile.harness;
+    const resolvedProfile = resolveProfile(requestedProfile || row.contract.profile);
+    const harnessName = requestedHarness || resolvedProfile.harness;
+    const profile = { ...resolvedProfile, harness: harnessName };
     const harness = this.createHarnessAdapter(harnessName);
 
     if (profile.mode === EXECUTION_MODE.PARALLEL)
@@ -102,6 +110,7 @@ export class Scheduler {
         requestedArchitect,
         taskSignal,
       );
+    resumeSessionId = this.reconcileSingleWorker(row, resumeSessionId);
     if (
       ![TASK_STATE.DRAFT, TASK_STATE.QUEUED, TASK_STATE.READY, TASK_STATE.FAILED].includes(
         row.state,
@@ -135,6 +144,8 @@ export class Scheduler {
         attempt,
         status: RUN_STATUS.RUNNING,
         harness: harnessName,
+        profile: profile.name,
+        policy: profile,
         workspace: workspace.path,
         startedAt,
       };
@@ -145,8 +156,9 @@ export class Scheduler {
         branch: workspace.branch,
         baseSha: workspace.baseSha,
       });
+      const workerTask = this.withRetryFeedback(row.contract, retryFeedback);
       const result = await harness.run({
-        task: row.contract,
+        task: workerTask,
         stageId: 'worker',
         cwd: workspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
@@ -155,6 +167,7 @@ export class Scheduler {
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
       });
 
+      this.assertVerificationPassed(result.verification);
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       const status = this.workspaceManager.getWorktreeStatus(workspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -164,24 +177,44 @@ export class Scheduler {
           )
         : status.sha;
 
-      this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', {
-        evidence: result.verification,
+      const evidence = this.normalizeVerificationEvidence(
+        row.contract,
+        profile,
+        result.verification,
+      );
+      const verificationReport = validateVerificationReport({
+        taskId,
+        stageId: 'worker',
+        runId,
+        attempt,
+        workspace: workspace.path,
+        evidence,
         revision,
+        rationale:
+          result.rationale ?? 'Harness evidence satisfied the configured completion policy',
+        skippedChecks: result.skippedChecks ?? [],
       });
+
+      this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', verificationReport);
       this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
       this.store.setStage(taskId, 'worker', STAGE_STATUS.COMPLETED);
       this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
       this.store.setTaskState(taskId, profile.review ? TASK_STATE.REVIEWING : TASK_STATE.READY);
       if (profile.review) {
-        const reviewer = this.createReviewerAdapter(requestedReviewHarness);
+        const reviewer = this.createReviewerAdapter(
+          requestedReviewHarness ??
+            (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
+        );
         const review = await reviewer.review({
           task: row.contract,
-          evidence: result.verification,
+          evidence,
           revision,
+          cwd: workspace.path,
         });
 
         this.store.appendEvent(taskId, 'REVIEW_RECORDED', review);
-        if (review.verdict === 'pass') this.store.setTaskState(taskId, TASK_STATE.READY);
+        if (review.verdict === REVIEW_VERDICT.PASS)
+          this.store.setTaskState(taskId, TASK_STATE.READY);
         else {
           this.store.setTaskState(taskId, TASK_STATE.FAILED);
           this.store.appendEvent(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
@@ -194,7 +227,15 @@ export class Scheduler {
             this.store.setStage(taskId, 'worker', STAGE_STATUS.QUEUED);
             this.store.setTaskState(taskId, TASK_STATE.QUEUED);
 
-            return this.runTask(taskId, requestedProfile, requestedHarness, requestedReviewHarness);
+            return this.runTask(
+              taskId,
+              requestedProfile,
+              requestedHarness,
+              requestedReviewHarness,
+              requestedArchitect,
+              attempt === 1 ? (result.sessionId ?? null) : null,
+              review.findings,
+            );
           }
         }
       }
@@ -247,9 +288,78 @@ export class Scheduler {
           requestedHarness,
           requestedReviewHarness,
           requestedArchitect,
-          failedRun?.session_id ?? null,
+          attempt === 1 ? (failedRun?.session_id ?? null) : null,
         );
       }
+      throw error;
+    }
+  }
+
+  reconcileSingleWorker(row, requestedSessionId = null) {
+    const recoverableStates = [
+      TASK_STATE.RECOVERING,
+      TASK_STATE.EXECUTING,
+      TASK_STATE.VERIFYING,
+      TASK_STATE.REVIEWING,
+    ];
+
+    if (!recoverableStates.includes(row.state)) return requestedSessionId;
+    const runningRuns = this.store
+      .listRuns(row.id)
+      .filter((run) => run.status === RUN_STATUS.RUNNING);
+    const latestRun = runningRuns.at(-1);
+
+    if (row.state !== TASK_STATE.RECOVERING) {
+      assertValidTaskTransition(row.state, TASK_STATE.RECOVERING);
+      this.store.setTaskState(row.id, TASK_STATE.RECOVERING);
+    }
+    for (const run of runningRuns) {
+      this.store.finishRun(run.id, RUN_STATUS.INTERRUPTED, run.commit_sha);
+      this.store.appendEvent(row.id, 'RUN_INTERRUPTED', {
+        runId: run.id,
+        stageId: run.stage_id,
+        reason: 'scheduler process restarted before terminal run state',
+      });
+    }
+    this.store.setStage(row.id, 'worker', STAGE_STATUS.QUEUED);
+    this.store.setTaskState(row.id, TASK_STATE.QUEUED);
+    row.state = TASK_STATE.QUEUED;
+
+    return requestedSessionId ?? latestRun?.session_id ?? null;
+  }
+
+  withRetryFeedback(task, findings = []) {
+    if (!findings.length) return task;
+    const feedback = findings
+      .map((finding) => `- [${finding.severity}] ${finding.criterion}: ${finding.reason}`)
+      .join('\n');
+
+    return {
+      ...task,
+      goal: `${task.goal}\n\nReview feedback to address in this attempt:\n${feedback}`,
+    };
+  }
+
+  normalizeVerificationEvidence(task, policy, evidence = []) {
+    return evidence.map((item) => ({
+      ...item,
+      scope: item.scope ?? policy.verification,
+      acceptanceCriteria:
+        item.acceptanceCriteria ?? task.acceptance.map((criterion) => criterion.id),
+    }));
+  }
+
+  assertVerificationPassed(evidence) {
+    if (!Array.isArray(evidence) || !evidence.length) {
+      const error = new Error('harness completed without verification evidence');
+
+      error.code = 'VERIFICATION_FAILED';
+      throw error;
+    }
+    if (!evidence.some((item) => item.result === 'passed')) {
+      const error = new Error('harness completed without passing verification evidence');
+
+      error.code = 'VERIFICATION_FAILED';
       throw error;
     }
   }
@@ -283,17 +393,20 @@ export class Scheduler {
       throw new Error(`task ${taskId} is already ${row.state}`);
     const latestPlan = this.store.getLatestPlan(taskId);
     const persistedPlan = latestPlan?.status === PLAN_STATUS.REJECTED ? null : latestPlan;
+    const architectName =
+      requestedArchitect ??
+      (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.architectHarness);
 
     if (!persistedPlan) {
       this.store.appendEvent(taskId, 'ARCHITECT_STARTED', {
-        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : HARNESS_NAME.FAKE),
+        architect: this.planFactory ? 'plan-factory' : architectName,
       });
     }
     const proposedPlan = persistedPlan
       ? persistedPlan.plan
       : this.planFactory
         ? await this.planFactory(row.contract, profile)
-        : await this.createArchitectAdapter(requestedArchitect).createPlan({
+        : await this.createArchitectAdapter(architectName).createPlan({
             task: row.contract,
             cwd: this.workspaceManager.projectRoot ?? process.cwd(),
           });
@@ -309,7 +422,7 @@ export class Scheduler {
 
     if (!persistedPlan) {
       this.store.appendEvent(taskId, 'ARCHITECT_COMPLETED', {
-        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : HARNESS_NAME.FAKE),
+        architect: this.planFactory ? 'plan-factory' : architectName,
         planVersion: planRecord.version,
       });
     }
@@ -381,6 +494,7 @@ export class Scheduler {
       harness,
       harnessName,
       maxWorkers: profile.maxWorkers,
+      policy: profile,
       integrationStageId: integrationStage.id,
       initialCompleted: recoveredStages,
       signal: taskSignal,
@@ -412,17 +526,21 @@ export class Scheduler {
     });
     this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
     this.store.setTaskState(taskId, TASK_STATE.REVIEWING);
-    const reviewer = this.createReviewerAdapter(requestedReviewHarness);
+    const reviewer = this.createReviewerAdapter(
+      requestedReviewHarness ??
+        (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
+    );
     const review = await reviewer.review({
       task: row.contract,
       evidence: integrationResult.evidence,
       revision: integrationResult.revision,
+      cwd: integrationResult.workspace.path,
     });
 
     this.store.appendEvent(taskId, 'REVIEW_RECORDED', review);
     this.store.setTaskState(
       taskId,
-      review.verdict === 'pass' ? TASK_STATE.READY : TASK_STATE.FAILED,
+      review.verdict === REVIEW_VERDICT.PASS ? TASK_STATE.READY : TASK_STATE.FAILED,
     );
 
     return {
@@ -545,6 +663,7 @@ export class Scheduler {
     harness,
     harnessName,
     maxWorkers,
+    policy,
     integrationStageId,
     initialCompleted = new Map(),
     signal = null,
@@ -582,16 +701,19 @@ export class Scheduler {
 
       while (running.size < concurrencyLimit && runnableStages.length) {
         const stage = runnableStages.shift();
+        const stageHarnessName = stage.harness ?? harnessName;
+        const stageHarness = stage.harness ? this.createHarnessAdapter(stageHarnessName) : harness;
 
         pending.delete(stage.id);
         const stageExecution = this.executePlannedStage({
           task,
           plan,
           stage,
-          harness,
-          harnessName,
+          harness: stageHarness,
+          harnessName: stageHarnessName,
           completed,
           integrationStageId,
+          policy,
           signal,
           resumeSessionId: this.takeResumeSession(task.id, stage.id),
         }).then(
@@ -621,7 +743,31 @@ export class Scheduler {
           await Promise.allSettled(running.values());
           throw settledStage.error;
         }
-        failures.set(settledStage.stageId, settledStage.error);
+        const failedStage = plan.stages.find((stage) => stage.id === settledStage.stageId);
+        const stageRuns = this.store
+          .listRuns(task.id)
+          .filter((run) => run.stage_id === settledStage.stageId);
+        const failedRun = stageRuns.at(-1);
+        const canRetry =
+          classifyFailure(settledStage.error) === FAILURE_CLASS.TIMEOUT &&
+          stageRuns.length < policy.maxAttempts;
+
+        if (canRetry) {
+          this.store.appendEvent(task.id, 'RETRY_SCHEDULED', {
+            stageId: settledStage.stageId,
+            failedAttempt: stageRuns.length,
+            nextAttempt: stageRuns.length + 1,
+            reason: FAILURE_CLASS.TIMEOUT,
+          });
+          this.store.setStage(task.id, settledStage.stageId, STAGE_STATUS.QUEUED);
+          pending.set(settledStage.stageId, failedStage);
+          if (stageRuns.length === 1 && failedRun?.session_id) {
+            const sessions = this.resumeSessions.get(task.id) ?? new Map();
+
+            sessions.set(settledStage.stageId, failedRun.session_id);
+            this.resumeSessions.set(task.id, sessions);
+          }
+        } else failures.set(settledStage.stageId, settledStage.error);
       }
     }
 
@@ -636,6 +782,7 @@ export class Scheduler {
     harnessName,
     completed,
     integrationStageId,
+    policy,
     signal = null,
     resumeSessionId = null,
   }) {
@@ -693,6 +840,7 @@ export class Scheduler {
         harnessName,
         attempt,
         workspace,
+        policy,
         signal,
         resumeSessionId,
       });
@@ -731,6 +879,7 @@ export class Scheduler {
     harnessName,
     attempt,
     workspace = null,
+    policy = null,
     signal = null,
     resumeSessionId = null,
   }) {
@@ -747,6 +896,8 @@ export class Scheduler {
       attempt,
       status: RUN_STATUS.RUNNING,
       harness: harnessName,
+      profile: policy?.name ?? task.profile,
+      policy,
       workspace: stageWorkspace.path,
       startedAt: new Date().toISOString(),
     };
@@ -767,6 +918,8 @@ export class Scheduler {
         resumeSessionId,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, signal),
       });
+
+      this.assertVerificationPassed(result.verification);
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
         ? this.workspaceManager.commitWorktreeChanges(
@@ -778,18 +931,28 @@ export class Scheduler {
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
       this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
-      this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', {
+      const evidence = this.normalizeVerificationEvidence(task, policy, result.verification);
+      const verificationReport = validateVerificationReport({
+        taskId,
         stageId: stage.id,
-        evidence: result.verification,
+        runId,
+        attempt,
+        workspace: stageWorkspace.path,
+        evidence,
         revision,
+        rationale:
+          result.rationale ?? 'Harness evidence satisfied the configured completion policy',
+        skippedChecks: result.skippedChecks ?? [],
       });
+
+      this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', verificationReport);
 
       return {
         runId,
         stageId: stage.id,
         workspace: stageWorkspace,
         revision,
-        evidence: result.verification,
+        evidence,
       };
     } catch (error) {
       if (error?.code === 'HARNESS_INTERRUPTED') {
@@ -815,8 +978,10 @@ export class Scheduler {
   createHarnessAdapter(harnessName) {
     if (this.harnessFactory) return this.harnessFactory(harnessName);
     if (harnessName === HARNESS_NAME.FAKE) return new FakeHarness();
-    if (harnessName === HARNESS_NAME.CODEX) return new CodexHarness();
-    if (harnessName === HARNESS_NAME.OPENCODE) return new OpenCodeHarness();
+    if (harnessName === HARNESS_NAME.CODEX)
+      return new CodexHarness({ command: this.adapterConfig.codexBin });
+    if (harnessName === HARNESS_NAME.OPENCODE)
+      return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
 
     return new ExternalHarnessUnavailable(harnessName);
   }
@@ -910,7 +1075,7 @@ export class Scheduler {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
 
     return reviewerName === HARNESS_NAME.CODEX
-      ? new CodexReviewer(new CodexHarness())
+      ? new CodexReviewer(new CodexHarness({ command: this.adapterConfig.codexBin }))
       : new FakeReviewer();
   }
 
@@ -918,7 +1083,7 @@ export class Scheduler {
     if (this.architectFactory) return this.architectFactory(architectName);
 
     return architectName === HARNESS_NAME.CODEX
-      ? new CodexArchitect(new CodexHarness())
+      ? new CodexArchitect(new CodexHarness({ command: this.adapterConfig.codexBin }))
       : new FakeArchitect();
   }
 }

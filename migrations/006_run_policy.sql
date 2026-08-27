@@ -1,0 +1,2 @@
+ALTER TABLE runs ADD COLUMN profile TEXT;
+ALTER TABLE runs ADD COLUMN policy TEXT;
