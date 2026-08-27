@@ -197,6 +197,28 @@ test('OpenCode harness conforms to the normalized successful lifecycle', async (
   assert.equal(result.sessionId, 'opencode_fixture');
 });
 
+test('OpenCode harness resumes a persisted session without creating a new one', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, options });
+
+    return createJsonResponse({ id: 'opencode_turn_fixture' });
+  };
+  const harness = new OpenCodeHarness({ fetchImpl });
+  const events = [];
+  const result = await harness.run({
+    task: fixtureTask,
+    cwd: process.cwd(),
+    resumeSessionId: 'opencode_existing',
+    onEvent: (event) => events.push(event),
+  });
+
+  assert.equal(result.sessionId, 'opencode_existing');
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].url, /session\/opencode_existing\/message$/);
+  assert.equal(events[0].type, HARNESS_EVENT_TYPE.SESSION_RESUMED);
+});
+
 test('OpenCode harness exposes AbortSignal interruption', async () => {
   const fetchImpl = (url, options) => {
     if (url.endsWith('/session'))

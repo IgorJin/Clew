@@ -21,6 +21,7 @@
 - Updated the Codex adapter to persist native thread/turn IDs, route server approval requests through an explicit callback, and interrupt active turns through the official `turn/interrupt` protocol.
 - Added persisted native harness approval gates with auditable decisions and `approve-run`/`reject-run` CLI commands for a second operator process.
 - Added explicit failure classes to run events and bounded retries for timed-out worker attempts.
+- Added OpenCode session resume support and persisted turn/output identity in the harness boundary.
 
 ## 0.1.0-alpha.1 — initial product slice
 

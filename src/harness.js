@@ -465,13 +465,15 @@ export class OpenCodeHarness {
     this.timeoutMs = timeoutMs;
     this.fetch = fetchImpl;
   }
-  async run({ task, cwd, onEvent, signal }) {
+  async run({ task, cwd, onEvent, signal, resumeSessionId = null }) {
     if (signal?.aborted) throw new HarnessInterruptedError('OpenCode');
-    const sessionResponse = await this.requestJson('/session', {
-      method: 'POST',
-      body: { title: task.title, directory: cwd },
-    });
-    const sessionId = sessionResponse.id || sessionResponse.data?.id;
+    const sessionResponse = resumeSessionId
+      ? null
+      : await this.requestJson('/session', {
+          method: 'POST',
+          body: { title: task.title, directory: cwd },
+        });
+    const sessionId = resumeSessionId || sessionResponse.id || sessionResponse.data?.id;
 
     if (!sessionId) throw new Error('OpenCode did not return a session id');
     const controller = new AbortController();
@@ -483,7 +485,12 @@ export class OpenCodeHarness {
     }, this.timeoutMs);
 
     signal?.addEventListener('abort', interrupt, { once: true });
-    onEvent({ type: HARNESS_EVENT_TYPE.SESSION_STARTED, sessionId });
+    onEvent({
+      type: resumeSessionId
+        ? HARNESS_EVENT_TYPE.SESSION_RESUMED
+        : HARNESS_EVENT_TYPE.SESSION_STARTED,
+      sessionId,
+    });
     onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId });
     if (signal?.aborted) controller.abort();
     try {
@@ -500,9 +507,12 @@ export class OpenCodeHarness {
       );
 
       if (!response.ok) throw new Error(`OpenCode message failed: HTTP ${response.status}`);
+      const responseBody = await response.json().catch(() => ({}));
+      const turnId = responseBody.id || responseBody.data?.id || responseBody.message?.id;
+
       onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId });
 
-      return { sessionId, verification: [] };
+      return { sessionId, turnId, verification: [], output: responseBody };
     } catch (error) {
       if (timedOut) {
         const timeoutError = new HarnessTimeoutError('OpenCode');
