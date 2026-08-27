@@ -3,12 +3,24 @@
   "version": "0.1.0-alpha.1",
   "description": "A local task-centric control plane for native AI coding harnesses",
   "type": "module",
-  "bin": { "clew": "bin/clew.js" },
+  "bin": {
+    "clew": "bin/clew.js"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "npm test && node --check bin/clew.js && node --check src/cli.js && node --check src/domain.js && node --check src/harness.js && node --check src/scheduler.js && node --check src/store.js && node --check src/workspace.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "check": "npm run format:check && npm run lint && npm test && node --check bin/clew.js && node --check src/cli.js && node --check src/domain.js && node --check src/harness.js && node --check src/scheduler.js && node --check src/store.js && node --check src/workspace.js",
     "start": "node bin/clew.js"
   },
-  "engines": { "node": ">=22.5" },
-  "license": "MIT"
+  "engines": {
+    "node": ">=22.5"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.1",
+    "prettier": "^3.9.6"
+  }
 }

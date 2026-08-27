@@ -4,7 +4,7 @@
 
 **Product type:** local, task-centric control plane for AI-assisted software development
 
-**Positioning:** *Bring your harness. Clew keeps the thread.*
+**Positioning:** _Bring your harness. Clew keeps the thread._
 
 ## 1. Summary
 
@@ -408,11 +408,7 @@ Every event carries its task, stage-run, attempt, session, source-harness, times
 
 ```ts
 interface WorkspaceManager {
-  create(input: {
-    taskId: string;
-    stageId: string;
-    baseSha: string;
-  }): Promise<Workspace>;
+  create(input: { taskId: string; stageId: string; baseSha: string }): Promise<Workspace>;
 
   remove(id: string): Promise<void>;
   status(id: string): Promise<WorkspaceStatus>;
@@ -502,14 +498,14 @@ Failures use an explicit classification:
 
 Default routing:
 
-| Failure | Default target |
-| --- | --- |
-| Implementation | same worker/session retry |
-| Test defect or missing QA | QA stage |
-| Architecture | architect |
-| Environment/tool transient | infrastructure retry |
-| Contract ambiguity | human |
-| Repeated or stuck worker | fresh worker session or human |
+| Failure                    | Default target                |
+| -------------------------- | ----------------------------- |
+| Implementation             | same worker/session retry     |
+| Test defect or missing QA  | QA stage                      |
+| Architecture               | architect                     |
+| Environment/tool transient | infrastructure retry          |
+| Contract ambiguity         | human                         |
+| Repeated or stuck worker   | fresh worker session or human |
 
 Default retry policy:
 
