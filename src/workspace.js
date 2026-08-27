@@ -16,8 +16,9 @@ export class GitWorktreeManager {
     this.projectRoot = resolve(projectRoot);
     mkdirSync(this.root, { recursive: true });
   }
-  create(taskId, stageId, baseRef = 'HEAD') {
-    const safe = `${taskId}-${stageId}`.replace(/[^A-Za-z0-9_.-]/g, '-');
+  create(taskId, stageId, baseRef = 'HEAD', attempt = 1) {
+    const suffix = attempt > 1 ? `-attempt-${attempt}` : '';
+    const safe = `${taskId}-${stageId}${suffix}`.replace(/[^A-Za-z0-9_.-]/g, '-');
     const path = join(this.root, safe);
     const branch = `ai/${safe}`;
     try {

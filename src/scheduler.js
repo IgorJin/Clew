@@ -6,6 +6,7 @@ import {
   OpenCodeHarness,
   ExternalHarnessUnavailable,
 } from './harness.js';
+import { FakeReviewer } from './review.js';
 
 export class Scheduler {
   constructor(store, workspaceManager) {
@@ -37,13 +38,14 @@ export class Scheduler {
     let workspace;
     const startedAt = new Date().toISOString();
     const runId = randomUUID();
+    const attempt = this.store.runs(taskId).length + 1;
     try {
-      workspace = this.workspaceManager.create(taskId, 'worker', row.contract.base_ref);
+      workspace = this.workspaceManager.create(taskId, 'worker', row.contract.base_ref, attempt);
       const run = {
         id: runId,
         taskId,
         stageId: 'worker',
-        attempt: this.store.runs(taskId).length + 1,
+        attempt,
         status: 'RUNNING',
         harness: harnessName,
         workspace: workspace.path,
@@ -72,10 +74,17 @@ export class Scheduler {
       this.store.setTaskState(taskId, 'VERIFYING');
       this.store.setTaskState(taskId, profile.review ? 'REVIEWING' : 'READY');
       if (profile.review) {
-        this.store.event(taskId, 'REVIEW_DEFERRED', {
-          reason: 'review adapter not configured; fixture evidence is available',
+        const review = await new FakeReviewer().review({
+          task: row.contract,
+          evidence: result.verification,
+          revision: status.sha,
         });
-        this.store.setTaskState(taskId, 'READY');
+        this.store.event(taskId, 'REVIEW_RECORDED', review);
+        if (review.verdict === 'pass') this.store.setTaskState(taskId, 'READY');
+        else {
+          this.store.setTaskState(taskId, 'FAILED');
+          this.store.event(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
+        }
       }
       return {
         taskId,

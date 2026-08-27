@@ -8,6 +8,7 @@
 - Added native Git worktree allocation and revision tracking.
 - Added machine-facing Codex app-server and OpenCode HTTP adapter boundaries with normalized lifecycle events.
 - Added a deterministic fake harness and tests for the first Quick flow.
+- Added a deterministic fake reviewer and Standard-flow review decision path.
 - Documented the v0.1 release gates and implementation backlog.
 
 Known limitations:

@@ -196,11 +196,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------ |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server |
-| `standard` | контракт и профиль сохраняются; review/retry orchestration пока не завершены                                       |
-| `deep`     | контракт и профиль сохраняются; architect/DAG/parallel integration пока не завершены                               |
+| Profile    | Сейчас можно ожидать                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server        |
+| `standard` | fake worker проходит через fake review и сохраняет `REVIEW_RECORDED`; native review/retry orchestration пока не завершены |
+| `deep`     | контракт и профиль сохраняются; architect/DAG/parallel integration пока не завершены                                      |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 

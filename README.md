@@ -44,6 +44,7 @@ Implemented in the first product slice:
 - state transitions and truthful `HARNESS_COMPLETED` vs task `READY` semantics;
 - local Git worktree allocation and revision evidence;
 - deterministic fake harness for end-to-end testing;
+- deterministic fake reviewer for Standard-flow testing;
 - CLI task lifecycle, JSON output, status, events, and diagnostics.
 
 The remaining v0.1 candidate work is tracked in [`tasks.md`](./tasks.md) and gated in [`RELEASE.md`](./RELEASE.md), including production Codex/OpenCode protocol adapters, reviewer/retry orchestration, parallel integration, and hardening.
