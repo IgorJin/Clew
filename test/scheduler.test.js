@@ -50,6 +50,46 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('retries a timed-out worker within the profile attempt limit', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-timeout-retry-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let attempts = 0;
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-TIMEOUT',
+    title: 'Retry timeout',
+    goal: 'Retry a transient timeout',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'eventually works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => ({
+      run: async (options) => {
+        attempts += 1;
+        if (attempts === 1) {
+          const error = new Error('fixture timeout');
+
+          error.code = 'HARNESS_TIMED_OUT';
+          throw error;
+        }
+
+        return new FakeHarness().run(options);
+      },
+    }),
+  });
+  const result = await scheduler.runTask('T-TIMEOUT', 'quick', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(store.listRuns('T-TIMEOUT').length, 2);
+  assert.ok(store.listEvents('T-TIMEOUT').some((event) => event.type === 'RETRY_SCHEDULED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('interrupts an active task through a persisted request', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-interrupt-request-'));
   const store = new Store(join(dir, 'state.sqlite'));

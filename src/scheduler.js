@@ -7,6 +7,7 @@ import {
   STAGE_STATUS,
   RUN_STATUS,
   PLAN_STATUS,
+  FAILURE_CLASS,
   classifyFailure,
   HARNESS_NAME,
   EXECUTION_MODE,
@@ -214,10 +215,29 @@ export class Scheduler {
       if (runId) this.store.finishRun(runId, RUN_STATUS.FAILED);
       this.store.setStage(taskId, 'worker', STAGE_STATUS.FAILED);
       this.store.setTaskState(taskId, TASK_STATE.FAILED);
+
+      const failureClass = classifyFailure(error);
+
       this.store.appendEvent(taskId, 'RUN_FAILED', {
         message: error.message,
-        failureClass: classifyFailure(error),
+        failureClass,
       });
+
+      if (
+        failureClass === FAILURE_CLASS.TIMEOUT &&
+        attempt < profile.maxAttempts &&
+        !taskSignal.aborted
+      ) {
+        this.store.appendEvent(taskId, 'RETRY_SCHEDULED', {
+          failedAttempt: attempt,
+          nextAttempt: attempt + 1,
+          reason: failureClass,
+        });
+        this.store.setStage(taskId, 'worker', STAGE_STATUS.QUEUED);
+        this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+
+        return this.runTask(taskId, requestedProfile, requestedHarness, requestedReviewHarness);
+      }
       throw error;
     }
   }
