@@ -206,11 +206,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                      |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                        |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                              |
-| `deep`     | fake plan валидируется как DAG, backend/frontend выполняются конкурентно и создают commits; Clew cherry-pick'ает их в integration worktree, запускает integration stage и review; native architect и разрешение конфликтов пока не готовы |
+| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                                                                   |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                                                                     |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                                                                           |
+| `deep`     | scheduler исполняет произвольный валидный DAG, запускает готовые stages с лимитом `maxWorkers`, переносит транзитивные commits предков в downstream worktrees, блокирует зависимые stages после failure и завершает обязательными integration и review; native architect пока не готов |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -222,8 +222,8 @@ node bin/clew.js doctor
 - live OpenCode session/event stream во всех поддерживаемых версиях;
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
-- native architect plan с human approval;
-- произвольный multi-stage DAG с concurrency limits и recovery;
+- native architect plan, его сохранение и human approval;
+- восстановление незавершённого DAG после перезапуска процесса;
 - автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;
@@ -241,6 +241,6 @@ node bin/clew.js doctor
 2. Проверить Codex app-server в конкретном локальном окружении.
 3. Проверить OpenCode endpoint и зафиксировать поддерживаемую версию.
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
-5. Только затем включать Deep/parallel flow и dashboard.
+5. Подключить native architect и persisted plan к уже работающему DAG executor.
 
-Если нужен следующий конкретный шаг, берите `CLEW-006` (Codex protocol spike), затем `CLEW-016` (production `CodexHarness`) и `CLEW-022` (Quick E2E acceptance fixture).
+Следующий крупный шаг для orchestration core — `CLEW-014`: классификация незавершённых runs и безопасное восстановление после перезапуска без повторного запуска уже завершённых stages.

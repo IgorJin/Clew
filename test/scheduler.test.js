@@ -1,12 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
 import { CodexReviewer } from '../src/review.js';
 import { CodexHarness } from '../src/harness.js';
+import { GitWorktreeManager, IntegrationConflictError } from '../src/workspace.js';
+
+function runGitCommand(args, cwd) {
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
 
 test('runs a quick task with a fake workspace and records evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-'));
@@ -172,7 +182,7 @@ test('blocks integration when a parallel dependency fails', async () => {
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
   const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
-  await assert.rejects(() => scheduler.runTask('T-10', 'deep', 'fake'), /parallel stages failed/);
+  await assert.rejects(() => scheduler.runTask('T-10', 'deep', 'fake'), /plan stages failed/);
   assert.equal(store.getTask('T-10').state, 'FAILED');
   assert.equal(
     store.listStages('T-10').find((stage) => stage.id === 'integration').status,
@@ -182,6 +192,216 @@ test('blocks integration when a parallel dependency fails', async () => {
     store.listRuns('T-10').some((run) => run.stage_id === 'integration'),
     false,
   );
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('runs an arbitrary multi-level DAG in dependency order', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-dag-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const started = [];
+  const completed = [];
+  const harness = {
+    run: async ({ stageId }) => {
+      started.push(stageId);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      completed.push(stageId);
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const workspaceManager = {
+    createWorktree: (_task, stage) => ({
+      path: dir,
+      branch: `test-${stage}`,
+      baseSha: 'abc',
+    }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  const planFactory = () => ({
+    parallelizable: true,
+    stages: [
+      { id: 'foundation', goal: 'Foundation', dependsOn: [] },
+      { id: 'api', goal: 'API', dependsOn: ['foundation'] },
+      { id: 'ui', goal: 'UI', dependsOn: ['foundation'] },
+      { id: 'docs', goal: 'Docs', dependsOn: ['api'] },
+      {
+        id: 'integration',
+        kind: 'integration',
+        goal: 'Integration',
+        dependsOn: ['ui', 'docs'],
+      },
+    ],
+  });
+  store.createTask({
+    id: 'T-13',
+    title: 'DAG',
+    goal: 'DAG',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => harness,
+    planFactory,
+  });
+
+  const result = await scheduler.runTask('T-13', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(started[0], 'foundation');
+  assert.ok(started.indexOf('api') > completed.indexOf('foundation'));
+  assert.ok(started.indexOf('ui') > completed.indexOf('foundation'));
+  assert.ok(started.indexOf('docs') > completed.indexOf('api'));
+  assert.equal(started.at(-1), 'integration');
+  assert.equal(store.listRuns('T-13').length, 5);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('enforces the Deep profile worker concurrency limit', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-limit-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let active = 0;
+  let maxActive = 0;
+  const harness = {
+    run: async ({ stageId }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, stageId === 'integration' ? 1 : 15));
+      active -= 1;
+      return { sessionId: `session-${stageId}`, verification: [{ result: 'passed' }] };
+    },
+  };
+  const workspaceManager = {
+    createWorktree: (_task, stage) => ({
+      path: dir,
+      branch: `test-${stage}`,
+      baseSha: 'abc',
+    }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  const workerIds = ['worker-a', 'worker-b', 'worker-c', 'worker-d', 'worker-e'];
+  const planFactory = () => ({
+    parallelizable: true,
+    stages: [
+      ...workerIds.map((id) => ({ id, goal: id, dependsOn: [] })),
+      {
+        id: 'integration',
+        kind: 'integration',
+        goal: 'Integration',
+        dependsOn: workerIds,
+      },
+    ],
+  });
+  store.createTask({
+    id: 'T-14',
+    title: 'Limit',
+    goal: 'Limit',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => harness,
+    planFactory,
+  });
+
+  const result = await scheduler.runTask('T-14', 'deep', 'fake');
+
+  assert.equal(result.state, 'READY');
+  assert.equal(maxActive, 3);
+  assert.equal(store.listRuns('T-14').length, 6);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('carries transitive stage commits into the integration worktree', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-dag-git-'));
+  const stateDir = join(repo, '.clew');
+  let store;
+  try {
+    runGitCommand(['init', '-b', 'main'], repo);
+    runGitCommand(['config', 'user.email', 'test@example.com'], repo);
+    runGitCommand(['config', 'user.name', 'Clew Test'], repo);
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    runGitCommand(['add', 'README.md'], repo);
+    runGitCommand(['commit', '-m', 'fixture'], repo);
+    store = new Store(join(stateDir, 'state.sqlite'));
+    const workspaceManager = new GitWorktreeManager(join(stateDir, 'worktrees'), repo);
+    const planFactory = () => ({
+      parallelizable: true,
+      stages: [
+        { id: 'foundation', goal: 'Foundation', dependsOn: [] },
+        { id: 'feature', goal: 'Feature', dependsOn: ['foundation'] },
+        {
+          id: 'integration',
+          kind: 'integration',
+          goal: 'Integration',
+          dependsOn: ['feature'],
+        },
+      ],
+    });
+    store.createTask({
+      id: 'T-15',
+      title: 'Git DAG',
+      goal: 'Git DAG',
+      profile: 'deep',
+      base_ref: 'main',
+      acceptance: [{ id: 'AC-1', criterion: 'works' }],
+    });
+    const scheduler = new Scheduler(store, workspaceManager, { planFactory });
+
+    const result = await scheduler.runTask('T-15', 'deep', 'fake');
+
+    assert.equal(result.state, 'READY');
+    const integrationRun = store.listRuns('T-15').find((run) => run.stage_id === 'integration');
+    assert.equal(
+      readFileSync(join(integrationRun.workspace, '.clew-runs', 'foundation.log'), 'utf8'),
+      'T-15/foundation\n',
+    );
+    assert.equal(
+      readFileSync(join(integrationRun.workspace, '.clew-runs', 'feature.log'), 'utf8'),
+      'T-15/feature\n',
+    );
+    assert.equal(
+      readFileSync(join(integrationRun.workspace, '.clew-runs', 'integration.log'), 'utf8'),
+      'T-15/integration\n',
+    );
+  } finally {
+    store?.close();
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('records an integration conflict as an explicit failed stage', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-conflict-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: (_task, stage) => ({
+      path: dir,
+      branch: `test-${stage}`,
+      baseSha: 'abc',
+    }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+    integrateCommits: () => {
+      throw new IntegrationConflictError('deadbeef', 'fixture conflict');
+    },
+  };
+  store.createTask({
+    id: 'T-16',
+    title: 'Conflict',
+    goal: 'Conflict',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager);
+
+  await assert.rejects(() => scheduler.runTask('T-16', 'deep', 'fake'), /plan stages failed/);
+
+  assert.equal(store.getTask('T-16').state, 'FAILED');
+  assert.equal(
+    store.listStages('T-16').find((stage) => stage.id === 'integration').status,
+    'FAILED',
+  );
+  assert.ok(store.listEvents('T-16').some((event) => event.type === 'INTEGRATION_CONFLICT'));
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

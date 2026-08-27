@@ -9,11 +9,16 @@ import {
 import { FakeReviewer, CodexReviewer } from './review.js';
 
 export class Scheduler {
-  constructor(store, workspaceManager, { harnessFactory = null, reviewerFactory = null } = {}) {
+  constructor(
+    store,
+    workspaceManager,
+    { harnessFactory = null, reviewerFactory = null, planFactory = null } = {},
+  ) {
     this.store = store;
     this.workspaceManager = workspaceManager;
     this.harnessFactory = harnessFactory;
     this.reviewerFactory = reviewerFactory;
+    this.planFactory = planFactory;
   }
   async runTask(taskId, requestedProfile, requestedHarness = null, requestedReviewHarness = null) {
     const row = this.store.getTask(taskId);
@@ -67,7 +72,7 @@ export class Scheduler {
       });
       this.store.setRunSession(runId, result.sessionId ?? null);
       const status = this.workspaceManager.getWorktreeStatus(workspace.path);
-      const revision = this.workspaceManager.commit
+      const revision = this.workspaceManager.commitWorktreeChanges
         ? this.workspaceManager.commitWorktreeChanges(
             workspace.path,
             `clew(${taskId}): worker attempt ${attempt}`,
@@ -126,78 +131,45 @@ export class Scheduler {
     const taskId = row.id;
     if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
       throw new Error(`task ${taskId} is already ${row.state}`);
-    const plan = validateExecutionPlan({
-      parallelizable: true,
-      stages: [
-        { id: 'backend', goal: `${row.contract.goal} (backend)`, dependsOn: [] },
-        { id: 'frontend', goal: `${row.contract.goal} (frontend)`, dependsOn: [] },
-        {
-          id: 'integration',
-          goal: `${row.contract.goal} (integration)`,
-          dependsOn: ['backend', 'frontend'],
-        },
-      ],
-    });
+    const proposedPlan = this.planFactory
+      ? await this.planFactory(row.contract, profile)
+      : this.createDefaultDeepPlan(row.contract);
+    const plan = validateExecutionPlan(proposedPlan);
+    const integrationStage = this.getIntegrationStage(plan);
     this.store.appendEvent(taskId, 'PLAN_VALIDATED', { plan });
-    if (row.state === 'DRAFT' || row.state === 'FAILED') this.store.setTaskState(taskId, 'QUEUED');
+    if (row.state !== 'QUEUED') {
+      assertValidTaskTransition(row.state, 'QUEUED');
+      this.store.setTaskState(taskId, 'QUEUED');
+    }
     this.store.setTaskState(taskId, 'EXECUTING');
     for (const stage of plan.stages)
       this.store.addStage(taskId, stage.id, stage.dependsOn, 'QUEUED');
-    const workerStages = plan.stages.filter((stage) => stage.id !== 'integration');
-    const workerResults = await Promise.allSettled(
-      workerStages.map((stage) =>
-        this.executeStage({ task: row.contract, stage, harness, harnessName, attempt: 1 }),
-      ),
-    );
-    const failures = workerResults.filter((result) => result.status === 'rejected');
-    if (failures.length) {
-      this.store.setStage(taskId, 'integration', 'BLOCKED');
-      this.store.appendEvent(taskId, 'INTEGRATION_BLOCKED', {
-        failedStages: workerStages
-          .filter((_, index) => workerResults[index].status === 'rejected')
-          .map((stage) => stage.id),
-      });
-      this.store.setTaskState(taskId, 'FAILED');
-      throw new Error('one or more parallel stages failed');
-    }
-    const completedWorkers = workerResults.map((result) => result.value);
-    this.store.appendEvent(taskId, 'INTEGRATION_STARTED', {
-      dependencies: ['backend', 'frontend'],
+    const execution = await this.executePlan({
+      task: row.contract,
+      plan,
+      harness,
+      harnessName,
+      maxWorkers: profile.maxWorkers,
+      integrationStageId: integrationStage.id,
     });
-    const integration = plan.stages.find((stage) => stage.id === 'integration');
-    let integrationResult;
-    try {
-      const integrationWorkspace = this.workspaceManager.createWorktree(
-        taskId,
-        integration.id,
-        row.contract.base_ref,
-        1,
-      );
-      if (this.workspaceManager.integrateCommits) {
-        const integrationGitResult = this.workspaceManager.integrateCommits(
-          integrationWorkspace.path,
-          completedWorkers.map((result) => result.revision),
-        );
-        this.store.appendEvent(taskId, 'COMMITS_INTEGRATED', integrationGitResult);
-      }
-      integrationResult = await this.executeStage({
-        task: row.contract,
-        stage: integration,
-        harness,
-        harnessName,
-        attempt: 1,
-        workspace: integrationWorkspace,
-      });
-    } catch (error) {
-      this.store.setStage(taskId, 'integration', 'FAILED');
+    if (execution.failures.size) {
       this.store.setTaskState(taskId, 'FAILED');
-      this.store.appendEvent(
-        taskId,
-        error.name === 'IntegrationConflictError' ? 'INTEGRATION_CONFLICT' : 'INTEGRATION_FAILED',
-        { message: error.message, commit: error.commit },
-      );
-      throw error;
+      const failedStages = [...execution.failures.keys()];
+      if (execution.blocked.includes(integrationStage.id)) {
+        this.store.appendEvent(taskId, 'INTEGRATION_BLOCKED', {
+          failedStages,
+          blockedStages: execution.blocked,
+        });
+      }
+      this.store.appendEvent(taskId, 'PLAN_EXECUTION_FAILED', {
+        failedStages,
+        blockedStages: execution.blocked,
+      });
+      throw new Error('one or more plan stages failed', {
+        cause: execution.failures.values().next().value,
+      });
     }
+    const integrationResult = execution.completed.get(integrationStage.id);
     this.store.appendEvent(taskId, 'INTEGRATION_COMPLETED', {
       result: 'passed',
       revision: integrationResult.revision,
@@ -218,6 +190,192 @@ export class Scheduler {
       state: this.store.getTask(taskId).state,
       stages: this.store.listStages(taskId),
     };
+  }
+
+  createDefaultDeepPlan(task) {
+    return {
+      parallelizable: true,
+      stages: [
+        { id: 'backend', goal: `${task.goal} (backend)`, dependsOn: [] },
+        { id: 'frontend', goal: `${task.goal} (frontend)`, dependsOn: [] },
+        {
+          id: 'integration',
+          kind: 'integration',
+          goal: `${task.goal} (integration)`,
+          dependsOn: ['backend', 'frontend'],
+        },
+      ],
+    };
+  }
+
+  getIntegrationStage(plan) {
+    const integrationStages = plan.stages.filter(
+      (stage) => stage.kind === 'integration' || stage.id === 'integration',
+    );
+    if (integrationStages.length !== 1)
+      throw new Error('a Deep plan must contain exactly one integration stage');
+    const integrationStage = integrationStages[0];
+    if (plan.stages.some((stage) => stage.dependsOn.includes(integrationStage.id)))
+      throw new Error('the integration stage must be terminal');
+
+    const stagesById = new Map(plan.stages.map((stage) => [stage.id, stage]));
+    const ancestors = new Set();
+    const collectAncestors = (stageId) => {
+      for (const dependency of stagesById.get(stageId).dependsOn) {
+        if (ancestors.has(dependency)) continue;
+        ancestors.add(dependency);
+        collectAncestors(dependency);
+      }
+    };
+    collectAncestors(integrationStage.id);
+    if (plan.stages.some((stage) => stage.id !== integrationStage.id && !ancestors.has(stage.id)))
+      throw new Error('every Deep plan stage must feed the integration stage');
+    return integrationStage;
+  }
+
+  async executePlan({ task, plan, harness, harnessName, maxWorkers, integrationStageId }) {
+    const pending = new Map(plan.stages.map((stage) => [stage.id, stage]));
+    const running = new Map();
+    const completed = new Map();
+    const failures = new Map();
+    const blocked = [];
+    const concurrencyLimit = Math.max(1, Number(maxWorkers) || 1);
+
+    while (pending.size || running.size) {
+      for (const [stageId, stage] of pending) {
+        const hasBlockedDependency = stage.dependsOn.some(
+          (dependency) => failures.has(dependency) || blocked.includes(dependency),
+        );
+        if (!hasBlockedDependency) continue;
+        pending.delete(stageId);
+        blocked.push(stageId);
+        this.store.setStage(task.id, stageId, 'BLOCKED');
+        this.store.appendEvent(task.id, 'STAGE_BLOCKED', {
+          stageId,
+          dependencies: stage.dependsOn,
+        });
+      }
+
+      const runnableStages = [...pending.values()].filter((stage) =>
+        stage.dependsOn.every((dependency) => completed.has(dependency)),
+      );
+      while (running.size < concurrencyLimit && runnableStages.length) {
+        const stage = runnableStages.shift();
+        pending.delete(stage.id);
+        const stageExecution = this.executePlannedStage({
+          task,
+          plan,
+          stage,
+          harness,
+          harnessName,
+          completed,
+          integrationStageId,
+        }).then(
+          (value) => ({ stageId: stage.id, status: 'fulfilled', value }),
+          (error) => ({ stageId: stage.id, status: 'rejected', error }),
+        );
+        running.set(stage.id, stageExecution);
+      }
+
+      if (!running.size) {
+        if (pending.size) throw new Error('validated plan reached an unrunnable state');
+        break;
+      }
+
+      const settledStage = await Promise.race(running.values());
+      running.delete(settledStage.stageId);
+      if (settledStage.status === 'fulfilled')
+        completed.set(settledStage.stageId, settledStage.value);
+      else failures.set(settledStage.stageId, settledStage.error);
+    }
+
+    return { completed, failures, blocked };
+  }
+
+  async executePlannedStage({
+    task,
+    plan,
+    stage,
+    harness,
+    harnessName,
+    completed,
+    integrationStageId,
+  }) {
+    let workspace;
+    const attempt =
+      this.store.listRuns(task.id).filter((run) => run.stage_id === stage.id).length + 1;
+    if (stage.id === integrationStageId) {
+      this.store.appendEvent(task.id, 'INTEGRATION_STARTED', {
+        dependencies: stage.dependsOn,
+      });
+    }
+    try {
+      workspace = this.workspaceManager.createWorktree(task.id, stage.id, task.base_ref, attempt);
+      const ancestorStageIds = this.getAncestorStageIds(plan, stage.id);
+      const dependencyRevisions = ancestorStageIds.map(
+        (ancestorId) => completed.get(ancestorId).revision,
+      );
+      if (dependencyRevisions.length && this.workspaceManager.integrateCommits) {
+        const integrationResult = this.workspaceManager.integrateCommits(
+          workspace.path,
+          dependencyRevisions,
+        );
+        this.store.appendEvent(task.id, 'STAGE_DEPENDENCIES_INTEGRATED', {
+          stageId: stage.id,
+          sourceStages: ancestorStageIds,
+          ...integrationResult,
+        });
+        if (stage.id === integrationStageId)
+          this.store.appendEvent(task.id, 'COMMITS_INTEGRATED', integrationResult);
+      }
+    } catch (error) {
+      this.store.setStage(task.id, stage.id, 'FAILED');
+      const eventType =
+        stage.id === integrationStageId
+          ? error.name === 'IntegrationConflictError'
+            ? 'INTEGRATION_CONFLICT'
+            : 'INTEGRATION_FAILED'
+          : 'STAGE_PREPARATION_FAILED';
+      this.store.appendEvent(task.id, eventType, {
+        stageId: stage.id,
+        message: error.message,
+        commit: error.commit,
+      });
+      throw error;
+    }
+    try {
+      return await this.executeStage({
+        task,
+        stage,
+        harness,
+        harnessName,
+        attempt,
+        workspace,
+      });
+    } catch (error) {
+      if (stage.id === integrationStageId)
+        this.store.appendEvent(task.id, 'INTEGRATION_FAILED', {
+          stageId: stage.id,
+          message: error.message,
+        });
+      throw error;
+    }
+  }
+
+  getAncestorStageIds(plan, stageId) {
+    const stagesById = new Map(plan.stages.map((stage) => [stage.id, stage]));
+    const visited = new Set();
+    const ordered = [];
+    const collect = (currentStageId) => {
+      for (const dependency of stagesById.get(currentStageId).dependsOn) {
+        if (visited.has(dependency)) continue;
+        collect(dependency);
+        visited.add(dependency);
+        ordered.push(dependency);
+      }
+    };
+    collect(stageId);
+    return ordered;
   }
 
   async executeStage({ task, stage, harness, harnessName, attempt, workspace = null }) {
@@ -250,7 +408,7 @@ export class Scheduler {
         onEvent: (event) => this.store.appendEvent(taskId, `HARNESS_${event.type}`, event),
       });
       const status = this.workspaceManager.getWorktreeStatus(stageWorkspace.path);
-      const revision = this.workspaceManager.commit
+      const revision = this.workspaceManager.commitWorktreeChanges
         ? this.workspaceManager.commitWorktreeChanges(
             stageWorkspace.path,
             `clew(${taskId}): ${stage.id} attempt ${attempt}`,
