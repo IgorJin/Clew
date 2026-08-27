@@ -9,11 +9,12 @@
 - Added machine-facing Codex app-server and OpenCode HTTP adapter boundaries with normalized lifecycle events.
 - Added a deterministic fake harness and tests for the first Quick flow.
 - Added a deterministic fake reviewer and Standard-flow review decision path.
+- Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
 - Documented the v0.1 release gates and implementation backlog.
 
 Known limitations:
 
 - Codex and OpenCode production protocol adapters are not yet enabled by default.
-- Standard review/retry and Deep parallel integration are still under implementation.
+- Native reviewer/retry and Deep parallel integration are still under implementation; fake review/retry is available for deterministic tests.
 - Worktrees are retained for inspection; cleanup policy is not automatic yet.
 - Node's built-in SQLite API is experimental in the supported runtime.

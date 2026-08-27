@@ -26,7 +26,7 @@ export class Scheduler {
           : harnessName === 'opencode'
             ? new OpenCodeHarness()
             : new ExternalHarnessUnavailable(harnessName);
-    if (row.state !== 'DRAFT' && row.state !== 'READY' && row.state !== 'FAILED')
+    if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
       throw new Error(`task ${taskId} is already ${row.state}`);
     if (!this.store.stages(taskId).length) this.store.addStage(taskId, 'worker', [], 'QUEUED');
     if (row.state !== 'QUEUED') {
@@ -84,11 +84,22 @@ export class Scheduler {
         else {
           this.store.setTaskState(taskId, 'FAILED');
           this.store.event(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
+          if (attempt < profile.maxAttempts) {
+            this.store.event(taskId, 'RETRY_SCHEDULED', {
+              failedAttempt: attempt,
+              nextAttempt: attempt + 1,
+              reason: 'blocking review findings',
+            });
+            this.store.setStage(taskId, 'worker', 'QUEUED');
+            this.store.setTaskState(taskId, 'QUEUED');
+            return this.runTask(taskId, requestedProfile, requestedHarness);
+          }
         }
       }
       return {
         taskId,
         runId,
+        attempt,
         workspace,
         revision: status.sha,
         state: this.store.getTask(taskId).state,

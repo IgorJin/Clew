@@ -48,3 +48,29 @@ test('runs standard profile through a review decision', async () => {
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+test('routes blocking review findings into bounded retries', async () => {
+  const previous = process.env.CLEW_FAKE_REVIEW;
+  process.env.CLEW_FAKE_REVIEW = 'request_changes';
+  const dir = mkdtempSync(join(tmpdir(), 'clew-retry-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    create: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  store.createTask({
+    id: 'T-5',
+    title: 'Retry',
+    goal: 'Retry',
+    profile: 'standard',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const result = await new Scheduler(store, workspaceManager).runTask('T-5', 'standard', 'fake');
+  assert.equal(result.state, 'FAILED');
+  assert.equal(store.runs('T-5').length, 3);
+  assert.equal(store.events('T-5').filter((event) => event.type === 'RETRY_SCHEDULED').length, 2);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+  if (previous === undefined) delete process.env.CLEW_FAKE_REVIEW;
+  else process.env.CLEW_FAKE_REVIEW = previous;
+});

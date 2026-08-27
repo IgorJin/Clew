@@ -196,11 +196,11 @@ node bin/clew.js doctor
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                      |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server        |
-| `standard` | fake worker проходит через fake review и сохраняет `REVIEW_RECORDED`; native review/retry orchestration пока не завершены |
-| `deep`     | контракт и профиль сохраняются; architect/DAG/parallel integration пока не завершены                                      |
+| Profile    | Сейчас можно ожидать                                                                                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                           |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены |
+| `deep`     | контракт и профиль сохраняются; architect/DAG/parallel integration пока не завершены                                                                                         |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -211,7 +211,7 @@ node bin/clew.js doctor
 - полноценный Codex app-server lifecycle с production-grade reconnect/resume;
 - live OpenCode session/event stream во всех поддерживаемых версиях;
 - native reviewer и structured review findings;
-- retry routing по классификации failures;
+- retry routing по общей классификации failures и native-session reuse;
 - architect plan с human approval;
 - настоящий multi-stage DAG и parallel workers;
 - интеграция результатов worktrees и merge-conflict workflow;
@@ -230,7 +230,7 @@ node bin/clew.js doctor
 1. Запустить `npm run check` и Quick fixture.
 2. Проверить Codex app-server в конкретном локальном окружении.
 3. Проверить OpenCode endpoint и зафиксировать поддерживаемую версию.
-4. Добавить review/retry поверх уже существующего event model.
+4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
 5. Только затем включать Deep/parallel flow и dashboard.
 
 Если нужен следующий конкретный шаг, берите `CLEW-006` (Codex protocol spike), затем `CLEW-016` (production `CodexHarness`) и `CLEW-022` (Quick E2E acceptance fixture).
