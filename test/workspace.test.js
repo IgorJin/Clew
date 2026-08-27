@@ -25,6 +25,10 @@ test('creates, inspects, and removes an isolated worktree', () => {
     const workspace = manager.createWorktree('T-3', 'worker');
 
     assert.equal(manager.getWorktreeStatus(workspace.path).dirty, false);
+    assert.equal(
+      manager.listWorktrees().some((entry) => entry.path === workspace.path),
+      true,
+    );
     manager.removeWorktree(workspace.path);
   } finally {
     rmSync(root, { recursive: true, force: true });

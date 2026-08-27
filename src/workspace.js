@@ -23,6 +23,7 @@ export class GitWorktreeManager {
     this.root = resolve(root);
     this.projectRoot = resolve(projectRoot);
     mkdirSync(this.root, { recursive: true });
+    this.root = realpathSync(this.root);
   }
   createWorktree(taskId, stageId, baseRef = 'HEAD', attempt = 1) {
     const suffix = attempt > 1 ? `-attempt-${attempt}` : '';
@@ -33,8 +34,9 @@ export class GitWorktreeManager {
     try {
       runGitCommand(['worktree', 'add', '-b', branch, path, baseRef], this.projectRoot);
       const baseSha = runGitCommand(['rev-parse', baseRef], this.projectRoot);
+      const canonicalPath = realpathSync(path);
 
-      return { path, branch, baseSha };
+      return { path: canonicalPath, branch, baseSha };
     } catch (error) {
       if (path.startsWith(`${this.root}/`)) rmSync(path, { recursive: true, force: true });
       throw error;
