@@ -7,27 +7,49 @@ import {
   ExternalHarnessUnavailable,
 } from './harness.js';
 import { FakeReviewer, CodexReviewer } from './review.js';
+import { FakeArchitect, CodexArchitect } from './architect.js';
 
 export class Scheduler {
   constructor(
     store,
     workspaceManager,
-    { harnessFactory = null, reviewerFactory = null, planFactory = null } = {},
+    {
+      harnessFactory = null,
+      reviewerFactory = null,
+      architectFactory = null,
+      planFactory = null,
+      requirePlanApproval = true,
+    } = {},
   ) {
     this.store = store;
     this.workspaceManager = workspaceManager;
     this.harnessFactory = harnessFactory;
     this.reviewerFactory = reviewerFactory;
+    this.architectFactory = architectFactory;
     this.planFactory = planFactory;
+    this.requirePlanApproval = requirePlanApproval;
   }
-  async runTask(taskId, requestedProfile, requestedHarness = null, requestedReviewHarness = null) {
+  async runTask(
+    taskId,
+    requestedProfile,
+    requestedHarness = null,
+    requestedReviewHarness = null,
+    requestedArchitect = null,
+  ) {
     const row = this.store.getTask(taskId);
     if (!row) throw new Error(`task not found: ${taskId}`);
     const profile = resolveProfile(requestedProfile || row.contract.profile);
     const harnessName = requestedHarness || profile.harness;
     const harness = this.createHarnessAdapter(harnessName);
     if (profile.mode === 'parallel')
-      return this.runDeep(row, profile, harness, harnessName, requestedReviewHarness);
+      return this.runDeep(
+        row,
+        profile,
+        harness,
+        harnessName,
+        requestedReviewHarness,
+        requestedArchitect,
+      );
     if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
       throw new Error(`task ${taskId} is already ${row.state}`);
     if (!this.store.listStages(taskId).length) this.store.addStage(taskId, 'worker', [], 'QUEUED');
@@ -127,35 +149,81 @@ export class Scheduler {
     }
   }
 
-  async runDeep(row, profile, harness, harnessName, requestedReviewHarness = null) {
+  async runDeep(
+    row,
+    profile,
+    harness,
+    harnessName,
+    requestedReviewHarness = null,
+    requestedArchitect = null,
+  ) {
     const taskId = row.id;
     if (
       ![
         'DRAFT',
+        'PLAN_READY',
         'QUEUED',
         'RECOVERING',
         'EXECUTING',
         'VERIFYING',
         'REVIEWING',
+        'WAITING_FOR_HUMAN',
         'READY',
         'FAILED',
         'BLOCKED',
       ].includes(row.state)
     )
       throw new Error(`task ${taskId} is already ${row.state}`);
-    const persistedPlan = this.store.getLatestPlan(taskId);
+    const latestPlan = this.store.getLatestPlan(taskId);
+    const persistedPlan = latestPlan?.status === 'REJECTED' ? null : latestPlan;
+    if (!persistedPlan) {
+      this.store.appendEvent(taskId, 'ARCHITECT_STARTED', {
+        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : 'fake'),
+      });
+    }
     const proposedPlan = persistedPlan
       ? persistedPlan.plan
       : this.planFactory
         ? await this.planFactory(row.contract, profile)
-        : this.createDefaultDeepPlan(row.contract);
+        : await this.createArchitectAdapter(requestedArchitect).createPlan({
+            task: row.contract,
+            cwd: this.workspaceManager.projectRoot ?? process.cwd(),
+          });
     const plan = validateExecutionPlan(proposedPlan);
     const integrationStage = this.getIntegrationStage(plan);
-    const planRecord = persistedPlan ?? this.store.savePlan(taskId, plan);
+    const planRecord =
+      persistedPlan ??
+      this.store.savePlan(taskId, plan, this.requirePlanApproval ? 'PENDING_APPROVAL' : 'APPROVED');
+    if (!persistedPlan) {
+      this.store.appendEvent(taskId, 'ARCHITECT_COMPLETED', {
+        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : 'fake'),
+        planVersion: planRecord.version,
+      });
+    }
     this.store.appendEvent(taskId, 'PLAN_VALIDATED', {
       version: planRecord.version,
       plan,
     });
+    if (planRecord.status !== 'APPROVED') {
+      if (row.state !== 'WAITING_FOR_HUMAN') {
+        if (row.state !== 'PLAN_READY') {
+          assertValidTaskTransition(row.state, 'PLAN_READY');
+          this.store.setTaskState(taskId, 'PLAN_READY');
+        }
+        this.store.setTaskState(taskId, 'WAITING_FOR_HUMAN');
+      }
+      this.store.appendEvent(taskId, 'PLAN_APPROVAL_REQUIRED', {
+        version: planRecord.version,
+        gateId: 'deep-plan',
+      });
+      return {
+        taskId,
+        state: 'WAITING_FOR_HUMAN',
+        attention: 'PLAN_APPROVAL_REQUIRED',
+        planVersion: planRecord.version,
+        plan,
+      };
+    }
     const existingStages = this.store.listStages(taskId);
     for (const stage of plan.stages)
       this.store.addStage(taskId, stage.id, stage.dependsOn, 'QUEUED');
@@ -231,22 +299,6 @@ export class Scheduler {
       plan,
       state: this.store.getTask(taskId).state,
       stages: this.store.listStages(taskId),
-    };
-  }
-
-  createDefaultDeepPlan(task) {
-    return {
-      parallelizable: true,
-      stages: [
-        { id: 'backend', goal: `${task.goal} (backend)`, dependsOn: [] },
-        { id: 'frontend', goal: `${task.goal} (frontend)`, dependsOn: [] },
-        {
-          id: 'integration',
-          kind: 'integration',
-          goal: `${task.goal} (integration)`,
-          dependsOn: ['backend', 'frontend'],
-        },
-      ],
     };
   }
 
@@ -576,5 +628,10 @@ export class Scheduler {
   createReviewerAdapter(reviewerName) {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
     return reviewerName === 'codex' ? new CodexReviewer(new CodexHarness()) : new FakeReviewer();
+  }
+
+  createArchitectAdapter(architectName) {
+    if (this.architectFactory) return this.architectFactory(architectName);
+    return architectName === 'codex' ? new CodexArchitect(new CodexHarness()) : new FakeArchitect();
   }
 }

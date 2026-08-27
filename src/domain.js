@@ -25,7 +25,7 @@ const transitions = {
   WAITING_FOR_HUMAN: ['QUEUED', 'PLAN_READY', 'READY', 'CANCELLED', 'FAILED'],
   READY: ['COMPLETED', 'QUEUED', 'CANCELLED'],
   COMPLETED: [],
-  FAILED: ['RECOVERING', 'QUEUED', 'CANCELLED'],
+  FAILED: ['PLAN_READY', 'RECOVERING', 'QUEUED', 'CANCELLED'],
   CANCELLED: [],
   BLOCKED: ['RECOVERING', 'QUEUED'],
 };
@@ -106,10 +106,14 @@ export function resolveProfile(profileName) {
 export function validateExecutionPlan(plan) {
   if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages) || !plan.stages.length)
     throw new Error('plan.stages must contain at least one stage');
+  if (typeof plan.parallelizable !== 'boolean')
+    throw new Error('plan.parallelizable must be a boolean');
   const ids = new Set();
   for (const stage of plan.stages) {
     if (!stage || typeof stage.id !== 'string' || !stage.id.trim())
       throw new Error('plan stage id is required');
+    if (typeof stage.goal !== 'string' || !stage.goal.trim())
+      throw new Error(`plan stage ${stage.id}.goal is required`);
     if (ids.has(stage.id)) throw new Error(`duplicate plan stage ${stage.id}`);
     ids.add(stage.id);
     if (stage.dependsOn !== undefined && !Array.isArray(stage.dependsOn))

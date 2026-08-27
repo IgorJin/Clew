@@ -38,13 +38,19 @@ Clew сейчас — локальный CLI, который связывает 
 
 ```text
 .clew/
-├── clew.sqlite       # tasks, stages, runs, events
+├── clew.sqlite       # tasks, plans, approvals, stages, runs, events
 └── worktrees/        # worktrees, которыми владеет Clew
 ```
 
 Event history append-only по смыслу: создание задачи, смена состояния, запуск harness, обнаруженное verification и ошибка сохраняются отдельно. Это позволяет объяснить, что происходило, без доступа к истории чата агента.
 
 Deep plan сохраняется в SQLite с номером версии до запуска stages. Если процесс Clew завершился посередине DAG, повторный `clew run TASK-ID --profile deep` переводит задачу в `RECOVERING`: завершённые stages восстанавливаются по persisted run/revision/evidence, оставшиеся `RUNNING` attempts получают статус `INTERRUPTED`, а незавершённая часть плана ставится в очередь заново.
+
+### Architect and plan approval
+
+Первый Deep run создаёт план через `fake` architect или отдельный read-only Codex turn. План проходит schema/DAG/integration validation, сохраняется со статусом `PENDING_APPROVAL`, а задача останавливается в `WAITING_FOR_HUMAN`. До решения человека Clew не создаёт ни одного worker worktree.
+
+Команды `approve` и `reject` записывают actor, gate, причину, timestamp и решение в таблицу approvals и event history одной SQLite-транзакцией. Одобренный план получает статус `APPROVED` и переводит задачу в `PLAN_READY`; отклонённый план не может быть выполнен, а следующий run создаёт новую версию.
 
 ### Git worktree isolation
 
@@ -212,15 +218,44 @@ node bin/clew.js doctor
 
 Сейчас `doctor` проверяет наличие подходящего Node.js и Git. Это минимальная диагностика; проверки Codex/OpenCode/auth/version будут расширяться по мере live-интеграции.
 
+## Сценарий 6: создать и подтвердить Deep plan
+
+Детерминированная локальная демонстрация без внешнего Codex:
+
+```sh
+node bin/clew.js run TASK-ID --profile deep --harness fake --architect fake
+node bin/clew.js plan TASK-ID
+node bin/clew.js approve TASK-ID
+node bin/clew.js run TASK-ID --profile deep --harness fake
+```
+
+Первый `run` возвращает `WAITING_FOR_HUMAN` и `PLAN_APPROVAL_REQUIRED`. `plan` показывает JSON плана, номер версии, статус и историю решений. После `approve` второй `run` начинает DAG execution.
+
+Для native architect:
+
+```sh
+node bin/clew.js run TASK-ID --profile deep --harness fake --architect codex
+```
+
+Architect использует отдельный Codex app-server turn с `readOnly: true` и JSON `outputSchema`. Worker при этом может оставаться `fake`. Нужен доступный и авторизованный `codex app-server`.
+
+Чтобы отклонить план:
+
+```sh
+node bin/clew.js reject TASK-ID --reason "Разделить backend на два stage"
+```
+
+Следующий Deep run создаст новую версию плана и снова запросит подтверждение.
+
 ## Что означают профили сейчас
 
 Названия профилей и базовая policy уже валидируются:
 
-| Profile    | Сейчас можно ожидать                                                                                                                                                                                                                      |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                                                        |
-| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                                                              |
-| `deep`     | scheduler исполняет произвольный валидный DAG, запускает готовые stages с лимитом `maxWorkers`, переносит транзитивные commits, блокирует зависимости и восстанавливает незавершённый план после рестарта; native architect пока не готов |
+| Profile    | Сейчас можно ожидать                                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                                                         |
+| `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены                               |
+| `deep`     | fake или read-only Codex architect создаёт versioned plan; обязательный approval gate предшествует worktrees; scheduler исполняет DAG с `maxWorkers`, переносит commits и восстанавливается после рестарта |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -232,7 +267,8 @@ node bin/clew.js doctor
 - live OpenCode session/event stream во всех поддерживаемых версиях;
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
-- native architect plan, его сохранение и human approval;
+- live-валидация native Codex architect на зафиксированной версии app-server; fake architect и protocol boundary уже покрыты тестами;
+- остальные human gates кроме подтверждения Deep plan, включая approvals от harness tools;
 - reconnect/resume активной native Codex/OpenCode session; локальный Deep recovery сейчас создаёт новую попытку после `INTERRUPTED`;
 - автоматическое или human-assisted разрешение merge conflicts и выборочная политика интеграции commits;
 - автоматическая cleanup policy для worktrees;
@@ -251,6 +287,6 @@ node bin/clew.js doctor
 2. Проверить Codex app-server в конкретном локальном окружении.
 3. Проверить OpenCode endpoint и зафиксировать поддерживаемую версию.
 4. Подключить native reviewer/retry routing поверх уже существующего fake review path.
-5. Подключить native architect и persisted plan к уже работающему DAG executor.
+5. Проверить native architect и reviewer на реальном Codex app-server.
 
-Следующий крупный шаг для orchestration core — native architect и persisted plan approval: получить DAG из read-only Codex, показать его человеку и запретить execution до явного approve.
+Следующий крупный шаг для orchestration core — production-grade Codex approvals/interrupt lifecycle и adapter conformance kit.

@@ -25,7 +25,7 @@ function printJson(data) {
 }
 function printHelp() {
   console.log(
-    `Clew v0.1.0-alpha.1\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew run ID [--profile PROFILE] [--harness fake]\n  clew status ID\n  clew events ID\n  clew doctor`,
+    `Clew v0.1.0-alpha.3\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--architect fake|codex]\n  clew status ID\n  clew events ID\n  clew doctor`,
   );
 }
 
@@ -66,9 +66,28 @@ export async function main(args) {
       if (!task) throw new Error(`task not found: ${rest[0]}`);
       return printJson({
         ...task,
+        plan: store.getLatestPlan(task.id),
+        approvals: store.listApprovals(task.id),
         stages: store.listStages(task.id),
         runs: store.listRuns(task.id),
       });
+    }
+    if (command === 'plan') {
+      const plan = store.getLatestPlan(subcommand);
+      if (!plan) throw new Error(`plan not found for task ${subcommand}`);
+      return printJson({ ...plan, approvals: store.listApprovals(subcommand) });
+    }
+    if (command === 'approve' || command === 'reject') {
+      const id = subcommand;
+      if (!id) throw new Error('task id is required');
+      const positionalGate = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
+      const decision = command === 'approve' ? 'APPROVED' : 'REJECTED';
+      const result = store.decideLatestPlan(id, decision, {
+        gateId: positionalGate || 'deep-plan',
+        actor: getOptionValue(rest, '--actor', process.env.USER || 'local-user'),
+        reason: getOptionValue(rest, '--reason'),
+      });
+      return printJson(result);
     }
     if (command === 'run') {
       const id = subcommand;
@@ -79,6 +98,7 @@ export async function main(args) {
         getOptionValue(rest, '--profile'),
         getOptionValue(rest, '--harness'),
         getOptionValue(rest, '--review-harness'),
+        getOptionValue(rest, '--architect'),
       );
       return printJson(result);
     }
@@ -88,6 +108,8 @@ export async function main(args) {
       return printJson({
         id: task.id,
         state: task.state,
+        plan: store.getLatestPlan(task.id),
+        approvals: store.listApprovals(task.id),
         stages: store.listStages(task.id),
         runs: store.listRuns(task.id),
       });

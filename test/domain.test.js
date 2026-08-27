@@ -39,16 +39,22 @@ test('requires explicit ids for object acceptance criteria', () => {
 });
 test('validates an acyclic execution plan', () => {
   assert.equal(
-    validateExecutionPlan({ stages: [{ id: 'a' }, { id: 'b', dependsOn: ['a'] }] }).stages[1]
-      .dependsOn[0],
+    validateExecutionPlan({
+      parallelizable: false,
+      stages: [
+        { id: 'a', goal: 'A' },
+        { id: 'b', goal: 'B', dependsOn: ['a'] },
+      ],
+    }).stages[1].dependsOn[0],
     'a',
   );
   assert.throws(
     () =>
       validateExecutionPlan({
+        parallelizable: false,
         stages: [
-          { id: 'a', dependsOn: ['b'] },
-          { id: 'b', dependsOn: ['a'] },
+          { id: 'a', goal: 'A', dependsOn: ['b'] },
+          { id: 'b', goal: 'B', dependsOn: ['a'] },
         ],
       }),
     /cycle/,

@@ -104,7 +104,9 @@ test('runs deep profile through planned worker and integration stages', async ()
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  const result = await new Scheduler(store, workspaceManager).runTask('T-6', 'deep', 'fake');
+  const result = await new Scheduler(store, workspaceManager, {
+    requirePlanApproval: false,
+  }).runTask('T-6', 'deep', 'fake');
   assert.equal(result.state, 'READY');
   assert.deepEqual(
     store.listStages('T-6').map((stage) => stage.id),
@@ -112,6 +114,78 @@ test('runs deep profile through planned worker and integration stages', async ()
   );
   assert.ok(store.listEvents('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
   assert.equal(store.listRuns('T-6').length, 3);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('requires an audited human approval before Deep execution', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-approval-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let allocatedWorktrees = 0;
+  const workspaceManager = {
+    createWorktree: (_task, stage) => {
+      allocatedWorktrees += 1;
+      return { path: dir, branch: `test-${stage}`, baseSha: 'abc' };
+    },
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  store.createTask({
+    id: 'T-20',
+    title: 'Approval',
+    goal: 'Approval',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager);
+
+  const waitingResult = await scheduler.runTask('T-20', 'deep', 'fake');
+
+  assert.equal(waitingResult.state, 'WAITING_FOR_HUMAN');
+  assert.equal(waitingResult.attention, 'PLAN_APPROVAL_REQUIRED');
+  assert.equal(store.getLatestPlan('T-20').status, 'PENDING_APPROVAL');
+  assert.equal(store.listRuns('T-20').length, 0);
+  assert.equal(allocatedWorktrees, 0);
+
+  store.decideLatestPlan('T-20', 'APPROVED', { actor: 'fixture-user' });
+  const completedResult = await scheduler.runTask('T-20', 'deep', 'fake');
+
+  assert.equal(completedResult.state, 'READY');
+  assert.equal(store.getLatestPlan('T-20').status, 'APPROVED');
+  assert.equal(store.listApprovals('T-20')[0].actor, 'fixture-user');
+  assert.equal(store.listRuns('T-20').length, 3);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('rejected Deep plans are replaced by a new approval-gated version', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-rejected-plan-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: () => {
+      throw new Error('a rejected or pending plan must not allocate worktrees');
+    },
+  };
+  store.createTask({
+    id: 'T-21',
+    title: 'Rejected plan',
+    goal: 'Rejected plan',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager);
+  await scheduler.runTask('T-21', 'deep', 'fake');
+  store.decideLatestPlan('T-21', 'REJECTED', {
+    actor: 'fixture-user',
+    reason: 'Split the work differently',
+  });
+
+  const result = await scheduler.runTask('T-21', 'deep', 'fake');
+
+  assert.equal(result.state, 'WAITING_FOR_HUMAN');
+  assert.equal(store.getLatestPlan('T-21').version, 2);
+  assert.equal(store.getLatestPlan('T-21').status, 'PENDING_APPROVAL');
+  assert.equal(store.listApprovals('T-21')[0].decision, 'REJECTED');
+  assert.equal(store.listRuns('T-21').length, 0);
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -141,7 +215,10 @@ test('runs independent deep stages concurrently before integration', async () =>
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => harness,
+    requirePlanApproval: false,
+  });
   const result = await scheduler.runTask('T-9', 'deep', 'fake');
   assert.equal(result.state, 'READY');
   assert.equal(maxActive, 2);
@@ -181,7 +258,10 @@ test('blocks integration when a parallel dependency fails', async () => {
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  const scheduler = new Scheduler(store, workspaceManager, { harnessFactory: () => harness });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    harnessFactory: () => harness,
+    requirePlanApproval: false,
+  });
   await assert.rejects(() => scheduler.runTask('T-10', 'deep', 'fake'), /plan stages failed/);
   assert.equal(store.getTask('T-10').state, 'FAILED');
   assert.equal(
@@ -242,6 +322,7 @@ test('runs an arbitrary multi-level DAG in dependency order', async () => {
   const scheduler = new Scheduler(store, workspaceManager, {
     harnessFactory: () => harness,
     planFactory,
+    requirePlanApproval: false,
   });
 
   const result = await scheduler.runTask('T-13', 'deep', 'fake');
@@ -302,6 +383,7 @@ test('enforces the Deep profile worker concurrency limit', async () => {
   const scheduler = new Scheduler(store, workspaceManager, {
     harnessFactory: () => harness,
     planFactory,
+    requirePlanApproval: false,
   });
 
   const result = await scheduler.runTask('T-14', 'deep', 'fake');
@@ -347,7 +429,10 @@ test('carries transitive stage commits into the integration worktree', async () 
       base_ref: 'main',
       acceptance: [{ id: 'AC-1', criterion: 'works' }],
     });
-    const scheduler = new Scheduler(store, workspaceManager, { planFactory });
+    const scheduler = new Scheduler(store, workspaceManager, {
+      planFactory,
+      requirePlanApproval: false,
+    });
 
     const result = await scheduler.runTask('T-15', 'deep', 'fake');
 
@@ -392,7 +477,7 @@ test('records an integration conflict as an explicit failed stage', async () => 
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  const scheduler = new Scheduler(store, workspaceManager);
+  const scheduler = new Scheduler(store, workspaceManager, { requirePlanApproval: false });
 
   await assert.rejects(() => scheduler.runTask('T-16', 'deep', 'fake'), /plan stages failed/);
 
@@ -447,6 +532,7 @@ test('resumes a persisted DAG without rerunning completed stages', async () => {
   const firstScheduler = new Scheduler(store, workspaceManager, {
     harnessFactory: () => failingHarness,
     planFactory: () => plan,
+    requirePlanApproval: false,
   });
   await assert.rejects(() => firstScheduler.runTask('T-17', 'deep', 'fake'), /plan stages failed/);
   store.close();
@@ -464,6 +550,7 @@ test('resumes a persisted DAG without rerunning completed stages', async () => {
     planFactory: () => {
       throw new Error('persisted plan was not reused');
     },
+    requirePlanApproval: false,
   });
 
   const result = await resumedScheduler.runTask('T-17', 'deep', 'fake');
@@ -494,18 +581,22 @@ test('interrupts a persisted running attempt before resuming it', async () => {
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  store.savePlan('T-18', {
-    parallelizable: false,
-    stages: [
-      { id: 'worker', goal: 'Worker', dependsOn: [] },
-      {
-        id: 'integration',
-        kind: 'integration',
-        goal: 'Integration',
-        dependsOn: ['worker'],
-      },
-    ],
-  });
+  store.savePlan(
+    'T-18',
+    {
+      parallelizable: false,
+      stages: [
+        { id: 'worker', goal: 'Worker', dependsOn: [] },
+        {
+          id: 'integration',
+          kind: 'integration',
+          goal: 'Integration',
+          dependsOn: ['worker'],
+        },
+      ],
+    },
+    'APPROVED',
+  );
   store.addStage('T-18', 'worker', [], 'RUNNING');
   store.addStage('T-18', 'integration', ['worker'], 'QUEUED');
   store.setTaskState('T-18', 'QUEUED');
@@ -531,7 +622,7 @@ test('interrupts a persisted running attempt before resuming it', async () => {
     }),
     getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
   };
-  const scheduler = new Scheduler(store, workspaceManager);
+  const scheduler = new Scheduler(store, workspaceManager, { requirePlanApproval: false });
 
   const result = await scheduler.runTask('T-18', 'deep', 'fake');
 
@@ -559,18 +650,22 @@ test('blocks recovery when a completed stage has no persisted revision', async (
     profile: 'deep',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
-  store.savePlan('T-19', {
-    parallelizable: false,
-    stages: [
-      { id: 'worker', goal: 'Worker', dependsOn: [] },
-      {
-        id: 'integration',
-        kind: 'integration',
-        goal: 'Integration',
-        dependsOn: ['worker'],
-      },
-    ],
-  });
+  store.savePlan(
+    'T-19',
+    {
+      parallelizable: false,
+      stages: [
+        { id: 'worker', goal: 'Worker', dependsOn: [] },
+        {
+          id: 'integration',
+          kind: 'integration',
+          goal: 'Integration',
+          dependsOn: ['worker'],
+        },
+      ],
+    },
+    'APPROVED',
+  );
   store.addStage('T-19', 'worker', [], 'COMPLETED');
   store.addStage('T-19', 'integration', ['worker'], 'QUEUED');
   store.setTaskState('T-19', 'QUEUED');
@@ -585,11 +680,15 @@ test('blocks recovery when a completed stage has no persisted revision', async (
     workspace: dir,
     startedAt: new Date().toISOString(),
   });
-  const scheduler = new Scheduler(store, {
-    createWorktree: () => {
-      throw new Error('recovery must stop before allocating a worktree');
+  const scheduler = new Scheduler(
+    store,
+    {
+      createWorktree: () => {
+        throw new Error('recovery must stop before allocating a worktree');
+      },
     },
-  });
+    { requirePlanApproval: false },
+  );
 
   await assert.rejects(
     () => scheduler.runTask('T-19', 'deep', 'fake'),

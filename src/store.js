@@ -10,12 +10,27 @@ export class Store {
       PRAGMA foreign_keys=ON;
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, contract TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS stages (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, id TEXT NOT NULL, status TEXT NOT NULL, depends_on TEXT NOT NULL, PRIMARY KEY(task_id,id));
-      CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
+      CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'APPROVED', created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
+      CREATE TABLE IF NOT EXISTS approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, plan_version INTEGER NOT NULL, gate_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT, actor TEXT NOT NULL, at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
+    const planColumns = this.db.prepare('PRAGMA table_info(plans)').all();
+    if (!planColumns.some((column) => column.name === 'status'))
+      this.db.exec("ALTER TABLE plans ADD COLUMN status TEXT NOT NULL DEFAULT 'APPROVED'");
   }
   close() {
     this.db.close();
+  }
+  runInTransaction(operation) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = operation();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   createTask(contract) {
     const now = new Date().toISOString();
@@ -43,20 +58,61 @@ export class Store {
       .prepare('INSERT OR IGNORE INTO stages VALUES (?, ?, ?, ?)')
       .run(taskId, id, status, JSON.stringify(dependsOn));
   }
-  savePlan(taskId, plan) {
-    const latestPlan = this.getLatestPlan(taskId);
-    const version = (latestPlan?.version ?? 0) + 1;
-    this.db
-      .prepare('INSERT INTO plans (task_id,version,plan,created_at) VALUES (?,?,?,?)')
-      .run(taskId, version, JSON.stringify(plan), new Date().toISOString());
-    this.appendEvent(taskId, 'PLAN_PERSISTED', { version, plan });
-    return { version, plan };
+  savePlan(taskId, plan, status = 'PENDING_APPROVAL') {
+    return this.runInTransaction(() => {
+      const latestPlan = this.getLatestPlan(taskId);
+      const version = (latestPlan?.version ?? 0) + 1;
+      this.db
+        .prepare('INSERT INTO plans (task_id,version,plan,status,created_at) VALUES (?,?,?,?,?)')
+        .run(taskId, version, JSON.stringify(plan), status, new Date().toISOString());
+      this.appendEvent(taskId, 'PLAN_PERSISTED', { version, status, plan });
+      return { version, status, plan };
+    });
   }
   getLatestPlan(taskId) {
     const row = this.db
       .prepare('SELECT * FROM plans WHERE task_id=? ORDER BY version DESC LIMIT 1')
       .get(taskId);
     return row ? { ...row, plan: JSON.parse(row.plan) } : null;
+  }
+  decideLatestPlan(
+    taskId,
+    decision,
+    { gateId = 'deep-plan', actor = 'local-user', reason = null } = {},
+  ) {
+    if (!['APPROVED', 'REJECTED'].includes(decision))
+      throw new Error('plan decision must be APPROVED or REJECTED');
+    return this.runInTransaction(() => {
+      const plan = this.getLatestPlan(taskId);
+      if (!plan) throw new Error(`plan not found for task ${taskId}`);
+      if (plan.status !== 'PENDING_APPROVAL')
+        throw new Error(`plan ${taskId} v${plan.version} is already ${plan.status}`);
+      const task = this.getTask(taskId);
+      if (task?.state !== 'WAITING_FOR_HUMAN')
+        throw new Error(`task ${taskId} is not waiting for plan approval`);
+      const at = new Date().toISOString();
+      this.db
+        .prepare('UPDATE plans SET status=? WHERE task_id=? AND version=?')
+        .run(decision, taskId, plan.version);
+      this.db
+        .prepare(
+          'INSERT INTO approvals (task_id,plan_version,gate_id,decision,reason,actor,at) VALUES (?,?,?,?,?,?,?)',
+        )
+        .run(taskId, plan.version, gateId, decision, reason, actor, at);
+      this.appendEvent(taskId, decision === 'APPROVED' ? 'PLAN_APPROVED' : 'PLAN_REJECTED', {
+        version: plan.version,
+        gateId,
+        decision,
+        reason,
+        actor,
+        at,
+      });
+      this.setTaskState(taskId, decision === 'APPROVED' ? 'PLAN_READY' : 'FAILED');
+      return { ...plan, status: decision, decision: { gateId, actor, reason, at } };
+    });
+  }
+  listApprovals(taskId) {
+    return this.db.prepare('SELECT * FROM approvals WHERE task_id=? ORDER BY seq').all(taskId);
   }
   listStages(taskId) {
     return this.db
