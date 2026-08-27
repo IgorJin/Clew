@@ -27,7 +27,35 @@ export const APPROVAL_DECISION = Object.freeze({
   CANCEL: 'cancel',
 });
 
+export const TURN_STATUS = Object.freeze({
+  COMPLETED: 'completed',
+  INTERRUPTED: 'interrupted',
+  IN_PROGRESS: 'inProgress',
+});
+
 const APPROVAL_DECISIONS = Object.freeze(Object.values(APPROVAL_DECISION));
+
+function hasInterruptableTurn(interruptRequested, threadId, turnId, settled) {
+  return interruptRequested && Boolean(threadId) && Boolean(turnId) && !settled;
+}
+
+function isInterruptedTurn(status, interruptRequested) {
+  return status === TURN_STATUS.INTERRUPTED || interruptRequested;
+}
+
+function getTurnId(params, currentTurnId) {
+  return params.turnId || currentTurnId;
+}
+
+function isApprovalRequest(message, method) {
+  return message.id !== undefined && method.endsWith('/requestApproval');
+}
+
+function isApprovalNotification(method) {
+  const normalizedMethod = method.toLowerCase();
+
+  return normalizedMethod.includes('approval') || method.includes('permission');
+}
 
 export class HarnessInterruptedError extends Error {
   constructor(harnessName) {
@@ -188,7 +216,7 @@ export class CodexHarness {
       const sendRpcNotification = (method, params) =>
         child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
       const sendInterrupt = () => {
-        if (!interruptRequested || !threadId || !turnId || settled) return;
+        if (!hasInterruptableTurn(interruptRequested, threadId, turnId, settled)) return;
         onEvent({
           type: HARNESS_EVENT_TYPE.INTERRUPT_REQUESTED,
           sessionId: getSessionId(),
@@ -239,7 +267,7 @@ export class CodexHarness {
         if (method === 'turn/completed') {
           const status = params.turn?.status || params.status;
 
-          if (status === 'interrupted' || interruptRequested)
+          if (isInterruptedTurn(status, interruptRequested))
             return settleRequest(
               resolve,
               reject,
@@ -261,11 +289,11 @@ export class CodexHarness {
             HARNESS_EVENT_TYPE.HARNESS_COMPLETED,
           );
         }
-        if (message.id !== undefined && method.endsWith('/requestApproval')) {
+        if (isApprovalRequest(message, method)) {
           onEvent({
             type: HARNESS_EVENT_TYPE.APPROVAL_REQUIRED,
             sessionId: getSessionId(),
-            turnId: params.turnId || turnId,
+            turnId: getTurnId(params, turnId),
             approvalId: message.id,
             method,
             params,
@@ -279,7 +307,7 @@ export class CodexHarness {
               onEvent({
                 type: HARNESS_EVENT_TYPE.APPROVAL_DECIDED,
                 sessionId: getSessionId(),
-                turnId: params.turnId || turnId,
+                turnId: getTurnId(params, turnId),
                 approvalId: message.id,
                 decision,
               });
@@ -287,7 +315,7 @@ export class CodexHarness {
             .catch((error) =>
               settleRequest(resolve, reject, error, null, HARNESS_EVENT_TYPE.HARNESS_FAILED),
             );
-        } else if (method.toLowerCase().includes('approval') || method.includes('permission'))
+        } else if (isApprovalNotification(method))
           onEvent({
             type: HARNESS_EVENT_TYPE.APPROVAL_REQUIRED,
             sessionId: getSessionId(),
