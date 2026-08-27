@@ -29,9 +29,11 @@ export class GitWorktreeManager {
     const safe = `${taskId}-${stageId}${suffix}`.replace(/[^A-Za-z0-9_.-]/g, '-');
     const path = join(this.root, safe);
     const branch = `ai/${safe}`;
+
     try {
       runGitCommand(['worktree', 'add', '-b', branch, path, baseRef], this.projectRoot);
       const baseSha = runGitCommand(['rev-parse', baseRef], this.projectRoot);
+
       return { path, branch, baseSha };
     } catch (error) {
       if (path.startsWith(`${this.root}/`)) rmSync(path, { recursive: true, force: true });
@@ -47,14 +49,17 @@ export class GitWorktreeManager {
   }
   commitWorktreeChanges(path, message) {
     const status = this.getWorktreeStatus(path);
+
     if (!status.dirty) return status.sha;
     runGitCommand(['add', '--all'], path);
     runGitCommand(['commit', '-m', message], path);
+
     return runGitCommand(['rev-parse', 'HEAD'], path);
   }
   integrateCommits(path, commits) {
     const integrated = [];
     const skipped = [];
+
     for (const commit of commits) {
       try {
         runGitCommand(['merge-base', '--is-ancestor', commit, 'HEAD'], path);
@@ -75,10 +80,12 @@ export class GitWorktreeManager {
         throw new IntegrationConflictError(commit, error.stderr || error.message);
       }
     }
+
     return { integrated, skipped, revision: runGitCommand(['rev-parse', 'HEAD'], path) };
   }
   removeWorktree(path, { force = false } = {}) {
     const target = resolve(path);
+
     if (!target.startsWith(`${this.root}/`))
       throw new Error('worktree path is outside the Clew worktree root');
     if (!force && this.getWorktreeStatus(target).dirty)

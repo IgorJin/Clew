@@ -24,6 +24,12 @@ export default [
       'no-console': 'off',
       'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-constant-condition': ['error', { checkLoops: false }],
+      'padding-line-between-statements': [
+        'error',
+        { blankLine: 'always', prev: ['const', 'let', 'var'], next: '*' },
+        { blankLine: 'any', prev: ['const', 'let', 'var'], next: ['const', 'let', 'var'] },
+        { blankLine: 'always', prev: '*', next: 'return' },
+      ],
     },
   },
 ];

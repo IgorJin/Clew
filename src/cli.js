@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { validateTaskContract } from './domain.js';
+import { validateTaskContract, PROFILE_NAME, PLAN_STATUS } from './domain.js';
 import { Store } from './store.js';
 import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
@@ -10,14 +10,18 @@ const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
 const dbFile = join(stateDir, 'clew.sqlite');
 const createStore = () => new Store(dbFile);
+
 function getOptionValue(args, name, fallback = undefined) {
   const index = args.indexOf(name);
+
   return index >= 0 ? args[index + 1] : fallback;
 }
 function getOptionValues(args, name) {
   const values = [];
+
   for (let index = 0; index < args.length; index++)
     if (args[index] === name && args[index + 1]) values.push(args[index + 1]);
+
   return values;
 }
 function printJson(data) {
@@ -31,26 +35,31 @@ function printHelp() {
 
 export async function main(args) {
   const [command, subcommand, ...rest] = args;
+
   if (!command || command === '--help' || command === '-h') return printHelp();
   if (command === 'init') {
     mkdirSync(stateDir, { recursive: true });
     const store = createStore();
+
     store.close();
     console.log(`Initialized ${stateDir}`);
+
     return;
   }
   const store = createStore();
+
   try {
     if (command === 'task' && subcommand === 'create') {
       let contract;
       const file = getOptionValue(rest, '--file');
+
       if (file) contract = JSON.parse(readFileSync(resolve(file), 'utf8'));
       else
         contract = {
           id: getOptionValue(rest, '--id'),
           title: getOptionValue(rest, '--title'),
           goal: getOptionValue(rest, '--goal'),
-          profile: getOptionValue(rest, '--profile', 'quick'),
+          profile: getOptionValue(rest, '--profile', PROFILE_NAME.QUICK),
           risk: getOptionValue(rest, '--risk', 'medium'),
           base_ref: getOptionValue(rest, '--base', 'HEAD'),
           acceptance: getOptionValues(rest, '--accept'),
@@ -58,12 +67,15 @@ export async function main(args) {
       contract = validateTaskContract(contract);
       store.createTask(contract);
       console.log(`Created task ${contract.id}`);
+
       return;
     }
     if (command === 'task' && subcommand === 'list') return printJson(store.listTasks());
     if (command === 'task' && subcommand === 'show') {
       const task = store.getTask(rest[0]);
+
       if (!task) throw new Error(`task not found: ${rest[0]}`);
+
       return printJson({
         ...task,
         plan: store.getLatestPlan(task.id),
@@ -74,23 +86,28 @@ export async function main(args) {
     }
     if (command === 'plan') {
       const plan = store.getLatestPlan(subcommand);
+
       if (!plan) throw new Error(`plan not found for task ${subcommand}`);
+
       return printJson({ ...plan, approvals: store.listApprovals(subcommand) });
     }
     if (command === 'approve' || command === 'reject') {
       const id = subcommand;
+
       if (!id) throw new Error('task id is required');
       const positionalGate = rest[0] && !rest[0].startsWith('--') ? rest[0] : undefined;
-      const decision = command === 'approve' ? 'APPROVED' : 'REJECTED';
+      const decision = command === 'approve' ? PLAN_STATUS.APPROVED : PLAN_STATUS.REJECTED;
       const result = store.decideLatestPlan(id, decision, {
         gateId: positionalGate || 'deep-plan',
         actor: getOptionValue(rest, '--actor', process.env.USER || 'local-user'),
         reason: getOptionValue(rest, '--reason'),
       });
+
       return printJson(result);
     }
     if (command === 'run') {
       const id = subcommand;
+
       if (!id) throw new Error('task id is required');
       const manager = new GitWorktreeManager(join(stateDir, 'worktrees'));
       const result = await new Scheduler(store, manager).runTask(
@@ -100,11 +117,14 @@ export async function main(args) {
         getOptionValue(rest, '--review-harness'),
         getOptionValue(rest, '--architect'),
       );
+
       return printJson(result);
     }
     if (command === 'status') {
       const task = store.getTask(subcommand);
+
       if (!task) throw new Error(`task not found: ${subcommand}`);
+
       return printJson({
         id: task.id,
         state: task.state,
@@ -129,8 +149,10 @@ export async function main(args) {
           })(),
         },
       ];
+
       return printJson({ ok: checks.every((check) => check.ok), checks });
     }
+
     return printHelp();
   } finally {
     store.close();

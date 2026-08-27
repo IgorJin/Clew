@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { resolveProfile, assertValidTaskTransition, validateExecutionPlan } from './domain.js';
+import {
+  resolveProfile,
+  assertValidTaskTransition,
+  validateExecutionPlan,
+  TASK_STATE,
+  STAGE_STATUS,
+  RUN_STATUS,
+  PLAN_STATUS,
+  HARNESS_NAME,
+  EXECUTION_MODE,
+} from './domain.js';
 import {
   FakeHarness,
   CodexHarness,
@@ -37,11 +47,13 @@ export class Scheduler {
     requestedArchitect = null,
   ) {
     const row = this.store.getTask(taskId);
+
     if (!row) throw new Error(`task not found: ${taskId}`);
     const profile = resolveProfile(requestedProfile || row.contract.profile);
     const harnessName = requestedHarness || profile.harness;
     const harness = this.createHarnessAdapter(harnessName);
-    if (profile.mode === 'parallel')
+
+    if (profile.mode === EXECUTION_MODE.PARALLEL)
       return this.runDeep(
         row,
         profile,
@@ -50,19 +62,25 @@ export class Scheduler {
         requestedReviewHarness,
         requestedArchitect,
       );
-    if (!['DRAFT', 'QUEUED', 'READY', 'FAILED'].includes(row.state))
+    if (
+      ![TASK_STATE.DRAFT, TASK_STATE.QUEUED, TASK_STATE.READY, TASK_STATE.FAILED].includes(
+        row.state,
+      )
+    )
       throw new Error(`task ${taskId} is already ${row.state}`);
-    if (!this.store.listStages(taskId).length) this.store.addStage(taskId, 'worker', [], 'QUEUED');
-    if (row.state !== 'QUEUED') {
-      assertValidTaskTransition(row.state, 'QUEUED');
-      this.store.setTaskState(taskId, 'QUEUED');
+    if (!this.store.listStages(taskId).length)
+      this.store.addStage(taskId, 'worker', [], STAGE_STATUS.QUEUED);
+    if (row.state !== TASK_STATE.QUEUED) {
+      assertValidTaskTransition(row.state, TASK_STATE.QUEUED);
+      this.store.setTaskState(taskId, TASK_STATE.QUEUED);
     }
-    this.store.setTaskState(taskId, 'EXECUTING');
-    this.store.setStage(taskId, 'worker', 'RUNNING');
+    this.store.setTaskState(taskId, TASK_STATE.EXECUTING);
+    this.store.setStage(taskId, 'worker', STAGE_STATUS.RUNNING);
     let workspace;
     const startedAt = new Date().toISOString();
     const runId = randomUUID();
     const attempt = this.store.listRuns(taskId).length + 1;
+
     try {
       workspace = this.workspaceManager.createWorktree(
         taskId,
@@ -75,11 +93,12 @@ export class Scheduler {
         taskId,
         stageId: 'worker',
         attempt,
-        status: 'RUNNING',
+        status: RUN_STATUS.RUNNING,
         harness: harnessName,
         workspace: workspace.path,
         startedAt,
       };
+
       this.store.createRun(run);
       this.store.appendEvent(taskId, 'STAGE_RUN_STARTED', {
         ...run,
@@ -92,6 +111,7 @@ export class Scheduler {
         cwd: workspace.path,
         onEvent: (event) => this.store.appendEvent(taskId, `HARNESS_${event.type}`, event),
       });
+
       this.store.setRunSession(runId, result.sessionId ?? null);
       const status = this.workspaceManager.getWorktreeStatus(workspace.path);
       const revision = this.workspaceManager.commitWorktreeChanges
@@ -100,14 +120,15 @@ export class Scheduler {
             `clew(${taskId}): worker attempt ${attempt}`,
           )
         : status.sha;
+
       this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', {
         evidence: result.verification,
         revision,
       });
-      this.store.finishRun(runId, 'COMPLETED', revision);
-      this.store.setStage(taskId, 'worker', 'COMPLETED');
-      this.store.setTaskState(taskId, 'VERIFYING');
-      this.store.setTaskState(taskId, profile.review ? 'REVIEWING' : 'READY');
+      this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
+      this.store.setStage(taskId, 'worker', STAGE_STATUS.COMPLETED);
+      this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
+      this.store.setTaskState(taskId, profile.review ? TASK_STATE.REVIEWING : TASK_STATE.READY);
       if (profile.review) {
         const reviewer = this.createReviewerAdapter(requestedReviewHarness);
         const review = await reviewer.review({
@@ -115,10 +136,11 @@ export class Scheduler {
           evidence: result.verification,
           revision,
         });
+
         this.store.appendEvent(taskId, 'REVIEW_RECORDED', review);
-        if (review.verdict === 'pass') this.store.setTaskState(taskId, 'READY');
+        if (review.verdict === 'pass') this.store.setTaskState(taskId, TASK_STATE.READY);
         else {
-          this.store.setTaskState(taskId, 'FAILED');
+          this.store.setTaskState(taskId, TASK_STATE.FAILED);
           this.store.appendEvent(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
           if (attempt < profile.maxAttempts) {
             this.store.appendEvent(taskId, 'RETRY_SCHEDULED', {
@@ -126,12 +148,14 @@ export class Scheduler {
               nextAttempt: attempt + 1,
               reason: 'blocking review findings',
             });
-            this.store.setStage(taskId, 'worker', 'QUEUED');
-            this.store.setTaskState(taskId, 'QUEUED');
+            this.store.setStage(taskId, 'worker', STAGE_STATUS.QUEUED);
+            this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+
             return this.runTask(taskId, requestedProfile, requestedHarness, requestedReviewHarness);
           }
         }
       }
+
       return {
         taskId,
         runId,
@@ -141,9 +165,9 @@ export class Scheduler {
         state: this.store.getTask(taskId).state,
       };
     } catch (error) {
-      if (runId) this.store.finishRun(runId, 'FAILED');
-      this.store.setStage(taskId, 'worker', 'FAILED');
-      this.store.setTaskState(taskId, 'FAILED');
+      if (runId) this.store.finishRun(runId, RUN_STATUS.FAILED);
+      this.store.setStage(taskId, 'worker', STAGE_STATUS.FAILED);
+      this.store.setTaskState(taskId, TASK_STATE.FAILED);
       this.store.appendEvent(taskId, 'RUN_FAILED', { message: error.message });
       throw error;
     }
@@ -158,27 +182,29 @@ export class Scheduler {
     requestedArchitect = null,
   ) {
     const taskId = row.id;
+
     if (
       ![
-        'DRAFT',
-        'PLAN_READY',
-        'QUEUED',
-        'RECOVERING',
-        'EXECUTING',
-        'VERIFYING',
-        'REVIEWING',
-        'WAITING_FOR_HUMAN',
-        'READY',
-        'FAILED',
-        'BLOCKED',
+        TASK_STATE.DRAFT,
+        TASK_STATE.PLAN_READY,
+        TASK_STATE.QUEUED,
+        TASK_STATE.RECOVERING,
+        TASK_STATE.EXECUTING,
+        TASK_STATE.VERIFYING,
+        TASK_STATE.REVIEWING,
+        TASK_STATE.WAITING_FOR_HUMAN,
+        TASK_STATE.READY,
+        TASK_STATE.FAILED,
+        TASK_STATE.BLOCKED,
       ].includes(row.state)
     )
       throw new Error(`task ${taskId} is already ${row.state}`);
     const latestPlan = this.store.getLatestPlan(taskId);
-    const persistedPlan = latestPlan?.status === 'REJECTED' ? null : latestPlan;
+    const persistedPlan = latestPlan?.status === PLAN_STATUS.REJECTED ? null : latestPlan;
+
     if (!persistedPlan) {
       this.store.appendEvent(taskId, 'ARCHITECT_STARTED', {
-        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : 'fake'),
+        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : HARNESS_NAME.FAKE),
       });
     }
     const proposedPlan = persistedPlan
@@ -193,10 +219,15 @@ export class Scheduler {
     const integrationStage = this.getIntegrationStage(plan);
     const planRecord =
       persistedPlan ??
-      this.store.savePlan(taskId, plan, this.requirePlanApproval ? 'PENDING_APPROVAL' : 'APPROVED');
+      this.store.savePlan(
+        taskId,
+        plan,
+        this.requirePlanApproval ? PLAN_STATUS.PENDING_APPROVAL : PLAN_STATUS.APPROVED,
+      );
+
     if (!persistedPlan) {
       this.store.appendEvent(taskId, 'ARCHITECT_COMPLETED', {
-        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : 'fake'),
+        architect: requestedArchitect || (this.planFactory ? 'plan-factory' : HARNESS_NAME.FAKE),
         planVersion: planRecord.version,
       });
     }
@@ -204,54 +235,63 @@ export class Scheduler {
       version: planRecord.version,
       plan,
     });
-    if (planRecord.status !== 'APPROVED') {
-      if (row.state !== 'WAITING_FOR_HUMAN') {
-        if (row.state !== 'PLAN_READY') {
-          assertValidTaskTransition(row.state, 'PLAN_READY');
-          this.store.setTaskState(taskId, 'PLAN_READY');
+    if (planRecord.status !== PLAN_STATUS.APPROVED) {
+      if (row.state !== TASK_STATE.WAITING_FOR_HUMAN) {
+        if (row.state !== TASK_STATE.PLAN_READY) {
+          assertValidTaskTransition(row.state, TASK_STATE.PLAN_READY);
+          this.store.setTaskState(taskId, TASK_STATE.PLAN_READY);
         }
-        this.store.setTaskState(taskId, 'WAITING_FOR_HUMAN');
+        this.store.setTaskState(taskId, TASK_STATE.WAITING_FOR_HUMAN);
       }
       this.store.appendEvent(taskId, 'PLAN_APPROVAL_REQUIRED', {
         version: planRecord.version,
         gateId: 'deep-plan',
       });
+
       return {
         taskId,
-        state: 'WAITING_FOR_HUMAN',
+        state: TASK_STATE.WAITING_FOR_HUMAN,
         attention: 'PLAN_APPROVAL_REQUIRED',
         planVersion: planRecord.version,
         plan,
       };
     }
     const existingStages = this.store.listStages(taskId);
+
     for (const stage of plan.stages)
-      this.store.addStage(taskId, stage.id, stage.dependsOn, 'QUEUED');
+      this.store.addStage(taskId, stage.id, stage.dependsOn, STAGE_STATUS.QUEUED);
 
     const isRecovery =
       existingStages.length > 0 &&
-      ['QUEUED', 'RECOVERING', 'EXECUTING', 'VERIFYING', 'REVIEWING', 'FAILED', 'BLOCKED'].includes(
-        row.state,
-      );
+      [
+        TASK_STATE.QUEUED,
+        TASK_STATE.RECOVERING,
+        TASK_STATE.EXECUTING,
+        TASK_STATE.VERIFYING,
+        TASK_STATE.REVIEWING,
+        TASK_STATE.FAILED,
+        TASK_STATE.BLOCKED,
+      ].includes(row.state);
     let recoveredStages = new Map();
+
     if (isRecovery) {
-      if (row.state !== 'RECOVERING') {
-        assertValidTaskTransition(row.state, 'RECOVERING');
-        this.store.setTaskState(taskId, 'RECOVERING');
+      if (row.state !== TASK_STATE.RECOVERING) {
+        assertValidTaskTransition(row.state, TASK_STATE.RECOVERING);
+        this.store.setTaskState(taskId, TASK_STATE.RECOVERING);
       }
       this.store.appendEvent(taskId, 'TASK_RECOVERY_STARTED', {
         planVersion: planRecord.version,
         previousState: row.state,
       });
       recoveredStages = this.reconcilePlanStages(taskId, plan);
-      this.store.setTaskState(taskId, 'EXECUTING');
+      this.store.setTaskState(taskId, TASK_STATE.EXECUTING);
     } else {
-      for (const stage of plan.stages) this.store.setStage(taskId, stage.id, 'QUEUED');
-      if (row.state !== 'QUEUED') {
-        assertValidTaskTransition(row.state, 'QUEUED');
-        this.store.setTaskState(taskId, 'QUEUED');
+      for (const stage of plan.stages) this.store.setStage(taskId, stage.id, STAGE_STATUS.QUEUED);
+      if (row.state !== TASK_STATE.QUEUED) {
+        assertValidTaskTransition(row.state, TASK_STATE.QUEUED);
+        this.store.setTaskState(taskId, TASK_STATE.QUEUED);
       }
-      this.store.setTaskState(taskId, 'EXECUTING');
+      this.store.setTaskState(taskId, TASK_STATE.EXECUTING);
     }
     const execution = await this.executePlan({
       task: row.contract,
@@ -262,9 +302,11 @@ export class Scheduler {
       integrationStageId: integrationStage.id,
       initialCompleted: recoveredStages,
     });
+
     if (execution.failures.size) {
-      this.store.setTaskState(taskId, 'FAILED');
+      this.store.setTaskState(taskId, TASK_STATE.FAILED);
       const failedStages = [...execution.failures.keys()];
+
       if (execution.blocked.includes(integrationStage.id)) {
         this.store.appendEvent(taskId, 'INTEGRATION_BLOCKED', {
           failedStages,
@@ -280,20 +322,26 @@ export class Scheduler {
       });
     }
     const integrationResult = execution.completed.get(integrationStage.id);
+
     this.store.appendEvent(taskId, 'INTEGRATION_COMPLETED', {
       result: 'passed',
       revision: integrationResult.revision,
     });
-    this.store.setTaskState(taskId, 'VERIFYING');
-    this.store.setTaskState(taskId, 'REVIEWING');
+    this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
+    this.store.setTaskState(taskId, TASK_STATE.REVIEWING);
     const reviewer = this.createReviewerAdapter(requestedReviewHarness);
     const review = await reviewer.review({
       task: row.contract,
       evidence: integrationResult.evidence,
       revision: integrationResult.revision,
     });
+
     this.store.appendEvent(taskId, 'REVIEW_RECORDED', review);
-    this.store.setTaskState(taskId, review.verdict === 'pass' ? 'READY' : 'FAILED');
+    this.store.setTaskState(
+      taskId,
+      review.verdict === 'pass' ? TASK_STATE.READY : TASK_STATE.FAILED,
+    );
+
     return {
       taskId,
       plan,
@@ -308,7 +356,7 @@ export class Scheduler {
     const events = this.store.listEvents(taskId);
     const recoveredStages = new Map();
     const interruptRun = (run) => {
-      this.store.finishRun(run.id, 'INTERRUPTED', run.commit_sha);
+      this.store.finishRun(run.id, RUN_STATUS.INTERRUPTED, run.commit_sha);
       this.store.appendEvent(taskId, 'RUN_INTERRUPTED', {
         stageId: run.stage_id,
         runId: run.id,
@@ -320,16 +368,17 @@ export class Scheduler {
       const stageRecord = stageRecords.get(stage.id);
       const stageRuns = runs.filter((run) => run.stage_id === stage.id);
       const latestRun = stageRuns.at(-1);
-      const runningStageRuns = stageRuns.filter((run) => run.status === 'RUNNING');
+      const runningStageRuns = stageRuns.filter((run) => run.status === RUN_STATUS.RUNNING);
       const canRecoverCompletedRun =
-        stageRecord?.status === 'COMPLETED' ||
-        (stageRecord?.status === 'RUNNING' && latestRun?.status === 'COMPLETED');
+        stageRecord?.status === STAGE_STATUS.COMPLETED ||
+        (stageRecord?.status === STAGE_STATUS.RUNNING &&
+          latestRun?.status === RUN_STATUS.COMPLETED);
 
       if (canRecoverCompletedRun) {
         for (const runningRun of runningStageRuns) interruptRun(runningRun);
         if (!latestRun?.commit_sha) {
-          this.store.setStage(taskId, stage.id, 'BLOCKED');
-          this.store.setTaskState(taskId, 'BLOCKED');
+          this.store.setStage(taskId, stage.id, STAGE_STATUS.BLOCKED);
+          this.store.setTaskState(taskId, TASK_STATE.BLOCKED);
           this.store.appendEvent(taskId, 'RECOVERY_BLOCKED', {
             stageId: stage.id,
             reason: 'completed stage has no persisted revision',
@@ -344,7 +393,8 @@ export class Scheduler {
               event.payload.stageId === stage.id &&
               event.payload.revision === latestRun.commit_sha,
           );
-        this.store.setStage(taskId, stage.id, 'COMPLETED');
+
+        this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
         recoveredStages.set(stage.id, {
           runId: latestRun.id,
           stageId: stage.id,
@@ -361,8 +411,8 @@ export class Scheduler {
       }
 
       for (const runningRun of runningStageRuns) interruptRun(runningRun);
-      if (stageRecord?.status !== 'QUEUED') {
-        this.store.setStage(taskId, stage.id, 'QUEUED');
+      if (stageRecord?.status !== STAGE_STATUS.QUEUED) {
+        this.store.setStage(taskId, stage.id, STAGE_STATUS.QUEUED);
         this.store.appendEvent(taskId, 'STAGE_REQUEUED', {
           stageId: stage.id,
           previousStatus: stageRecord?.status,
@@ -377,9 +427,11 @@ export class Scheduler {
     const integrationStages = plan.stages.filter(
       (stage) => stage.kind === 'integration' || stage.id === 'integration',
     );
+
     if (integrationStages.length !== 1)
       throw new Error('a Deep plan must contain exactly one integration stage');
     const integrationStage = integrationStages[0];
+
     if (plan.stages.some((stage) => stage.dependsOn.includes(integrationStage.id)))
       throw new Error('the integration stage must be terminal');
 
@@ -392,9 +444,11 @@ export class Scheduler {
         collectAncestors(dependency);
       }
     };
+
     collectAncestors(integrationStage.id);
     if (plan.stages.some((stage) => stage.id !== integrationStage.id && !ancestors.has(stage.id)))
       throw new Error('every Deep plan stage must feed the integration stage');
+
     return integrationStage;
   }
 
@@ -423,10 +477,11 @@ export class Scheduler {
         const hasBlockedDependency = stage.dependsOn.some(
           (dependency) => failures.has(dependency) || blocked.includes(dependency),
         );
+
         if (!hasBlockedDependency) continue;
         pending.delete(stageId);
         blocked.push(stageId);
-        this.store.setStage(task.id, stageId, 'BLOCKED');
+        this.store.setStage(task.id, stageId, STAGE_STATUS.BLOCKED);
         this.store.appendEvent(task.id, 'STAGE_BLOCKED', {
           stageId,
           dependencies: stage.dependsOn,
@@ -436,8 +491,10 @@ export class Scheduler {
       const runnableStages = [...pending.values()].filter((stage) =>
         stage.dependsOn.every((dependency) => completed.has(dependency)),
       );
+
       while (running.size < concurrencyLimit && runnableStages.length) {
         const stage = runnableStages.shift();
+
         pending.delete(stage.id);
         const stageExecution = this.executePlannedStage({
           task,
@@ -451,6 +508,7 @@ export class Scheduler {
           (value) => ({ stageId: stage.id, status: 'fulfilled', value }),
           (error) => ({ stageId: stage.id, status: 'rejected', error }),
         );
+
         running.set(stage.id, stageExecution);
       }
 
@@ -460,6 +518,7 @@ export class Scheduler {
       }
 
       const settledStage = await Promise.race(running.values());
+
       running.delete(settledStage.stageId);
       if (settledStage.status === 'fulfilled')
         completed.set(settledStage.stageId, settledStage.value);
@@ -481,6 +540,7 @@ export class Scheduler {
     let workspace;
     const attempt =
       this.store.listRuns(task.id).filter((run) => run.stage_id === stage.id).length + 1;
+
     if (stage.id === integrationStageId) {
       this.store.appendEvent(task.id, 'INTEGRATION_STARTED', {
         dependencies: stage.dependsOn,
@@ -492,11 +552,13 @@ export class Scheduler {
       const dependencyRevisions = ancestorStageIds.map(
         (ancestorId) => completed.get(ancestorId).revision,
       );
+
       if (dependencyRevisions.length && this.workspaceManager.integrateCommits) {
         const integrationResult = this.workspaceManager.integrateCommits(
           workspace.path,
           dependencyRevisions,
         );
+
         this.store.appendEvent(task.id, 'STAGE_DEPENDENCIES_INTEGRATED', {
           stageId: stage.id,
           sourceStages: ancestorStageIds,
@@ -506,13 +568,14 @@ export class Scheduler {
           this.store.appendEvent(task.id, 'COMMITS_INTEGRATED', integrationResult);
       }
     } catch (error) {
-      this.store.setStage(task.id, stage.id, 'FAILED');
+      this.store.setStage(task.id, stage.id, STAGE_STATUS.FAILED);
       const eventType =
         stage.id === integrationStageId
           ? error.name === 'IntegrationConflictError'
             ? 'INTEGRATION_CONFLICT'
             : 'INTEGRATION_FAILED'
           : 'STAGE_PREPARATION_FAILED';
+
       this.store.appendEvent(task.id, eventType, {
         stageId: stage.id,
         message: error.message,
@@ -551,14 +614,17 @@ export class Scheduler {
         ordered.push(dependency);
       }
     };
+
     collect(stageId);
+
     return ordered;
   }
 
   async executeStage({ task, stage, harness, harnessName, attempt, workspace = null }) {
     const taskId = task.id;
     const runId = randomUUID();
-    this.store.setStage(taskId, stage.id, 'RUNNING');
+
+    this.store.setStage(taskId, stage.id, STAGE_STATUS.RUNNING);
     const stageWorkspace =
       workspace ?? this.workspaceManager.createWorktree(taskId, stage.id, task.base_ref, attempt);
     const run = {
@@ -566,11 +632,12 @@ export class Scheduler {
       taskId,
       stageId: stage.id,
       attempt,
-      status: 'RUNNING',
+      status: RUN_STATUS.RUNNING,
       harness: harnessName,
       workspace: stageWorkspace.path,
       startedAt: new Date().toISOString(),
     };
+
     this.store.createRun(run);
     this.store.appendEvent(taskId, 'STAGE_RUN_STARTED', {
       ...run,
@@ -591,14 +658,16 @@ export class Scheduler {
             `clew(${taskId}): ${stage.id} attempt ${attempt}`,
           )
         : status.sha;
+
       this.store.setRunSession(runId, result.sessionId ?? null);
-      this.store.finishRun(runId, 'COMPLETED', revision);
-      this.store.setStage(taskId, stage.id, 'COMPLETED');
+      this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
+      this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
       this.store.appendEvent(taskId, 'VERIFICATION_RECORDED', {
         stageId: stage.id,
         evidence: result.verification,
         revision,
       });
+
       return {
         runId,
         stageId: stage.id,
@@ -607,8 +676,8 @@ export class Scheduler {
         evidence: result.verification,
       };
     } catch (error) {
-      this.store.finishRun(runId, 'FAILED');
-      this.store.setStage(taskId, stage.id, 'FAILED');
+      this.store.finishRun(runId, RUN_STATUS.FAILED);
+      this.store.setStage(taskId, stage.id, STAGE_STATUS.FAILED);
       this.store.appendEvent(taskId, 'STAGE_RUN_FAILED', {
         stageId: stage.id,
         message: error.message,
@@ -619,19 +688,26 @@ export class Scheduler {
 
   createHarnessAdapter(harnessName) {
     if (this.harnessFactory) return this.harnessFactory(harnessName);
-    if (harnessName === 'fake') return new FakeHarness();
-    if (harnessName === 'codex') return new CodexHarness();
-    if (harnessName === 'opencode') return new OpenCodeHarness();
+    if (harnessName === HARNESS_NAME.FAKE) return new FakeHarness();
+    if (harnessName === HARNESS_NAME.CODEX) return new CodexHarness();
+    if (harnessName === HARNESS_NAME.OPENCODE) return new OpenCodeHarness();
+
     return new ExternalHarnessUnavailable(harnessName);
   }
 
   createReviewerAdapter(reviewerName) {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
-    return reviewerName === 'codex' ? new CodexReviewer(new CodexHarness()) : new FakeReviewer();
+
+    return reviewerName === HARNESS_NAME.CODEX
+      ? new CodexReviewer(new CodexHarness())
+      : new FakeReviewer();
   }
 
   createArchitectAdapter(architectName) {
     if (this.architectFactory) return this.architectFactory(architectName);
-    return architectName === 'codex' ? new CodexArchitect(new CodexHarness()) : new FakeArchitect();
+
+    return architectName === HARNESS_NAME.CODEX
+      ? new CodexArchitect(new CodexHarness())
+      : new FakeArchitect();
   }
 }

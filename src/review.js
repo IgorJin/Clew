@@ -1,6 +1,7 @@
 export class FakeReviewer {
   async review({ task, evidence, revision }) {
     const verdict = process.env.CLEW_FAKE_REVIEW === 'request_changes' ? 'request_changes' : 'pass';
+
     return {
       verdict,
       findings:
@@ -47,6 +48,7 @@ export class CodexReviewer {
       onEvent: () => {},
     });
     const report = result.output?.output ?? result.output;
+
     if (!report || !['pass', 'request_changes', 'needs_human'].includes(report.verdict))
       return {
         verdict: 'needs_human',
@@ -54,6 +56,7 @@ export class CodexReviewer {
         reason: 'Codex did not return a valid review report',
         revision,
       };
+
     return { ...report, revision };
   }
 }

@@ -9,6 +9,7 @@ import { Store } from '../src/store.js';
 test('persists a task, stage, run, and event history', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-test-'));
   const store = new Store(join(dir, 'state.sqlite'));
+
   store.createTask({
     id: 'T-1',
     title: 'Test',
@@ -19,6 +20,7 @@ test('persists a task, stage, run, and event history', () => {
   const savedPlan = store.savePlan('T-1', {
     stages: [{ id: 'worker', dependsOn: [] }],
   });
+
   store.addStage('T-1', 'worker');
   store.setTaskState('T-1', 'QUEUED');
   store.createRun({
@@ -42,6 +44,7 @@ test('upgrades persisted plans with approval status', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-store-migration-'));
   const databaseFile = join(dir, 'state.sqlite');
   const legacyDatabase = new DatabaseSync(databaseFile);
+
   legacyDatabase.exec(`
     CREATE TABLE plans (
       task_id TEXT NOT NULL,

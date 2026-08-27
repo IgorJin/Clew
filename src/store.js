@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { TASK_STATE, STAGE_STATUS, PLAN_STATUS } from './domain.js';
 
 export class Store {
   constructor(file) {
@@ -15,6 +16,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);`);
     const planColumns = this.db.prepare('PRAGMA table_info(plans)').all();
+
     if (!planColumns.some((column) => column.name === 'status'))
       this.db.exec("ALTER TABLE plans ADD COLUMN status TEXT NOT NULL DEFAULT 'APPROVED'");
   }
@@ -25,7 +27,9 @@ export class Store {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const result = operation();
+
       this.db.exec('COMMIT');
+
       return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -34,13 +38,15 @@ export class Store {
   }
   createTask(contract) {
     const now = new Date().toISOString();
+
     this.db
       .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)')
-      .run(contract.id, JSON.stringify(contract), 'DRAFT', now, now);
-    this.appendEvent(contract.id, 'TASK_CREATED', { state: 'DRAFT', contract });
+      .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now);
+    this.appendEvent(contract.id, 'TASK_CREATED', { state: TASK_STATE.DRAFT, contract });
   }
   getTask(id) {
     const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id);
+
     return row ? { ...row, contract: JSON.parse(row.contract) } : null;
   }
   listTasks() {
@@ -50,22 +56,25 @@ export class Store {
   }
   setTaskState(id, state) {
     const now = new Date().toISOString();
+
     this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
     this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
   }
-  addStage(taskId, id, dependsOn = [], status = 'QUEUED') {
+  addStage(taskId, id, dependsOn = [], status = STAGE_STATUS.QUEUED) {
     this.db
       .prepare('INSERT OR IGNORE INTO stages VALUES (?, ?, ?, ?)')
       .run(taskId, id, status, JSON.stringify(dependsOn));
   }
-  savePlan(taskId, plan, status = 'PENDING_APPROVAL') {
+  savePlan(taskId, plan, status = PLAN_STATUS.PENDING_APPROVAL) {
     return this.runInTransaction(() => {
       const latestPlan = this.getLatestPlan(taskId);
       const version = (latestPlan?.version ?? 0) + 1;
+
       this.db
         .prepare('INSERT INTO plans (task_id,version,plan,status,created_at) VALUES (?,?,?,?,?)')
         .run(taskId, version, JSON.stringify(plan), status, new Date().toISOString());
       this.appendEvent(taskId, 'PLAN_PERSISTED', { version, status, plan });
+
       return { version, status, plan };
     });
   }
@@ -73,6 +82,7 @@ export class Store {
     const row = this.db
       .prepare('SELECT * FROM plans WHERE task_id=? ORDER BY version DESC LIMIT 1')
       .get(taskId);
+
     return row ? { ...row, plan: JSON.parse(row.plan) } : null;
   }
   decideLatestPlan(
@@ -80,17 +90,21 @@ export class Store {
     decision,
     { gateId = 'deep-plan', actor = 'local-user', reason = null } = {},
   ) {
-    if (!['APPROVED', 'REJECTED'].includes(decision))
+    if (![PLAN_STATUS.APPROVED, PLAN_STATUS.REJECTED].includes(decision))
       throw new Error('plan decision must be APPROVED or REJECTED');
+
     return this.runInTransaction(() => {
       const plan = this.getLatestPlan(taskId);
+
       if (!plan) throw new Error(`plan not found for task ${taskId}`);
-      if (plan.status !== 'PENDING_APPROVAL')
+      if (plan.status !== PLAN_STATUS.PENDING_APPROVAL)
         throw new Error(`plan ${taskId} v${plan.version} is already ${plan.status}`);
       const task = this.getTask(taskId);
-      if (task?.state !== 'WAITING_FOR_HUMAN')
+
+      if (task?.state !== TASK_STATE.WAITING_FOR_HUMAN)
         throw new Error(`task ${taskId} is not waiting for plan approval`);
       const at = new Date().toISOString();
+
       this.db
         .prepare('UPDATE plans SET status=? WHERE task_id=? AND version=?')
         .run(decision, taskId, plan.version);
@@ -99,15 +113,23 @@ export class Store {
           'INSERT INTO approvals (task_id,plan_version,gate_id,decision,reason,actor,at) VALUES (?,?,?,?,?,?,?)',
         )
         .run(taskId, plan.version, gateId, decision, reason, actor, at);
-      this.appendEvent(taskId, decision === 'APPROVED' ? 'PLAN_APPROVED' : 'PLAN_REJECTED', {
-        version: plan.version,
-        gateId,
-        decision,
-        reason,
-        actor,
-        at,
-      });
-      this.setTaskState(taskId, decision === 'APPROVED' ? 'PLAN_READY' : 'FAILED');
+      this.appendEvent(
+        taskId,
+        decision === PLAN_STATUS.APPROVED ? 'PLAN_APPROVED' : 'PLAN_REJECTED',
+        {
+          version: plan.version,
+          gateId,
+          decision,
+          reason,
+          actor,
+          at,
+        },
+      );
+      this.setTaskState(
+        taskId,
+        decision === PLAN_STATUS.APPROVED ? TASK_STATE.PLAN_READY : TASK_STATE.FAILED,
+      );
+
       return { ...plan, status: decision, decision: { gateId, actor, reason, at } };
     });
   }

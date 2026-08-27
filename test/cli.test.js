@@ -22,6 +22,7 @@ function runCli(args, cwd) {
 
 test('CLI gates Deep execution on explicit plan approval', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-approval-'));
+
   try {
     runCommand('git', ['init', '-b', 'main'], repo);
     runCommand('git', ['config', 'user.email', 'test@example.com'], repo);
@@ -51,14 +52,18 @@ test('CLI gates Deep execution on explicit plan approval', () => {
     );
 
     const waiting = JSON.parse(runCli(['run', 'CLI-1', '--harness', 'fake'], repo));
+
     assert.equal(waiting.state, 'WAITING_FOR_HUMAN');
     assert.equal(waiting.attention, 'PLAN_APPROVAL_REQUIRED');
     const pendingPlan = JSON.parse(runCli(['plan', 'CLI-1'], repo));
+
     assert.equal(pendingPlan.status, 'PENDING_APPROVAL');
 
     const approval = JSON.parse(runCli(['approve', 'CLI-1'], repo));
+
     assert.equal(approval.status, 'APPROVED');
     const completed = JSON.parse(runCli(['run', 'CLI-1', '--harness', 'fake'], repo));
+
     assert.equal(completed.state, 'READY');
   } finally {
     rmSync(repo, { recursive: true, force: true });

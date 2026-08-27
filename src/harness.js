@@ -6,9 +6,11 @@ import { spawn } from 'node:child_process';
 export class FakeHarness {
   async run({ task, stageId, cwd, onEvent }) {
     const sessionId = `fake-${randomUUID()}`;
+
     onEvent({ type: 'SESSION_STARTED', sessionId, stageId });
     onEvent({ type: 'TURN_STARTED', sessionId });
     const evidenceDir = join(cwd, '.clew-runs');
+
     mkdirSync(evidenceDir, { recursive: true });
     appendFileSync(join(evidenceDir, `${stageId}.log`), `${task.id}/${stageId}\n`);
     onEvent({ type: 'TOOL_COMPLETED', sessionId, tool: 'fixture-write', exitCode: 0 });
@@ -19,6 +21,7 @@ export class FakeHarness {
       result: 'passed',
     });
     onEvent({ type: 'HARNESS_COMPLETED', sessionId });
+
     return {
       sessionId,
       verification: [{ type: 'targeted', result: 'passed', command: 'clew fixture verification' }],
@@ -71,7 +74,9 @@ export class CodexHarness {
       );
       const sendRpcRequest = (method, params) => {
         const id = nextRequestId++;
+
         child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+
         return id;
       };
       const sendRpcNotification = (method, params) =>
@@ -79,8 +84,10 @@ export class CodexHarness {
       const handleServerMessage = (message) => {
         const method = message.method || '';
         const params = message.params || message.result || {};
+
         if (message.id !== undefined && !method) {
           const resolver = pendingRequests.get(message.id);
+
           pendingRequests.delete(message.id);
           if (message.error)
             return settleRequest(
@@ -89,10 +96,12 @@ export class CodexHarness {
               new Error(`Codex request failed: ${message.error.message || message.error.code}`),
             );
           resolver?.(message.result ?? {});
+
           return;
         }
         if (method === 'turn/completed') {
           onEvent({ type: 'HARNESS_COMPLETED', sessionId, raw: message });
+
           return settleRequest(resolve, reject, null, {
             sessionId,
             verification: [],
@@ -112,11 +121,14 @@ export class CodexHarness {
           onEvent({ type: 'TOOL_COMPLETED', sessionId, raw: message });
         else if (method) onEvent({ type: 'HARNESS_EVENT', sessionId, method, params });
       };
+
       child.stdout.on('data', (chunk) => {
         stdoutBuffer += chunk.toString();
         let index;
+
         while ((index = stdoutBuffer.indexOf('\n')) >= 0) {
           const line = stdoutBuffer.slice(0, index).trim();
+
           stdoutBuffer = stdoutBuffer.slice(index + 1);
           if (!line) continue;
           try {
@@ -152,6 +164,7 @@ export class CodexHarness {
       const initializeId = sendRpcRequest('initialize', {
         clientInfo: { name: 'clew', title: 'Clew', version: '0.1.0' },
       });
+
       pendingRequests.set(initializeId, () => {
         sendRpcNotification('initialized', {});
         const threadId = sendRpcRequest('thread/start', {
@@ -159,8 +172,10 @@ export class CodexHarness {
           model,
           sandbox: readOnly ? 'read-only' : undefined,
         });
+
         pendingRequests.set(threadId, (threadResult) => {
           const threadId = threadResult.thread?.id;
+
           if (!threadId)
             return settleRequest(
               resolve,
@@ -173,6 +188,7 @@ export class CodexHarness {
       onEvent({ type: 'SESSION_STARTED', sessionId });
       onEvent({ type: 'TURN_STARTED', sessionId });
     });
+
     return result;
   }
 }
@@ -192,11 +208,13 @@ export class OpenCodeHarness {
       body: { title: task.title, directory: cwd },
     });
     const sessionId = sessionResponse.id || sessionResponse.data?.id;
+
     if (!sessionId) throw new Error('OpenCode did not return a session id');
     onEvent({ type: 'SESSION_STARTED', sessionId });
     onEvent({ type: 'TURN_STARTED', sessionId });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
       const response = await fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
@@ -209,8 +227,10 @@ export class OpenCodeHarness {
           signal: controller.signal,
         },
       );
+
       if (!response.ok) throw new Error(`OpenCode message failed: HTTP ${response.status}`);
       onEvent({ type: 'HARNESS_COMPLETED', sessionId });
+
       return { sessionId, verification: [] };
     } finally {
       clearTimeout(timer);
@@ -222,7 +242,9 @@ export class OpenCodeHarness {
       headers: body ? { 'content-type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
+
     if (!response.ok) throw new Error(`OpenCode request failed: HTTP ${response.status}`);
+
     return response.json();
   }
 }

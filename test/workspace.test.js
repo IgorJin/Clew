@@ -13,6 +13,7 @@ function runGitCommand(args, cwd) {
 test('creates, inspects, and removes an isolated worktree', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-worktree-'));
   const worktrees = join(root, 'worktrees');
+
   try {
     runGitCommand(['init', '-b', 'main'], root);
     runGitCommand(['config', 'user.email', 'test@example.com'], root);
@@ -22,6 +23,7 @@ test('creates, inspects, and removes an isolated worktree', () => {
     runGitCommand(['commit', '-m', 'fixture'], root);
     const manager = new GitWorktreeManager(worktrees, root);
     const workspace = manager.createWorktree('T-3', 'worker');
+
     assert.equal(manager.getWorktreeStatus(workspace.path).dirty, false);
     manager.removeWorktree(workspace.path);
   } finally {
@@ -32,6 +34,7 @@ test('creates, inspects, and removes an isolated worktree', () => {
 test('commits worker outputs and integrates them into a target worktree', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-integration-'));
   const worktrees = join(root, 'worktrees');
+
   try {
     runGitCommand(['init', '-b', 'main'], root);
     runGitCommand(['config', 'user.email', 'test@example.com'], root);
@@ -42,12 +45,14 @@ test('commits worker outputs and integrates them into a target worktree', () => 
     const manager = new GitWorktreeManager(worktrees, root);
     const backend = manager.createWorktree('T-11', 'backend');
     const frontend = manager.createWorktree('T-11', 'frontend');
+
     writeFileSync(join(backend.path, 'backend.txt'), 'backend\n');
     writeFileSync(join(frontend.path, 'frontend.txt'), 'frontend\n');
     const backendCommit = manager.commitWorktreeChanges(backend.path, 'backend');
     const frontendCommit = manager.commitWorktreeChanges(frontend.path, 'frontend');
     const integration = manager.createWorktree('T-11', 'integration');
     const result = manager.integrateCommits(integration.path, [backendCommit, frontendCommit]);
+
     assert.equal(result.integrated.length, 2);
     assert.equal(readFileSync(join(integration.path, 'backend.txt'), 'utf8'), 'backend\n');
     assert.equal(readFileSync(join(integration.path, 'frontend.txt'), 'utf8'), 'frontend\n');
@@ -59,6 +64,7 @@ test('commits worker outputs and integrates them into a target worktree', () => 
 test('reports integration conflicts and aborts the cherry-pick', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-conflict-'));
   const worktrees = join(root, 'worktrees');
+
   try {
     runGitCommand(['init', '-b', 'main'], root);
     runGitCommand(['config', 'user.email', 'test@example.com'], root);
@@ -69,11 +75,13 @@ test('reports integration conflicts and aborts the cherry-pick', () => {
     const manager = new GitWorktreeManager(worktrees, root);
     const first = manager.createWorktree('T-12', 'first');
     const second = manager.createWorktree('T-12', 'second');
+
     writeFileSync(join(first.path, 'shared.txt'), 'first\n');
     writeFileSync(join(second.path, 'shared.txt'), 'second\n');
     const firstCommit = manager.commitWorktreeChanges(first.path, 'first');
     const secondCommit = manager.commitWorktreeChanges(second.path, 'second');
     const integration = manager.createWorktree('T-12', 'integration');
+
     assert.throws(
       () => manager.integrateCommits(integration.path, [firstCommit, secondCommit]),
       IntegrationConflictError,

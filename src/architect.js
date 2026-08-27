@@ -59,8 +59,10 @@ export class CodexArchitect {
       onEvent: () => {},
     });
     const plan = result.output?.output ?? result.output;
+
     if (!plan || typeof plan !== 'object')
       throw new Error('Codex architect did not return a structured plan');
+
     return plan;
   }
 }

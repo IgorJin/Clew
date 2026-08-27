@@ -13,6 +13,7 @@ test('fake architect produces a terminal integration stage', async () => {
   const plan = await new FakeArchitect().createPlan({ task });
 
   const integration = plan.stages.find((stage) => stage.kind === 'integration');
+
   assert.ok(integration);
   assert.deepEqual(integration.dependsOn, ['backend', 'frontend']);
 });
@@ -34,6 +35,7 @@ test('Codex architect requests a read-only structured plan', async () => {
   const architect = new CodexArchitect({
     run: async (input) => {
       request = input;
+
       return { output: { output: expectedPlan } };
     },
   });

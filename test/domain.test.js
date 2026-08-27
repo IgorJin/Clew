@@ -14,6 +14,7 @@ test('validates and normalizes a task contract', () => {
     profile: 'quick',
     acceptance: ['old token is rejected'],
   });
+
   assert.equal(task.acceptance[0].id, 'AC-1');
 });
 test('rejects invalid transitions', () => {

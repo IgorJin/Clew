@@ -1,33 +1,113 @@
-export const TASK_STATES = Object.freeze([
-  'DRAFT',
-  'PLAN_READY',
-  'QUEUED',
-  'RECOVERING',
-  'EXECUTING',
-  'VERIFYING',
-  'REVIEWING',
-  'WAITING_FOR_HUMAN',
-  'READY',
-  'COMPLETED',
-  'FAILED',
-  'CANCELLED',
-  'BLOCKED',
-]);
+export const TASK_STATE = Object.freeze({
+  DRAFT: 'DRAFT',
+  PLAN_READY: 'PLAN_READY',
+  QUEUED: 'QUEUED',
+  RECOVERING: 'RECOVERING',
+  EXECUTING: 'EXECUTING',
+  VERIFYING: 'VERIFYING',
+  REVIEWING: 'REVIEWING',
+  WAITING_FOR_HUMAN: 'WAITING_FOR_HUMAN',
+  READY: 'READY',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+  BLOCKED: 'BLOCKED',
+});
+
+export const TASK_STATES = Object.freeze(Object.values(TASK_STATE));
+
+export const STAGE_STATUS = Object.freeze({
+  QUEUED: 'QUEUED',
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  BLOCKED: 'BLOCKED',
+});
+
+export const RUN_STATUS = Object.freeze({
+  RUNNING: 'RUNNING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  INTERRUPTED: 'INTERRUPTED',
+});
+
+export const PLAN_STATUS = Object.freeze({
+  PENDING_APPROVAL: 'PENDING_APPROVAL',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+});
+
+export const PROFILE_NAME = Object.freeze({
+  QUICK: 'quick',
+  STANDARD: 'standard',
+  DEEP: 'deep',
+});
+
+export const HARNESS_NAME = Object.freeze({
+  FAKE: 'fake',
+  CODEX: 'codex',
+  OPENCODE: 'opencode',
+});
+
+export const EXECUTION_MODE = Object.freeze({
+  DIRECT: 'direct',
+  ISOLATED: 'isolated',
+  PARALLEL: 'parallel',
+});
 
 const transitions = {
-  DRAFT: ['PLAN_READY', 'QUEUED', 'CANCELLED'],
-  PLAN_READY: ['QUEUED', 'WAITING_FOR_HUMAN', 'CANCELLED'],
-  QUEUED: ['RECOVERING', 'EXECUTING', 'WAITING_FOR_HUMAN', 'CANCELLED'],
-  RECOVERING: ['EXECUTING', 'FAILED', 'BLOCKED', 'CANCELLED'],
-  EXECUTING: ['RECOVERING', 'VERIFYING', 'FAILED', 'CANCELLED', 'WAITING_FOR_HUMAN'],
-  VERIFYING: ['RECOVERING', 'REVIEWING', 'READY', 'FAILED', 'WAITING_FOR_HUMAN'],
-  REVIEWING: ['RECOVERING', 'READY', 'COMPLETED', 'FAILED', 'WAITING_FOR_HUMAN'],
-  WAITING_FOR_HUMAN: ['QUEUED', 'PLAN_READY', 'READY', 'CANCELLED', 'FAILED'],
-  READY: ['COMPLETED', 'QUEUED', 'CANCELLED'],
-  COMPLETED: [],
-  FAILED: ['PLAN_READY', 'RECOVERING', 'QUEUED', 'CANCELLED'],
-  CANCELLED: [],
-  BLOCKED: ['RECOVERING', 'QUEUED'],
+  [TASK_STATE.DRAFT]: [TASK_STATE.PLAN_READY, TASK_STATE.QUEUED, TASK_STATE.CANCELLED],
+  [TASK_STATE.PLAN_READY]: [TASK_STATE.QUEUED, TASK_STATE.WAITING_FOR_HUMAN, TASK_STATE.CANCELLED],
+  [TASK_STATE.QUEUED]: [
+    TASK_STATE.RECOVERING,
+    TASK_STATE.EXECUTING,
+    TASK_STATE.WAITING_FOR_HUMAN,
+    TASK_STATE.CANCELLED,
+  ],
+  [TASK_STATE.RECOVERING]: [
+    TASK_STATE.EXECUTING,
+    TASK_STATE.FAILED,
+    TASK_STATE.BLOCKED,
+    TASK_STATE.CANCELLED,
+  ],
+  [TASK_STATE.EXECUTING]: [
+    TASK_STATE.RECOVERING,
+    TASK_STATE.VERIFYING,
+    TASK_STATE.FAILED,
+    TASK_STATE.CANCELLED,
+    TASK_STATE.WAITING_FOR_HUMAN,
+  ],
+  [TASK_STATE.VERIFYING]: [
+    TASK_STATE.RECOVERING,
+    TASK_STATE.REVIEWING,
+    TASK_STATE.READY,
+    TASK_STATE.FAILED,
+    TASK_STATE.WAITING_FOR_HUMAN,
+  ],
+  [TASK_STATE.REVIEWING]: [
+    TASK_STATE.RECOVERING,
+    TASK_STATE.READY,
+    TASK_STATE.COMPLETED,
+    TASK_STATE.FAILED,
+    TASK_STATE.WAITING_FOR_HUMAN,
+  ],
+  [TASK_STATE.WAITING_FOR_HUMAN]: [
+    TASK_STATE.QUEUED,
+    TASK_STATE.PLAN_READY,
+    TASK_STATE.READY,
+    TASK_STATE.CANCELLED,
+    TASK_STATE.FAILED,
+  ],
+  [TASK_STATE.READY]: [TASK_STATE.COMPLETED, TASK_STATE.QUEUED, TASK_STATE.CANCELLED],
+  [TASK_STATE.COMPLETED]: [],
+  [TASK_STATE.FAILED]: [
+    TASK_STATE.PLAN_READY,
+    TASK_STATE.RECOVERING,
+    TASK_STATE.QUEUED,
+    TASK_STATE.CANCELLED,
+  ],
+  [TASK_STATE.CANCELLED]: [],
+  [TASK_STATE.BLOCKED]: [TASK_STATE.RECOVERING, TASK_STATE.QUEUED],
 };
 
 export function assertValidTaskTransition(fromState, toState) {
@@ -44,21 +124,25 @@ export function validateTaskContract(contract) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$/.test(contract.id))
     throw new Error('task.id must contain 2-64 safe characters');
   const acceptance = Array.isArray(contract.acceptance) ? contract.acceptance : [];
+
   if (!acceptance.length) throw new Error('task.acceptance must contain at least one criterion');
   const ids = new Set();
+
   for (let i = 0; i < acceptance.length; i++) {
     const item =
       typeof acceptance[i] === 'string'
         ? { id: `AC-${i + 1}`, criterion: acceptance[i] }
         : acceptance[i];
+
     if (!item?.criterion) throw new Error(`task.acceptance[${i}].criterion is required`);
     if (typeof item.id !== 'string' || !item.id.trim())
       throw new Error(`task.acceptance[${i}].id is required`);
     if (ids.has(item.id)) throw new Error(`duplicate acceptance id ${item.id}`);
     ids.add(item.id);
   }
-  if (!['quick', 'standard', 'deep'].includes(contract.profile))
+  if (!Object.values(PROFILE_NAME).includes(contract.profile))
     throw new Error('task.profile must be quick, standard, or deep');
+
   return {
     ...contract,
     risk: contract.risk ?? 'medium',
@@ -71,31 +155,33 @@ export function validateTaskContract(contract) {
 
 export function resolveProfile(profileName) {
   const common = { maxAttempts: 3, verification: 'targeted' };
-  if (profileName === 'quick')
+
+  if (profileName === PROFILE_NAME.QUICK)
     return {
       ...common,
       name: profileName,
-      mode: 'direct',
-      harness: 'fake',
+      mode: EXECUTION_MODE.DIRECT,
+      harness: HARNESS_NAME.FAKE,
       review: false,
       architecture: false,
       maxWorkers: 1,
     };
-  if (profileName === 'standard')
+  if (profileName === PROFILE_NAME.STANDARD)
     return {
       ...common,
       name: profileName,
-      mode: 'isolated',
-      harness: 'fake',
+      mode: EXECUTION_MODE.ISOLATED,
+      harness: HARNESS_NAME.FAKE,
       review: true,
       architecture: false,
       maxWorkers: 1,
     };
+
   return {
     ...common,
     name: profileName,
-    mode: 'parallel',
-    harness: 'fake',
+    mode: EXECUTION_MODE.PARALLEL,
+    harness: HARNESS_NAME.FAKE,
     review: true,
     architecture: true,
     integration: true,
@@ -109,6 +195,7 @@ export function validateExecutionPlan(plan) {
   if (typeof plan.parallelizable !== 'boolean')
     throw new Error('plan.parallelizable must be a boolean');
   const ids = new Set();
+
   for (const stage of plan.stages) {
     if (!stage || typeof stage.id !== 'string' || !stage.id.trim())
       throw new Error('plan stage id is required');
@@ -122,10 +209,12 @@ export function validateExecutionPlan(plan) {
   const visiting = new Set();
   const visited = new Set();
   const byId = new Map(plan.stages.map((stage) => [stage.id, stage]));
+
   function visitPlanStage(stageId) {
     if (visiting.has(stageId)) throw new Error('plan contains a cycle');
     if (visited.has(stageId)) return;
     const stage = byId.get(stageId);
+
     if (!stage) throw new Error(`plan dependency not found: ${stageId}`);
     visiting.add(stageId);
     for (const dependency of stage.dependsOn ?? []) visitPlanStage(dependency);
@@ -133,6 +222,7 @@ export function validateExecutionPlan(plan) {
     visited.add(stageId);
   }
   for (const stage of plan.stages) visitPlanStage(stage.id);
+
   return {
     ...plan,
     stages: plan.stages.map((stage) => ({ ...stage, dependsOn: stage.dependsOn ?? [] })),
