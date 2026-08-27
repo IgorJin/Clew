@@ -202,7 +202,12 @@ export async function main(args) {
           required: false,
           command: codexCommand,
         },
-        { name: 'opencode', ...probeUrl(openCodeUrl), required: false, url: openCodeUrl },
+        {
+          name: 'opencode',
+          ...(await probeHttpEndpoint(openCodeUrl)),
+          required: false,
+          url: openCodeUrl,
+        },
       ];
 
       return printJson({
@@ -226,15 +231,29 @@ function probeCommand(command, args) {
   }
 }
 
-function probeUrl(value) {
-  try {
-    const url = new URL(value);
+async function probeHttpEndpoint(value) {
+  let url;
 
-    return {
-      ok: ['http:', 'https:'].includes(url.protocol),
-      detail: 'endpoint configured',
-    };
+  try {
+    url = new URL(value);
   } catch {
     return { ok: false, detail: 'invalid URL' };
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) return { ok: false, detail: 'invalid URL' };
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1_000);
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { accept: 'application/json' },
+    });
+
+    clearTimeout(timeout);
+
+    return { ok: response.status < 500, detail: `reachable (HTTP ${response.status})` };
+  } catch {
+    return { ok: false, detail: 'unreachable' };
   }
 }

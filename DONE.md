@@ -235,7 +235,7 @@ npm test -- --test-name-pattern="worktree"
 node bin/clew.js doctor
 ```
 
-`doctor` проверяет подходящий Node.js, Git, наличие Codex CLI и корректность OpenCode endpoint. Внешние Codex/OpenCode проверки считаются optional: `ok: false` там не блокирует локальный fake-flow, но показывает, что native запуск в этой среде не готов.
+`doctor` проверяет подходящий Node.js, Git, наличие Codex CLI и доступность OpenCode endpoint (timeout 1 секунда). Внешние Codex/OpenCode проверки считаются optional: `ok: false` там не блокирует локальный fake-flow, но показывает, что native запуск в этой среде не готов.
 
 ## Сценарий 6: создать и подтвердить Deep plan
 
