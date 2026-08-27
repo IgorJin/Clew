@@ -5,6 +5,7 @@ import {
   assertValidTaskTransition,
   classifyFailure,
   FAILURE_CLASS,
+  isSafeGitRef,
   validateExecutionPlan,
 } from '../src/domain.js';
 
@@ -47,6 +48,31 @@ test('requires explicit ids for object acceptance criteria', () => {
         acceptance: [{ criterion: 'works' }],
       }),
     /acceptance\[0\]\.id is required/,
+  );
+});
+test('rejects unsafe Git refs and plan stage ids', () => {
+  assert.equal(isSafeGitRef('feature/safe-name'), true);
+  assert.equal(isSafeGitRef('../main'), false);
+  assert.equal(isSafeGitRef('-danger'), false);
+  assert.throws(
+    () =>
+      validateTaskContract({
+        id: 'T-REF',
+        title: 'Ref',
+        goal: 'Validate ref',
+        profile: 'quick',
+        base_ref: '../main',
+        acceptance: ['safe'],
+      }),
+    /safe Git ref/,
+  );
+  assert.throws(
+    () =>
+      validateExecutionPlan({
+        parallelizable: false,
+        stages: [{ id: '../worker', goal: 'escape' }],
+      }),
+    /unsafe id/,
   );
 });
 test('validates an acyclic execution plan', () => {

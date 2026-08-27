@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Store } from '../src/store.js';
+import { CURRENT_SCHEMA_VERSION } from '../src/migrations.js';
 
 test('persists a task, stage, run, and event history', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-test-'));
@@ -85,6 +86,10 @@ test('upgrades persisted plans with approval status', () => {
       .prepare('PRAGMA table_info(runs)')
       .all()
       .some((column) => column.name === 'turn_id'),
+  );
+  assert.equal(
+    store.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,
+    CURRENT_SCHEMA_VERSION,
   );
   store.close();
   rmSync(dir, { recursive: true, force: true });

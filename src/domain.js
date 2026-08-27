@@ -164,11 +164,14 @@ export function validateTaskContract(contract) {
   }
   if (!Object.values(PROFILE_NAME).includes(contract.profile))
     throw new Error('task.profile must be quick, standard, or deep');
+  const baseRef = contract.base_ref ?? 'HEAD';
+
+  if (!isSafeGitRef(baseRef)) throw new Error('task.base_ref must be a safe Git ref');
 
   return {
     ...contract,
     risk: contract.risk ?? 'medium',
-    base_ref: contract.base_ref ?? 'HEAD',
+    base_ref: baseRef,
     acceptance: acceptance.map((x, i) =>
       typeof x === 'string' ? { id: `AC-${i + 1}`, criterion: x } : x,
     ),
@@ -221,6 +224,8 @@ export function validateExecutionPlan(plan) {
   for (const stage of plan.stages) {
     if (!stage || typeof stage.id !== 'string' || !stage.id.trim())
       throw new Error('plan stage id is required');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(stage.id))
+      throw new Error(`plan stage ${stage.id} has an unsafe id`);
     if (typeof stage.goal !== 'string' || !stage.goal.trim())
       throw new Error(`plan stage ${stage.id}.goal is required`);
     if (ids.has(stage.id)) throw new Error(`duplicate plan stage ${stage.id}`);
@@ -249,4 +254,20 @@ export function validateExecutionPlan(plan) {
     ...plan,
     stages: plan.stages.map((stage) => ({ ...stage, dependsOn: stage.dependsOn ?? [] })),
   };
+}
+
+export function isSafeGitRef(value) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 255 &&
+    !value.startsWith('-') &&
+    !value.startsWith('/') &&
+    !value.endsWith('/') &&
+    !value.endsWith('.') &&
+    !value.includes('..') &&
+    !value.includes('@{') &&
+    !value.endsWith('.lock') &&
+    !/[\s~^:?*[\\]/.test(value)
+  );
 }

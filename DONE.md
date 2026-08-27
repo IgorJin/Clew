@@ -44,6 +44,8 @@ Clew сейчас — локальный CLI, который связывает 
 
 Event history append-only по смыслу: создание задачи, смена состояния, запуск harness, обнаруженное verification и ошибка сохраняются отдельно. Это позволяет объяснить, что происходило, без доступа к истории чата агента.
 
+Перед записью event payload Clew рекурсивно скрывает значения полей вроде `authorization`, `apiKey`, `token`, `password` и inline Bearer credentials. Схема SQLite обновляется последовательными транзакционными миграциями; применённые версии записываются в `schema_migrations`, а SQL-артефакты лежат в `migrations/`.
+
 Deep plan сохраняется в SQLite с номером версии до запуска stages. Если процесс Clew завершился посередине DAG, повторный `clew run TASK-ID --profile deep` переводит задачу в `RECOVERING`: завершённые stages восстанавливаются по persisted run/revision/evidence, оставшиеся `RUNNING` attempts получают статус `INTERRUPTED`, а незавершённая часть плана ставится в очередь заново.
 
 ### Architect and plan approval

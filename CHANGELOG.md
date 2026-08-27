@@ -2,6 +2,8 @@
 
 ## 0.1.0-alpha.3 — execution and review iteration
 
+- Added versioned transactional SQLite migrations with a recorded schema version and release SQL artifacts.
+- Added persisted-event secret redaction plus strict Git-ref and plan-stage identifier validation.
 - Added `clew interrupt ID` and Ctrl-C propagation through scheduler and harnesses; interrupted tasks become `CANCELLED` with an auditable `INTERRUPTED` run.
 - Added persisted interrupt requests so a second CLI process can safely signal an active scheduler.
 - Added Codex thread resume during Deep recovery: persisted native session IDs are reused through `thread/resume` before a new turn starts.

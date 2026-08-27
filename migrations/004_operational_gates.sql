@@ -1,0 +1,3 @@
+CREATE TABLE approvals (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, plan_version INTEGER NOT NULL, gate_id TEXT NOT NULL, decision TEXT NOT NULL, reason TEXT, actor TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE interrupt_requests (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, actor TEXT NOT NULL, requested_at TEXT NOT NULL);
+CREATE TABLE harness_approvals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, run_id TEXT NOT NULL, method TEXT NOT NULL, params TEXT NOT NULL, decision TEXT, actor TEXT, requested_at TEXT NOT NULL, decided_at TEXT);
