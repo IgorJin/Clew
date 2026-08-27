@@ -74,3 +74,28 @@ test('routes blocking review findings into bounded retries', async () => {
   if (previous === undefined) delete process.env.CLEW_FAKE_REVIEW;
   else process.env.CLEW_FAKE_REVIEW = previous;
 });
+
+test('runs deep profile through planned worker and integration stages', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-deep-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    create: (_task, stage) => ({ path: dir, branch: `test-${stage}`, baseSha: 'abc' }),
+    status: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+  store.createTask({
+    id: 'T-6',
+    title: 'Deep',
+    goal: 'Deep',
+    profile: 'deep',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  const result = await new Scheduler(store, workspaceManager).runTask('T-6', 'deep', 'fake');
+  assert.equal(result.state, 'READY');
+  assert.deepEqual(
+    store.stages('T-6').map((stage) => stage.id),
+    ['backend', 'frontend', 'integration'],
+  );
+  assert.ok(store.events('T-6').some((event) => event.type === 'INTEGRATION_COMPLETED'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});

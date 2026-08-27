@@ -200,7 +200,7 @@ node bin/clew.js doctor
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `quick`    | полностью рабочий путь с `fake`; native Codex boundary доступен через `--harness codex` при настроенном app-server                                                           |
 | `standard` | fake worker проходит через fake review, сохраняет `REVIEW_RECORDED` и автоматически повторяется после blocking findings; native review/retry orchestration пока не завершены |
-| `deep`     | контракт и профиль сохраняются; architect/DAG/parallel integration пока не завершены                                                                                         |
+| `deep`     | fake plan валидируется как DAG, запускаются backend/frontend stages, затем integration и review; native architect/parallel integration пока не завершены                     |
 
 Поэтому для демонстрации и локальной разработки используйте `quick --harness fake`.
 
@@ -212,8 +212,8 @@ node bin/clew.js doctor
 - live OpenCode session/event stream во всех поддерживаемых версиях;
 - native reviewer и structured review findings;
 - retry routing по общей классификации failures и native-session reuse;
-- architect plan с human approval;
-- настоящий multi-stage DAG и parallel workers;
+- native architect plan с human approval;
+- настоящий concurrent multi-stage DAG и production merge integration;
 - интеграция результатов worktrees и merge-conflict workflow;
 - автоматическая cleanup policy для worktrees;
 - dashboard UI;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateContract, assertTaskTransition } from '../src/domain.js';
+import { validateContract, assertTaskTransition, validatePlan } from '../src/domain.js';
 
 test('validates and normalizes a task contract', () => {
   const task = validateContract({
@@ -26,5 +26,21 @@ test('requires explicit ids for object acceptance criteria', () => {
         acceptance: [{ criterion: 'works' }],
       }),
     /acceptance\[0\]\.id is required/,
+  );
+});
+test('validates an acyclic execution plan', () => {
+  assert.equal(
+    validatePlan({ stages: [{ id: 'a' }, { id: 'b', dependsOn: ['a'] }] }).stages[1].dependsOn[0],
+    'a',
+  );
+  assert.throws(
+    () =>
+      validatePlan({
+        stages: [
+          { id: 'a', dependsOn: ['b'] },
+          { id: 'b', dependsOn: ['a'] },
+        ],
+      }),
+    /cycle/,
   );
 });

@@ -99,3 +99,35 @@ export function effectiveProfile(name) {
     maxWorkers: 3,
   };
 }
+
+export function validatePlan(plan) {
+  if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages) || !plan.stages.length)
+    throw new Error('plan.stages must contain at least one stage');
+  const ids = new Set();
+  for (const stage of plan.stages) {
+    if (!stage || typeof stage.id !== 'string' || !stage.id.trim())
+      throw new Error('plan stage id is required');
+    if (ids.has(stage.id)) throw new Error(`duplicate plan stage ${stage.id}`);
+    ids.add(stage.id);
+    if (stage.dependsOn !== undefined && !Array.isArray(stage.dependsOn))
+      throw new Error(`plan stage ${stage.id}.dependsOn must be an array`);
+  }
+  const visiting = new Set();
+  const visited = new Set();
+  const byId = new Map(plan.stages.map((stage) => [stage.id, stage]));
+  function visit(id) {
+    if (visiting.has(id)) throw new Error('plan contains a cycle');
+    if (visited.has(id)) return;
+    const stage = byId.get(id);
+    if (!stage) throw new Error(`plan dependency not found: ${id}`);
+    visiting.add(id);
+    for (const dependency of stage.dependsOn ?? []) visit(dependency);
+    visiting.delete(id);
+    visited.add(id);
+  }
+  for (const stage of plan.stages) visit(stage.id);
+  return {
+    ...plan,
+    stages: plan.stages.map((stage) => ({ ...stage, dependsOn: stage.dependsOn ?? [] })),
+  };
+}

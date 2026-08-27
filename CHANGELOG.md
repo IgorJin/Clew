@@ -10,6 +10,7 @@
 - Added a deterministic fake harness and tests for the first Quick flow.
 - Added a deterministic fake reviewer and Standard-flow review decision path.
 - Added bounded automatic retries after blocking review findings, with per-attempt workspaces and retry events.
+- Added validated Deep plan execution with backend/frontend worker stages, integration stage, and final review.
 - Documented the v0.1 release gates and implementation backlog.
 
 Known limitations:
