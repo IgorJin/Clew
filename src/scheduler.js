@@ -23,6 +23,7 @@ import {
 } from './harness.js';
 import { FakeReviewer, CodexReviewer } from './review.js';
 import { FakeArchitect, CodexArchitect } from './architect.js';
+import { verificationEnvironment } from './trust.js';
 
 export class Scheduler {
   constructor(
@@ -181,7 +182,21 @@ export class Scheduler {
         row.contract,
         profile,
         result.verification,
-      );
+      ).map((item) => {
+        const environment = verificationEnvironment({
+          command: item.command,
+          cwd: workspace.path,
+          revision,
+        });
+
+        return {
+          ...item,
+          revision,
+          endedAt: item.endedAt ?? new Date().toISOString(),
+          environment,
+          environmentFingerprint: environment.fingerprint,
+        };
+      });
       const verificationReport = validateVerificationReport({
         taskId,
         stageId: 'worker',
@@ -931,7 +946,23 @@ export class Scheduler {
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
       this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
-      const evidence = this.normalizeVerificationEvidence(task, policy, result.verification);
+      const evidence = this.normalizeVerificationEvidence(task, policy, result.verification).map(
+        (item) => {
+          const environment = verificationEnvironment({
+            command: item.command,
+            cwd: stageWorkspace.path,
+            revision,
+          });
+
+          return {
+            ...item,
+            revision,
+            endedAt: item.endedAt ?? new Date().toISOString(),
+            environment,
+            environmentFingerprint: environment.fingerprint,
+          };
+        },
+      );
       const verificationReport = validateVerificationReport({
         taskId,
         stageId: stage.id,

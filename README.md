@@ -82,11 +82,17 @@ node bin/clew.js run DEMO-DEEP --profile deep --harness fake
 ```sh
 node bin/clew.js status DEMO-1 --watch
 node bin/clew.js interrupt DEMO-1 --actor your-name
+node bin/clew.js task result DEMO-1
+node bin/clew.js task history DEMO-1 --stage worker --attempt 1
+node bin/clew.js retry DEMO-1 worker --actor your-name --reason "rerun after inspection"
+node bin/clew.js verify DEMO-1 --revision <worker-sha> --actor your-name
 node bin/clew.js worktree list
 node bin/clew.js worktree prune
 ```
 
 `worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
+
+`task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 
@@ -96,6 +102,7 @@ Configuration precedence is command flag → environment → project `.clew.json
 - [`tasks.md`](./tasks.md) — implementation record and post-v0.1 backlog;
 - [`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md) — mapping of all ten acceptance criteria;
 - [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
+- [`RELEASE-0.2.md`](./RELEASE-0.2.md) — planned next-release scope, candidate gates, and fixed decisions;
 - [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
 
 ## Intentional v0.1 limits

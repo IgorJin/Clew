@@ -1,5 +1,5 @@
 const SECRET_KEY_PATTERN =
-  /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|cookie)/i;
+  /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|cookie|token)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const TOKEN_ASSIGNMENT_PATTERN =
   /\b([A-Za-z0-9_-]*(?:token|secret|password|api[_-]?key))=([^\s&]+)/gi;

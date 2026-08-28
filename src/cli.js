@@ -1,4 +1,4 @@
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { URL } from 'node:url';
@@ -13,6 +13,10 @@ import {
   PLAN_STATUS,
   TASK_STATE,
   RUN_STATUS,
+  OPERATOR_ACTION,
+  resolveProfile,
+  validateRetryRequest,
+  validateCompletionDecision,
 } from './domain.js';
 import { APPROVAL_DECISION } from './harness.js';
 import { Store } from './store.js';
@@ -20,6 +24,8 @@ import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
 import { loadConfig } from './config.js';
 import { redactSecrets } from './security.js';
+import { evaluateEvidenceSet } from './trust.js';
+import { createHash } from 'node:crypto';
 
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
@@ -55,7 +61,7 @@ function printJson(data) {
 }
 function printHelp() {
   console.log(
-    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID\n  clew doctor [--harness codex|opencode]`,
+    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID\n  clew doctor [--harness codex|opencode]`,
   );
 }
 
@@ -112,6 +118,30 @@ export async function main(args) {
         runs: store.listRuns(task.id),
       });
     }
+    if (command === 'task' && subcommand === 'result') {
+      return printJson(store.getResultManifest(rest[0]));
+    }
+    if (command === 'task' && subcommand === 'history') {
+      const taskId = rest[0];
+
+      if (!taskId) throw new Error('task id is required');
+      const attemptValue = getOptionValue(rest, '--attempt');
+      const attempt = attemptValue === undefined ? null : Number(attemptValue);
+
+      if (attempt !== null && (!Number.isInteger(attempt) || attempt < 1))
+        throw new Error('--attempt must be a positive integer');
+
+      return printJson({
+        taskId,
+        stages: store.listStages(taskId),
+        runs: store.listRuns(taskId, {
+          stageId: getOptionValue(rest, '--stage', null),
+          attempt,
+        }),
+        actions: store.listOperatorActions(taskId),
+        events: store.listEvents(taskId),
+      });
+    }
     if (command === 'plan') {
       const plan = store.getLatestPlan(subcommand);
 
@@ -164,6 +194,176 @@ export async function main(args) {
           getOptionValue(rest, '--actor', process.env.USER || 'local-user'),
         ),
       );
+    }
+    if (command === 'retry') {
+      const taskId = subcommand;
+      const stageId = rest[0] && !rest[0].startsWith('--') ? rest[0] : 'worker';
+      const actor = getOptionValue(rest, '--actor', process.env.USER || 'local-user');
+      const reason = getOptionValue(rest, '--reason');
+      const task = store.getTask(taskId);
+
+      if (!task) throw new Error(`task not found: ${taskId}`);
+      if (![TASK_STATE.READY, TASK_STATE.FAILED, TASK_STATE.BLOCKED].includes(task.state))
+        throw new Error(`task ${taskId} cannot be retried from ${task.state}`);
+      if (!store.listStages(taskId).some((stage) => stage.id === stageId))
+        throw new Error(`stage not found: ${stageId}`);
+      if (stageId !== 'worker')
+        throw new Error('manual retry currently supports the worker stage only');
+      const previousRuns = store.listRuns(taskId, { stageId });
+      const maxAttempts =
+        previousRuns.at(-1)?.policy?.maxAttempts ??
+        resolveProfile(getOptionValue(rest, '--profile', task.contract.profile)).maxAttempts;
+
+      if (previousRuns.length >= maxAttempts)
+        throw new Error(
+          `retry policy exhausted for ${taskId}: ${previousRuns.length}/${maxAttempts}`,
+        );
+      const request = validateRetryRequest({ taskId, stageId, actor, reason });
+      const action = store.recordOperatorAction({
+        taskId,
+        action: OPERATOR_ACTION.RETRY,
+        stageId,
+        actor,
+        reason: request.reason,
+      });
+      const runtimeConfig = resolveCommandConfig(config, rest);
+      const manager = new GitWorktreeManager(runtimeConfig.worktreeRoot);
+      const result = await new Scheduler(store, manager, { adapterConfig: runtimeConfig }).runTask(
+        taskId,
+        getOptionValue(rest, '--profile', task.contract.profile),
+        getOptionValue(rest, '--harness'),
+        getOptionValue(rest, '--review-harness'),
+        getOptionValue(rest, '--architect'),
+      );
+
+      return printJson({ action, result });
+    }
+    if (command === 'verify') {
+      const taskId = subcommand;
+      const revision = getOptionValue(rest, '--revision');
+      const stageId = getOptionValue(rest, '--stage', 'worker');
+      const actor = getOptionValue(rest, '--actor', process.env.USER || 'local-user');
+
+      if (!taskId) throw new Error('task id is required');
+      if (!revision) throw new Error('--revision is required');
+
+      return printJson(store.recordVerification({ taskId, stageId, revision, actor }));
+    }
+    if (command === 'complete') {
+      const taskId = subcommand;
+      const revision = getOptionValue(rest, '--revision');
+      const actor = getOptionValue(rest, '--actor', process.env.USER || 'local-user');
+      const task = store.getTask(taskId);
+
+      if (!task) throw new Error(`task not found: ${taskId}`);
+      if (!revision) throw new Error('--revision is required');
+      if (task.state !== TASK_STATE.READY)
+        throw new Error(`task ${taskId} must be READY before completion`);
+      const manifest = store.getResultManifest(taskId);
+      const latestRevision = manifest?.revision ?? store.listRuns(taskId).at(-1)?.commit_sha;
+
+      if (latestRevision !== revision)
+        throw new Error('completion revision does not match current READY revision');
+      const trust = evaluateEvidenceSet(store.latestVerification(taskId)?.evidence ?? [], {
+        revision,
+      });
+
+      if (!trust.reusable) throw new Error('READY evidence is stale or untrusted');
+
+      return printJson(
+        store.recordCompletion(
+          validateCompletionDecision({
+            taskId,
+            expectedRevision: revision,
+            actor,
+            note: getOptionValue(rest, '--note'),
+          }),
+          manifest,
+        ),
+      );
+    }
+    if (command === 'export') {
+      const taskId = subcommand;
+      const outputDir = getOptionValue(rest, '--dir');
+
+      if (!outputDir) throw new Error('--dir is required');
+      const manifest = store.getResultManifest(taskId);
+
+      if (!manifest) throw new Error('result manifest is not available');
+      const revision = getOptionValue(rest, '--revision', manifest.revision);
+
+      if (revision !== manifest.revision)
+        throw new Error('export revision does not match result manifest');
+      const base = store.getTask(taskId).contract.base_ref;
+      const target = resolve(outputDir);
+
+      mkdirSync(target, { recursive: true });
+      if (execFileSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' }).trim())
+        throw new Error('refusing export from a dirty primary checkout');
+      const text = `${JSON.stringify(manifest, null, 2)}\n`;
+      const checksum = createHash('sha256').update(text).digest('hex');
+
+      writeFileSync(join(target, `${taskId}.manifest.json`), text);
+      writeFileSync(
+        join(target, `${taskId}.manifest.sha256`),
+        `${checksum}  ${taskId}.manifest.json\n`,
+      );
+      writeFileSync(
+        join(target, `${taskId}.patch`),
+        execFileSync('git', ['diff', `${base}..${revision}`], { cwd, encoding: 'utf8' }),
+      );
+      execFileSync(
+        'git',
+        ['bundle', 'create', join(target, `${taskId}.bundle`), `${base}..${revision}`],
+        { cwd, stdio: 'pipe' },
+      );
+      store.appendEvent(taskId, 'RESULT_EXPORTED', { outputDir: target, revision, checksum });
+
+      return printJson({ taskId, outputDir: target, revision, checksum });
+    }
+    if (command === 'cleanup') {
+      const retentionDays = Number(getOptionValue(rest, '--retention-days', 0));
+
+      if (!Number.isFinite(retentionDays) || retentionDays < 0)
+        throw new Error('--retention-days must be a non-negative number');
+      const manager = new GitWorktreeManager(resolveCommandConfig(config, rest).worktreeRoot);
+      const removed = [];
+      const skipped = [];
+
+      for (const task of store.listTasks()) {
+        const completion = store.getCompletion(task.id);
+        const events = store.listEvents(task.id);
+        const runs = store.listRuns(task.id).filter((run) => run.workspace);
+        const protectedReason =
+          task.state !== TASK_STATE.COMPLETED
+            ? 'not completed'
+            : !completion
+              ? 'not accepted'
+              : !events.some((event) => event.type === 'RESULT_EXPORTED')
+                ? 'not exported'
+                : Date.now() - Date.parse(task.updated_at) < retentionDays * 86_400_000
+                  ? 'retention policy'
+                  : null;
+
+        if (protectedReason) {
+          skipped.push({ taskId: task.id, reason: protectedReason });
+          continue;
+        }
+        for (const run of runs) {
+          try {
+            manager.removeWorktree(run.workspace);
+            removed.push({ taskId: task.id, path: run.workspace });
+          } catch (error) {
+            skipped.push({ taskId: task.id, path: run.workspace, reason: error.message });
+          }
+        }
+        if (runs.length && runs.every((run) => removed.some((item) => item.path === run.workspace)))
+          store.appendEvent(task.id, 'WORKTREES_CLEANED', {
+            paths: runs.map((run) => run.workspace),
+          });
+      }
+
+      return printJson({ removed, skipped });
     }
     if (command === 'run') {
       const id = subcommand;

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/completion-decision.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "expectedRevision", "decision", "actor"],
+  "properties": {
+    "taskId": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "type": "string", "minLength": 1 },
+    "decision": { "const": "accept" },
+    "actor": { "type": "string", "minLength": 1 },
+    "note": { "type": ["string", "null"] }
+  }
+}

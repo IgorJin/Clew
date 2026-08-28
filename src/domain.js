@@ -83,6 +83,66 @@ export const EXECUTION_MODE = Object.freeze({
   PARALLEL: 'parallel',
 });
 
+export const OPERATOR_ACTION = Object.freeze({
+  RETRY: 'retry',
+  VERIFY: 'verify',
+  COMPLETE: 'complete',
+});
+
+export const COMPLETION_DECISION = Object.freeze({
+  ACCEPT: 'accept',
+});
+
+export function validateRetryRequest(request) {
+  if (!request || typeof request !== 'object') throw new Error('retry request must be an object');
+  for (const field of ['taskId', 'stageId', 'actor'])
+    if (typeof request[field] !== 'string' || !request[field].trim())
+      throw new Error(`retry.${field} is required`);
+  if (request.reason !== undefined && typeof request.reason !== 'string')
+    throw new Error('retry.reason must be a string');
+
+  return { ...request, reason: request.reason ?? null };
+}
+
+export function validateCompletionDecision(decision) {
+  if (!decision || typeof decision !== 'object')
+    throw new Error('completion decision must be an object');
+  for (const field of ['taskId', 'expectedRevision', 'actor'])
+    if (typeof decision[field] !== 'string' || !decision[field].trim())
+      throw new Error(`completion.${field} is required`);
+  if (!Object.values(COMPLETION_DECISION).includes(decision.decision ?? COMPLETION_DECISION.ACCEPT))
+    throw new Error('completion.decision is invalid');
+  if (decision.note !== undefined && typeof decision.note !== 'string')
+    throw new Error('completion.note must be a string');
+
+  return {
+    ...decision,
+    decision: decision.decision ?? COMPLETION_DECISION.ACCEPT,
+    note: decision.note ?? null,
+  };
+}
+
+export function validateRuntimeNamespace(namespace) {
+  if (!namespace || typeof namespace !== 'object')
+    throw new Error('runtime namespace must be an object');
+  for (const field of ['taskId', 'runId', 'value'])
+    if (typeof namespace[field] !== 'string' || !namespace[field].trim())
+      throw new Error(`runtimeNamespace.${field} is required`);
+
+  return namespace;
+}
+
+export function validateResultManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object')
+    throw new Error('result manifest must be an object');
+  for (const field of ['taskId', 'state'])
+    if (typeof manifest[field] !== 'string' || !manifest[field].trim())
+      throw new Error(`result.${field} is required`);
+  if (!Array.isArray(manifest.attempts)) throw new Error('result.attempts must be an array');
+
+  return manifest;
+}
+
 export function classifyFailure(error) {
   if (!error) return FAILURE_CLASS.UNKNOWN;
   if (error.code === 'HARNESS_INTERRUPTED') return FAILURE_CLASS.INTERRUPTED;
@@ -140,7 +200,12 @@ const transitions = {
     TASK_STATE.CANCELLED,
     TASK_STATE.FAILED,
   ],
-  [TASK_STATE.READY]: [TASK_STATE.COMPLETED, TASK_STATE.QUEUED, TASK_STATE.CANCELLED],
+  [TASK_STATE.READY]: [
+    TASK_STATE.COMPLETED,
+    TASK_STATE.QUEUED,
+    TASK_STATE.VERIFYING,
+    TASK_STATE.CANCELLED,
+  ],
   [TASK_STATE.COMPLETED]: [],
   [TASK_STATE.FAILED]: [
     TASK_STATE.PLAN_READY,

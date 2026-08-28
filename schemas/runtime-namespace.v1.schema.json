@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/runtime-namespace.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["taskId", "runId", "value"],
+  "properties": {
+    "taskId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "value": { "type": "string", "minLength": 1 }
+  }
+}

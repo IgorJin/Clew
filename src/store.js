@@ -1,9 +1,20 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { TASK_STATE, STAGE_STATUS, PLAN_STATUS, validateNormalizedEvent } from './domain.js';
+import {
+  TASK_STATE,
+  STAGE_STATUS,
+  PLAN_STATUS,
+  OPERATOR_ACTION,
+  assertValidTaskTransition,
+  validateCompletionDecision,
+  validateNormalizedEvent,
+  validateResultManifest,
+} from './domain.js';
 import { applyMigrations } from './migrations.js';
 import { redactSecrets } from './security.js';
+import { evaluateEvidenceSet, verificationEnvironment } from './trust.js';
 
 export class Store {
   constructor(file) {
@@ -255,10 +266,22 @@ export class Store {
       .prepare('UPDATE runs SET status=?,finished_at=?,commit_sha=? WHERE id=?')
       .run(status, new Date().toISOString(), commitSha, id);
   }
-  listRuns(taskId) {
+  listRuns(taskId, { stageId = null, attempt = null } = {}) {
+    const conditions = ['task_id=?'];
+    const params = [taskId];
+
+    if (stageId !== null) {
+      conditions.push('stage_id=?');
+      params.push(stageId);
+    }
+    if (attempt !== null) {
+      conditions.push('attempt=?');
+      params.push(attempt);
+    }
+
     return this.db
-      .prepare('SELECT * FROM runs WHERE task_id=? ORDER BY rowid')
-      .all(taskId)
+      .prepare(`SELECT * FROM runs WHERE ${conditions.join(' AND ')} ORDER BY rowid`)
+      .all(...params)
       .map(parseRun);
   }
   listAllRuns() {
@@ -285,6 +308,276 @@ export class Store {
       )
       .all(taskId)
       .map((eventRow) => ({ ...eventRow, payload: JSON.parse(eventRow.payload) }));
+  }
+  listVerification(taskId) {
+    return this.listEvents(taskId)
+      .filter((event) => event.type === 'VERIFICATION_RECORDED')
+      .map((event) => event.payload);
+  }
+  listOperatorActions(taskId) {
+    return this.db
+      .prepare('SELECT * FROM operator_actions WHERE task_id=? ORDER BY at, id')
+      .all(taskId);
+  }
+  recordOperatorAction(requestOrTaskId, positionalAction, positionalOptions = {}) {
+    const request =
+      typeof requestOrTaskId === 'string'
+        ? { taskId: requestOrTaskId, action: positionalAction, ...positionalOptions }
+        : requestOrTaskId;
+    const {
+      taskId,
+      action,
+      stageId = null,
+      attempt = null,
+      actor = 'local-user',
+      reason = null,
+      expectedRevision = null,
+    } = request;
+
+    if (!taskId || !actor) throw new Error('operator action taskId and actor are required');
+    const normalizedAction = typeof action === 'string' ? action.toLowerCase() : action;
+
+    if (!Object.values(OPERATOR_ACTION).includes(normalizedAction))
+      throw new Error(`unsupported operator action: ${action}`);
+    const id = randomUUID();
+    const at = new Date().toISOString();
+
+    this.db
+      .prepare(
+        'INSERT INTO operator_actions (id,task_id,action,stage_id,attempt,actor,reason,expected_revision,at) VALUES (?,?,?,?,?,?,?,?,?)',
+      )
+      .run(id, taskId, normalizedAction, stageId, attempt, actor, reason, expectedRevision, at);
+    this.appendEvent(taskId, 'OPERATOR_ACTION_RECORDED', {
+      id,
+      action: normalizedAction,
+      stageId,
+      attempt,
+      actor,
+      reason,
+      expectedRevision,
+      at,
+    });
+
+    return {
+      id,
+      taskId,
+      action: normalizedAction,
+      stageId,
+      attempt,
+      actor,
+      reason,
+      expectedRevision,
+      at,
+    };
+  }
+  getCompletion(taskId) {
+    const row = this.db.prepare('SELECT * FROM completions WHERE task_id=?').get(taskId);
+
+    return row ? { ...row, manifest: JSON.parse(row.manifest) } : null;
+  }
+  recordCompletion(decision, manifest) {
+    const normalized = validateCompletionDecision(decision);
+    const result = validateResultManifest(manifest);
+
+    if (normalized.taskId !== result.taskId)
+      throw new Error('completion task and result manifest task do not match');
+
+    return this.runInTransaction(() => {
+      const task = this.getTask(normalized.taskId);
+
+      if (!task) throw new Error(`task not found: ${normalized.taskId}`);
+      if (task.state !== TASK_STATE.READY)
+        throw new Error(`task ${task.id} must be READY before completion`);
+      const currentResult = this.getResultManifest(task.id);
+
+      if (currentResult.revision !== normalized.expectedRevision)
+        throw new Error('completion revision is not the current READY revision');
+      if (result.revision && result.revision !== normalized.expectedRevision)
+        throw new Error('completion revision does not match result manifest');
+      if (this.getCompletion(task.id)) throw new Error(`task ${task.id} is already completed`);
+      const at = new Date().toISOString();
+
+      assertValidTaskTransition(task.state, TASK_STATE.COMPLETED);
+      this.db
+        .prepare(
+          'INSERT INTO completions (task_id,expected_revision,decision,note,actor,at,manifest) VALUES (?,?,?,?,?,?,?)',
+        )
+        .run(
+          task.id,
+          normalized.expectedRevision,
+          normalized.decision,
+          normalized.note,
+          normalized.actor,
+          at,
+          JSON.stringify(result),
+        );
+      this.recordOperatorAction({
+        taskId: task.id,
+        action: OPERATOR_ACTION.COMPLETE,
+        actor: normalized.actor,
+        reason: normalized.note,
+        expectedRevision: normalized.expectedRevision,
+      });
+      this.setTaskState(task.id, TASK_STATE.COMPLETED);
+      this.appendEvent(task.id, 'TASK_COMPLETED', {
+        expectedRevision: normalized.expectedRevision,
+        decision: normalized.decision,
+        actor: normalized.actor,
+        note: normalized.note,
+        at,
+      });
+
+      return this.getCompletion(task.id);
+    });
+  }
+  saveCompletion(taskId, revision, manifest, { actor = 'local-user', note = null } = {}) {
+    const current = this.getResultManifest(taskId);
+
+    return this.recordCompletion(
+      { taskId, expectedRevision: revision, actor, note },
+      { ...current, ...manifest, taskId, revision },
+    );
+  }
+  latestVerification(taskId, stageId = null) {
+    const reports = this.listEvents(taskId)
+      .filter((event) => event.type === 'VERIFICATION_RECORDED')
+      .map((event) => event.payload)
+      .filter((report) => stageId === null || report.stageId === stageId);
+
+    return reports.at(-1) ?? null;
+  }
+  evaluateTaskTrust(taskId, context = {}) {
+    const result = evaluateEvidenceSet(this.latestVerification(taskId)?.evidence ?? [], context);
+    const task = this.getTask(taskId);
+
+    if (task?.state === TASK_STATE.READY && !result.reusable) {
+      this.runInTransaction(() => {
+        this.setTaskState(taskId, TASK_STATE.VERIFYING);
+        this.appendEvent(taskId, 'READY_INVALIDATED', {
+          reason: result.evaluated.map((item) => item.trust.reason),
+          ...context,
+        });
+      });
+    }
+
+    return result;
+  }
+  latestReview(taskId) {
+    return (
+      this.listEvents(taskId)
+        .filter((event) => event.type === 'REVIEW_RECORDED')
+        .map((event) => event.payload)
+        .at(-1) ?? null
+    );
+  }
+  getResultManifest(taskId) {
+    const task = this.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const runs = this.listRuns(taskId);
+    const latestCompletedRun = [...runs].reverse().find((run) => run.status === 'COMPLETED');
+    const latestVerification = this.latestVerification(taskId);
+    const manifest = {
+      version: 1,
+      taskId,
+      state: task.state,
+      contract: task.contract,
+      attention: task.state === TASK_STATE.WAITING_FOR_HUMAN ? 'HUMAN_ACTION_REQUIRED' : null,
+      plan: this.getLatestPlan(taskId),
+      attempts: runs.map((run) => ({
+        id: run.id,
+        stageId: run.stage_id,
+        attempt: run.attempt,
+        status: run.status,
+        harness: run.harness,
+        profile: run.profile,
+        workspace: run.workspace,
+        revision: run.commit_sha,
+        startedAt: run.started_at,
+        finishedAt: run.finished_at,
+      })),
+      revision: latestCompletedRun?.commit_sha ?? latestVerification?.revision ?? null,
+      baseRevision: task.contract.base_ref,
+      resultRevision: latestCompletedRun?.commit_sha ?? latestVerification?.revision ?? null,
+      diffSummary: {
+        baseRevision: task.contract.base_ref,
+        resultRevision: latestCompletedRun?.commit_sha ?? latestVerification?.revision ?? null,
+        changed: Boolean(latestCompletedRun?.commit_sha ?? latestVerification?.revision),
+      },
+      evidence: latestVerification?.evidence ?? [],
+      evidenceCoverage: latestVerification
+        ? [...new Set(latestVerification.evidence.flatMap((item) => item.acceptanceCriteria ?? []))]
+        : [],
+      review: this.latestReview(taskId),
+      workspace: latestCompletedRun?.workspace ?? latestVerification?.workspace ?? null,
+      completion: this.getCompletion(taskId),
+    };
+
+    return validateResultManifest(manifest);
+  }
+  recordVerification({
+    taskId,
+    stageId = 'worker',
+    revision,
+    actor = 'local-user',
+    evidence,
+    rationale = 'Verification rerun against the pinned revision',
+    skippedChecks = [],
+  }) {
+    const task = this.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const run = [...this.listRuns(taskId, { stageId })]
+      .reverse()
+      .find((item) => item.commit_sha === revision);
+
+    if (!run) throw new Error(`revision ${revision} is not a known ${stageId} run revision`);
+    const normalizedEvidence = (
+      evidence ??
+      this.latestVerification(taskId, stageId)?.evidence ??
+      []
+    ).map((item) => {
+      const environment = verificationEnvironment({
+        command: item.command,
+        cwd: run.workspace,
+        revision,
+      });
+
+      return {
+        ...item,
+        revision,
+        endedAt: new Date().toISOString(),
+        environment,
+        environmentFingerprint: environment.fingerprint,
+      };
+    });
+    const report = {
+      taskId,
+      stageId,
+      runId: run.id,
+      attempt: run.attempt,
+      workspace: run.workspace,
+      evidence: normalizedEvidence,
+      revision,
+      rationale,
+      skippedChecks,
+      reverifiedBy: actor,
+    };
+    const normalized = this.runInTransaction(() => {
+      this.recordOperatorAction({
+        taskId,
+        action: OPERATOR_ACTION.VERIFY,
+        stageId,
+        attempt: run.attempt,
+        actor,
+        expectedRevision: revision,
+      });
+      this.appendEvent(taskId, 'VERIFICATION_RECORDED', report);
+
+      return report;
+    });
+
+    return normalized;
   }
   rebuildTaskProjection(taskId) {
     const task = this.getTask(taskId);
