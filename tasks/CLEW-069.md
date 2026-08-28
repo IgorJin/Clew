@@ -1,7 +1,7 @@
 ---
 id: CLEW-069
 title: Local daemon and API server
-status: planned
+status: done
 release: v0.4
 priority: P0
 size: L
@@ -90,8 +90,10 @@ Primary ownership: daemon/server transport, CLI API client, process lifecycle. C
 
 ## Blockers
 
-Waiting for `CLEW-068` contracts.
+None.
 
 ## Completion record
 
-Not completed.
+- Implementation: authenticated loopback daemon, exclusive state-directory lock, restrictive token/metadata files, HTTP command/query endpoint, WebSocket cursor replay, static asset hook, explicit CLI daemon lifecycle, and API client command.
+- Verification: daemon/control-plane/store integration tests passed with loopback enabled; full suite passed with 86 tests and 2 environment skips on 2026-08-28.
+- Compatibility: existing CLI commands remain available through `clew api ...`; no automatic daemon startup, remote service, or account dependency was added.

@@ -93,6 +93,8 @@ node bin/clew.js complete DEMO-1 --revision <worker-sha> --actor your-name
 node bin/clew.js export DEMO-1 --dir /tmp/clew-export
 node bin/clew.js cleanup --retention-days 7
 node bin/clew.js telemetry install
+node bin/clew.js daemon start
+node bin/clew.js api task list
 CLEW_TELEMETRY_ENABLED=true node bin/clew.js telemetry status
 node bin/clew.js worktree list
 node bin/clew.js worktree prune
@@ -105,6 +107,8 @@ node bin/clew.js worktree prune
 Each completed native turn records reported token usage when the harness exposes it. `task usage` aggregates the complete task lifecycle, including retries and Deep stages. Missing provider data remains `unknown` or `partial`; Clew never estimates tokens or silently treats them as zero. Pricing is synced by an external cron via configured JSON endpoints (`pricing.sources`) or an explicit `--url`; every successful sync is an immutable catalog snapshot.
 
 Telemetry is optional and disabled by default. `telemetry install` installs the official OpenTelemetry trace runtime under `.clew/telemetry`; enable it with `CLEW_TELEMETRY_ENABLED=true` or project configuration, then point the official OTLP exporter at Phoenix or another collector with `OTEL_EXPORTER_OTLP_ENDPOINT`. Collector failures are reported as diagnostics and never change task state.
+
+The local daemon is explicit and loopback-only. Start it with `clew daemon start`, inspect it with `clew daemon status`, stop it with `clew daemon stop`, and use `clew api ...` to send authenticated commands through its API. The daemon stores its bearer token and ownership metadata in `.clew`, with restrictive permissions; it never starts automatically.
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 

@@ -26,6 +26,7 @@ import { loadConfig } from './config.js';
 import { redactSecrets } from './security.js';
 import { createHash } from 'node:crypto';
 import { Observability, telemetryInstall } from './observability.js';
+import { LocalDaemon, daemonRequest, readDaemonMetadata, stopDaemon } from './daemon.js';
 
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
@@ -126,12 +127,32 @@ function printHelp() {
   console.log('  clew cleanup [--retention-days N]');
   console.log('  clew telemetry install | status');
   console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
+  console.log('  clew daemon start [--port PORT] | status | stop');
+  console.log('  clew api task list|show ID|...');
 }
 
 export async function main(args) {
   const [command, subcommand, ...rest] = args;
 
   if (!command || command === '--help' || command === '-h') return printHelp();
+  if (command === 'daemon') {
+    if (subcommand === 'status') return printJson(readDaemonMetadata(cwd));
+    if (subcommand === 'stop') return printJson(await stopDaemon(cwd));
+    if (subcommand === 'start') {
+      const daemon = new LocalDaemon({ cwd, port: Number(getOptionValue(rest, '--port', 0)) });
+      const metadata = await daemon.start();
+
+      printJson(metadata);
+      const shutdown = () => daemon.stop().finally(() => process.exit(0));
+
+      process.once('SIGINT', shutdown);
+      process.once('SIGTERM', shutdown);
+      await new Promise(() => {});
+    }
+    throw new Error('usage: clew daemon start|status|stop');
+  }
+  if (command === 'api')
+    return printJson(await daemonRequest(cwd, [subcommand, ...rest].filter(Boolean)));
   if (command === 'init') {
     mkdirSync(stateDir, { recursive: true });
     const store = createStore();

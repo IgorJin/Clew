@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added the v0.4 local daemon/API foundation with authenticated loopback transport, exclusive state ownership, cursor-based event replay, explicit lifecycle commands, and API command forwarding.
+
 ## 0.3.0
 
 - Added optional OpenTelemetry trace export with persisted correlation, redaction, bounded failure handling, and disabled-by-default behavior.
