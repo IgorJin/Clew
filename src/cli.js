@@ -25,6 +25,7 @@ import { Scheduler } from './scheduler.js';
 import { loadConfig } from './config.js';
 import { redactSecrets } from './security.js';
 import { createHash } from 'node:crypto';
+import { Observability, telemetryInstall } from './observability.js';
 
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
@@ -120,6 +121,7 @@ function printHelp() {
   console.log('  clew complete TASK --revision SHA [--actor ACTOR]');
   console.log('  clew export TASK --dir DIR [--revision SHA]');
   console.log('  clew cleanup [--retention-days N]');
+  console.log('  clew telemetry install | status');
 }
 
 export async function main(args) {
@@ -135,7 +137,25 @@ export async function main(args) {
 
     return;
   }
+  if (command === 'telemetry' && subcommand === 'install') {
+    return printJson(telemetryInstall({ cwd }));
+  }
+  if (command === 'telemetry' && subcommand === 'status') {
+    const observability = new Observability({ cwd, config: config.observability });
+
+    printJson(observability.status());
+    await observability.shutdown();
+
+    return;
+  }
   const store = createStore();
+  const observability = new Observability({
+    cwd,
+    config: resolveCommandConfig(config, args).observability,
+    store,
+  });
+
+  store.setEventObserver(observability);
 
   try {
     if (command === 'task' && subcommand === 'create') {
@@ -560,6 +580,13 @@ export async function main(args) {
         ? probeCommand(codexCommand, ['login', 'status'])
         : { ok: false, detail: 'Codex CLI unavailable' };
       const openCodeVersion = probeCommand(openCodeCommand, ['--version']);
+      const telemetry = new Observability({
+        cwd,
+        config: { ...runtimeConfig.observability, enabled: true },
+      });
+      const telemetryStatus = telemetry.status();
+
+      await telemetry.shutdown();
       const checks = [
         {
           name: 'node',
@@ -571,6 +598,12 @@ export async function main(args) {
           name: 'git',
           ...probeCommand('git', ['--version']),
           required: true,
+        },
+        {
+          name: 'telemetry',
+          ok: telemetryStatus.state !== 'unavailable',
+          required: false,
+          ...telemetryStatus,
         },
         {
           name: 'codex-cli',
@@ -605,6 +638,7 @@ export async function main(args) {
 
     return printHelp();
   } finally {
+    await observability.shutdown();
     store.close();
   }
 }

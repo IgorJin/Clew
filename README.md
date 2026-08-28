@@ -90,6 +90,8 @@ node bin/clew.js task result DEMO-1 --human
 node bin/clew.js complete DEMO-1 --revision <worker-sha> --actor your-name
 node bin/clew.js export DEMO-1 --dir /tmp/clew-export
 node bin/clew.js cleanup --retention-days 7
+node bin/clew.js telemetry install
+CLEW_TELEMETRY_ENABLED=true node bin/clew.js telemetry status
 node bin/clew.js worktree list
 node bin/clew.js worktree prune
 ```
@@ -97,6 +99,8 @@ node bin/clew.js worktree prune
 `worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
 
 `task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
+
+Telemetry is optional and disabled by default. `telemetry install` installs the official OpenTelemetry trace runtime under `.clew/telemetry`; enable it with `CLEW_TELEMETRY_ENABLED=true` or project configuration, then point the official OTLP exporter at Phoenix or another collector with `OTEL_EXPORTER_OTLP_ENDPOINT`. Collector failures are reported as diagnostics and never change task state.
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 

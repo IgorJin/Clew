@@ -1,6 +1,6 @@
 # Clew v0.3 release plan — Explainable execution economics
 
-**Status:** planned
+**Status:** `CLEW-042` in progress
 
 **Target:** `v0.3.0`
 
@@ -66,6 +66,16 @@ Scope:
 - make exporter failures visible through diagnostics and local events while keeping task state unchanged;
 - redact attributes through the existing secret boundary and enforce an allowlist that excludes prompts, completions, tool arguments/results, environment values, and repository contents;
 - document and test a local Phoenix connection through standard OTLP configuration.
+
+Implementation slice:
+
+1. Keep the Clew core free of OpenTelemetry runtime dependencies and expose a no-op-safe observer boundary from `Store.appendEvent`.
+2. Add migration 010 for task trace context, run span context, and bounded exporter bookkeeping.
+3. Install the official trace-only runtime into `.clew/telemetry` with `clew telemetry install`; load it only when telemetry is enabled.
+4. Convert allowlisted durable lifecycle events into task, stage-run, and short event spans; persist contexts before export.
+5. Add `telemetry status`, an optional `doctor` check, redaction tests, missing-runtime tests, and the collector failure matrix.
+
+Out of the implementation slice: custom OTLP encoding, automatic instrumentation of arbitrary Node modules, metrics/logs exporters, raw prompt/tool capture, and making a collector a prerequisite for execution.
 
 Acceptance:
 
