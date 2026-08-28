@@ -9,6 +9,7 @@ depends_on: []
 parallel_group: null
 owner: null
 updated: 2026-08-28
+evidence_policy: v1
 ---
 
 # CLEW-000 — Short task title
@@ -41,9 +42,25 @@ Explain the relevant current behavior and why the change belongs in this release
 
 1. Observable completion condition.
 
+## Acceptance evidence
+
+| Criterion | Automated evidence     | Logical scenarios                                     | Result  |
+| --------- | ---------------------- | ----------------------------------------------------- | ------- |
+| AC-1      | `test/example.test.js` | happy path; relevant state/profile/restart boundaries | pending |
+
 ## Verification
 
 - Automated checks and smoke procedures required before `done`.
+- State transitions, including explicit human decisions and terminal states.
+- Every affected execution profile and fallback path.
+- Duplicate requests and process restarts at each durable boundary.
+- Failure, ambiguity, and exhaustion paths—not only the happy path.
+
+## Review record
+
+- Verdict: pending
+- Reviewer: unassigned
+- Findings: Not reviewed.
 
 ## Dependencies and parallelization
 

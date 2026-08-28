@@ -9,6 +9,7 @@ depends_on: [CLEW-075]
 parallel_group: null
 owner: null
 updated: 2026-08-28
+evidence_policy: legacy
 ---
 
 # CLEW-076 — Docker packaging and self-hosted acceptance

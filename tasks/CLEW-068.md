@@ -9,6 +9,7 @@ depends_on: [CLEW-067]
 parallel_group: null
 owner: null
 updated: 2026-08-28
+evidence_policy: legacy
 ---
 
 # CLEW-068 — Local control plane contracts

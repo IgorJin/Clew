@@ -9,6 +9,7 @@ depends_on: [CLEW-068]
 parallel_group: v0.4-control-plane
 owner: null
 updated: 2026-08-28
+evidence_policy: legacy
 ---
 
 # CLEW-070 — Task Thread projection
