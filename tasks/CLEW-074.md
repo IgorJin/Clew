@@ -1,7 +1,7 @@
 ---
 id: CLEW-074
 title: v0.4 upgrade, acceptance, and release
-status: planned
+status: in_review
 release: v0.4
 priority: P0
 size: L
@@ -9,7 +9,7 @@ depends_on: [CLEW-069, CLEW-070, CLEW-071, CLEW-072, CLEW-073]
 parallel_group: null
 owner: null
 updated: 2026-08-28
-evidence_policy: legacy
+evidence_policy: v1
 ---
 
 # CLEW-074 — v0.4 upgrade, acceptance, and release
@@ -34,11 +34,11 @@ A developer can install Clew, explicitly start the local daemon, use CLI or Web 
 - local auth and API version compatibility tests;
 - WebSocket disconnect/reconnect/cursor-expiry matrix;
 - deterministic Task Thread rebuild;
-- React production build and daemon asset serving;
+- Preact production build and daemon asset serving;
 - Continue, review exhaustion, interruption, and operator override flows;
 - plain-terminal Session Surface acceptance and optional live Codex smoke;
 - documentation, troubleshooting, package contents, changelog, and release notes;
-- clean tarball smoke, CI, version bump, tag, and publication.
+- clean tarball smoke, CI, version bump, and release sign-off. Tag/publication remain an explicit operator action.
 
 ## Out of scope
 
@@ -89,10 +89,32 @@ Primary ownership: cross-component acceptance, release documentation, package co
 - daemon process tests may be flaky without deterministic ports and cleanup;
 - live terminal behavior is environment-dependent.
 
+## Acceptance evidence
+
+| Criterion | Automated evidence                                                                                             | Result  |
+| --------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| AC-1      | `test/release-v04.test.js` populated v0.3 fixture; schema 11 → 15; history, completion, usage, integrity check | pass    |
+| AC-2      | `test/daemon.test.js`; `test/cli.test.js`; installed Quick/Standard/Deep daemon API acceptance                 | pass    |
+| AC-3      | `test/thread.test.js`; `ui/src/*.test.tsx`; production browser and installed Preact smoke                      | pass    |
+| AC-4      | daemon replay/origin tests, serialized command queue, installed WebSocket replay, restart acceptance           | pass    |
+| AC-5      | `test/session-surface.test.js`; session identity projection in Preact client                                   | pass    |
+| AC-6      | `test/continuation.test.js`; exhaustion and explicit continuation scenarios                                    | pass    |
+| AC-7      | completion/override tests and immutable manifest assertions                                                    | pass    |
+| AC-8      | `scripts/installed-package-acceptance.js`; clean install plus daemon API/UI/WS/restart and package inspection  | pass    |
+| AC-9      | Local checks pass; CI on committed `main` and the `v0.4.0` release tag require an operator commit/tag          | pending |
+
+## Review record
+
+- Verdict: pending release-operator gate
+- Reviewer: independent Codex review
+- Findings: production Task Thread/message integration, daemon parse containment, WebSocket Origin validation, durable UI continuation, migration history, and installed API/UI/WS/restart acceptance pass locally. CI/tag evidence remains pending.
+
 ## Blockers
 
-Waiting for `CLEW-069`–`073`.
+Commit, CI on `main`, tag, and publication were intentionally not performed because the operator requested no commit.
 
 ## Completion record
 
-Not completed.
+- Implementation: v0.4.0 package integration with Preact UI, daemon static serving/bootstrap, API/Task Thread/WebSocket wiring, migration coverage, and installed-package acceptance.
+- Verification: local `npm run check`, production browser smoke, dependency audit, and installed daemon/API/UI/WS/restart acceptance passed on 2026-08-28; live Codex smoke is optional and skipped without explicit provider credentials.
+- Release evidence: [RELEASE-0.4.md](../RELEASE-0.4.md).

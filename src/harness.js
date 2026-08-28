@@ -292,6 +292,10 @@ export class CodexHarness {
       error ? reject(error) : resolve(result);
     };
     const result = await new Promise((resolve, reject) => {
+      child.stdin.on('error', (error) => {
+        if (settled && ['EPIPE', 'ERR_STREAM_DESTROYED'].includes(error.code)) return;
+        settleRequest(resolve, reject, error, null, HARNESS_EVENT_TYPE.HARNESS_FAILED);
+      });
       timeoutTimer = setTimeout(
         () =>
           settleRequest(

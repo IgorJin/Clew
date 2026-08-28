@@ -4,6 +4,12 @@
 
 - Added the v0.4 local daemon/API foundation with authenticated loopback transport, exclusive state ownership, cursor-based event replay, explicit lifecycle commands, and API command forwarding.
 
+## 0.4.0
+
+- Added the local control-plane Task Thread projection, bounded continuation/review handoff, native Session Surface, and installed Preact Web UI.
+- Added v0.3-to-v0.4 migration coverage through schema version 15, daemon static asset serving with same-origin HttpOnly bootstrap, and full installed-package acceptance.
+- Release verification is recorded in `RELEASE-0.4.md`; tagging and publication require an explicit operator action.
+
 ## 0.3.0
 
 - Added optional OpenTelemetry trace export with persisted correlation, redaction, bounded failure handling, and disabled-by-default behavior.

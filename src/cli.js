@@ -132,6 +132,8 @@ function printHelp() {
   console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
   console.log('  clew daemon start [--port PORT] | status | stop');
   console.log('  clew api task list|show ID|...');
+  console.log('  clew task thread ID [--after CURSOR] [--limit N]');
+  console.log('  clew task message ID --message TEXT [--actor ACTOR]');
   console.log(
     '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|none]',
   );
@@ -346,7 +348,40 @@ export async function main(args) {
         harnessApprovals: store.listHarnessApprovals(task.id),
         stages: store.listStages(task.id),
         runs: store.listRuns(task.id),
+        review: store.latestReview(task.id),
+        completion: store.getCompletion(task.id),
       });
+    }
+    if (command === 'task' && subcommand === 'thread') {
+      const taskId = rest[0];
+
+      if (!taskId) throw new Error('task id is required');
+      const after = Number(getOptionValue(rest, '--after', 0));
+      const limit = Number(getOptionValue(rest, '--limit', 50));
+
+      if (!Number.isSafeInteger(after) || after < 0)
+        throw new Error('--after must be non-negative');
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('--limit must be positive');
+
+      return printJson(store.getTaskThread(taskId, { after, limit }));
+    }
+    if (command === 'task' && subcommand === 'message') {
+      const taskId = rest[0];
+      const message = getOptionValue(rest, '--message');
+
+      if (!taskId || !message) throw new Error('task id and --message are required');
+
+      return printJson(
+        store.recordOperatorMessage({
+          taskId,
+          message,
+          actor: getOptionValue(rest, '--actor', 'local-user'),
+          target: {
+            stageId: getOptionValue(rest, '--stage', null),
+            runId: getOptionValue(rest, '--run', null),
+          },
+        }),
+      );
     }
     if (command === 'task' && subcommand === 'result') {
       store.evaluateTaskTrust(rest[0]);
@@ -859,7 +894,7 @@ export async function main(args) {
       });
     }
 
-    return printHelp();
+    throw new Error(`unknown command: ${args.join(' ')}`);
   } finally {
     await observability.shutdown();
     store.close();

@@ -1,7 +1,7 @@
 ---
 id: CLEW-071
-title: React Web UI
-status: planned
+title: Preact Web UI
+status: done
 release: v0.4
 priority: P1
 size: L
@@ -12,7 +12,7 @@ updated: 2026-08-28
 evidence_policy: legacy
 ---
 
-# CLEW-071 — React Web UI
+# CLEW-071 — Preact Web UI
 
 ## Objective
 
@@ -28,7 +28,7 @@ The UI is introduced together with Task Thread. It complements native terminals 
 
 ## Technology
 
-- React;
+- Preact;
 - TypeScript;
 - Vite;
 - client-side application;
@@ -61,7 +61,7 @@ The UI is introduced together with Task Thread. It complements native terminals 
 
 ## Deliverables
 
-- React/TypeScript/Vite application;
+- Preact/TypeScript/Vite application;
 - fixture development server and visual states;
 - production asset bundle;
 - API/WebSocket client;
@@ -104,4 +104,5 @@ Waiting for `CLEW-068` API and fixture contracts.
 
 ## Completion record
 
-Not completed.
+- Implementation: fixture-first Preact UI with typed API/WebSocket client, daemon-backed task/thread/history views, redacted operator actions, responsive accessible states, production assets, and UI tests.
+- Verification: `npm run ui:check` passed on 2026-08-28; production assets are served and inspected through the CLEW-074 installed-package acceptance.

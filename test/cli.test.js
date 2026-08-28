@@ -117,6 +117,42 @@ test('CLI records an interrupt request for an active task', () => {
   }
 });
 
+test('CLI exposes redacted operator messages through Task Thread', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-thread-'));
+
+  try {
+    runCli(['init'], repo);
+    runCli(
+      [
+        'task',
+        'create',
+        '--id',
+        'CLI-THREAD',
+        '--title',
+        'CLI thread',
+        '--goal',
+        'Expose operator context',
+        '--accept',
+        'message appears safely',
+      ],
+      repo,
+    );
+    runCli(
+      ['task', 'message', 'CLI-THREAD', '--message', 'token=super-secret', '--actor', 'reviewer'],
+      repo,
+    );
+    const thread = JSON.parse(runCli(['task', 'thread', 'CLI-THREAD'], repo));
+
+    assert.equal(thread.version, 1);
+    const message = thread.items.find((item) => item.kind === 'operator_message');
+
+    assert.equal(message.actor, 'reviewer');
+    assert.doesNotMatch(message.summary, /super-secret/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('CLI continue from READY is redacted and duplicate-safe', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-continue-ready-'));
 

@@ -2,7 +2,7 @@ import js from '@eslint/js';
 
 export default [
   {
-    ignores: ['.clew/**', 'node_modules/**'],
+    ignores: ['.clew/**', 'node_modules/**', 'ui/**'],
   },
   js.configs.recommended,
   {

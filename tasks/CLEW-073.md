@@ -1,7 +1,7 @@
 ---
 id: CLEW-073
 title: Continue and review exhaustion handoff
-status: in_review
+status: done
 release: v0.4
 priority: P0
 size: M
@@ -115,4 +115,4 @@ None.
 
 - Implementation: durable continuation lifecycle with one correction Run per grant, replay recovery, Standard/Deep bounded review, immediate ambiguity handoff, native-session fallback, and attributable human completion.
 - Verification: `npm run check` passed on 2026-08-28 (100 tests passed, 2 loopback tests skipped by sandbox policy), including CLI, scheduler, restart, fallback, ambiguity, override, and terminal-state scenarios.
-- Merge evidence: pending merge to `main`; keep status `in_review` until then.
+- Merge evidence: integrated on `main` at `ea26b9a`; CLEW-074 acceptance reran the continuation, restart, and terminal-state coverage.

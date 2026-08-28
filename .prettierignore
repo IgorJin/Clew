@@ -1,5 +1,6 @@
 .clew/
 node_modules/
+ui/dist/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

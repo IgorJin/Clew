@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
-import { join, resolve, relative } from 'node:path';
+import { extname, join, resolve, relative } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { Store } from './store.js';
 import {
@@ -21,7 +21,18 @@ import {
 } from './control-plane.js';
 
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const UI_ROOT = join(PACKAGE_ROOT, 'ui', 'dist');
 const DAEMON_VERSION = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')).version;
+const ASSET_TYPES = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+};
 
 function json(response, status, body) {
   response.writeHead(status, {
@@ -54,7 +65,13 @@ function readBody(request) {
 function tokenFrom(request) {
   const value = request.headers.authorization;
 
-  return value?.startsWith('Bearer ') ? value.slice(7) : null;
+  if (value?.startsWith('Bearer ')) return value.slice(7);
+  const cookie = request.headers.cookie
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith('clew_token='));
+
+  return cookie?.slice('clew_token='.length) ?? null;
 }
 
 function runCli(args, cwd) {
@@ -81,7 +98,17 @@ function runCli(args, cwd) {
               stderr,
             }),
           );
-        else resolveRun(stdout.trim() ? JSON.parse(stdout) : null);
+        else {
+          try {
+            resolveRun(stdout.trim() ? JSON.parse(stdout) : null);
+          } catch (parseError) {
+            reject(
+              new Error(`CLI returned invalid JSON: ${parseError.message}`, {
+                cause: parseError,
+              }),
+            );
+          }
+        }
       },
     );
   });
@@ -167,6 +194,41 @@ export class LocalDaemon {
 
   async handle(request, response) {
     try {
+      const pathname = new URL(request.url, this.metadata.endpoint).pathname;
+
+      if (request.method === 'GET' && (pathname === '/' || pathname === '/index.html'))
+        return this.uiIndex(response);
+      if (request.method === 'GET' && pathname.startsWith('/assets/'))
+        return this.asset(pathname, response);
+      if (request.method === 'GET' && pathname === '/api/v1/bootstrap') {
+        const origin = request.headers.origin;
+        const referer = request.headers.referer;
+        let refererOrigin = null;
+
+        try {
+          refererOrigin = referer ? new URL(referer).origin : null;
+        } catch {
+          refererOrigin = null;
+        }
+
+        if (origin !== this.metadata.endpoint && refererOrigin !== this.metadata.endpoint)
+          return json(response, 403, {
+            version: 1,
+            code: 'ORIGIN_REJECTED',
+            message: 'bootstrap origin rejected',
+            retryable: false,
+          });
+        response.writeHead(204, {
+          'cache-control': 'no-store',
+          ...(origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {}),
+          'set-cookie': [
+            `clew_token=${readFileSync(this.tokenPath, 'utf8').trim()}; Path=/; SameSite=Strict; HttpOnly`,
+          ],
+        });
+        response.end();
+
+        return;
+      }
       this.authenticate(request);
       if (request.method === 'GET' && request.url === '/api/v1/health')
         return json(response, 200, {
@@ -183,8 +245,6 @@ export class LocalDaemon {
       }
       if (request.method === 'GET' && request.url.startsWith('/api/v1/events'))
         return this.events(request, response);
-      if (request.method === 'GET' && request.url.startsWith('/assets/'))
-        return this.asset(request, response);
       if (request.method !== 'POST' || request.url !== '/api/v1/command')
         return json(response, 404, {
           version: 1,
@@ -261,25 +321,45 @@ export class LocalDaemon {
     return json(response, 200, { version: 1, events, nextCursor: events.at(-1)?.cursor ?? after });
   }
 
-  asset(request, response) {
-    const root = join(this.cwd, '.clew', 'ui');
-    const requested = resolve(
-      root,
-      `.${new URL(request.url, this.metadata.endpoint).pathname.slice('/assets'.length)}`,
-    );
+  asset(pathname, response) {
+    const requested = resolve(UI_ROOT, `.${pathname}`);
 
-    if (relative(root, requested).startsWith('..') || !existsSync(requested))
+    if (relative(UI_ROOT, requested).startsWith('..') || !existsSync(requested))
       return json(response, 404, {
         code: 'ASSET_NOT_FOUND',
         message: 'asset not found',
         retryable: false,
       });
-    response.writeHead(200, { 'cache-control': 'no-store' });
+    response.writeHead(200, {
+      'content-type': ASSET_TYPES[extname(requested)] ?? 'application/octet-stream',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    });
     response.end(readFileSync(requested));
   }
 
+  uiIndex(response) {
+    const path = join(UI_ROOT, 'index.html');
+
+    if (!existsSync(path))
+      return json(response, 404, {
+        code: 'UI_NOT_BUILT',
+        message: 'UI assets are not built',
+        retryable: false,
+      });
+    response.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    });
+    response.end(readFileSync(path));
+  }
+
   handleUpgrade(request, socket, token) {
-    if (tokenFrom(request) !== token || request.headers.upgrade?.toLowerCase() !== 'websocket')
+    if (
+      tokenFrom(request) !== token ||
+      request.headers.origin !== this.metadata.endpoint ||
+      request.headers.upgrade?.toLowerCase() !== 'websocket'
+    )
       return socket.destroy();
     const key = request.headers['sec-websocket-key'];
 
