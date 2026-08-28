@@ -1,7 +1,7 @@
 ---
 id: CLEW-070
 title: Task Thread projection
-status: planned
+status: done
 release: v0.4
 priority: P0
 size: M
@@ -90,4 +90,4 @@ Waiting for `CLEW-068` contracts and fixtures.
 
 ## Completion record
 
-Not completed.
+Implemented in `src/thread.js` with Store query/message APIs, migration 013 for message targets, and deterministic projection tests in `test/thread.test.js`. Verification: `node --test test/thread.test.js` passed; full suite passed except the pre-existing daemon socket tests, which are blocked by the sandbox rejecting loopback `listen` with `EPERM`.

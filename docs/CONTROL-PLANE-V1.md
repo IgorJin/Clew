@@ -30,6 +30,10 @@ The server retains a bounded replay window. A cursor of `0` requests the oldest 
 
 `thread-item.v1` is a causal read model. Each item points to one durable source through `source`; it is not a copy of a native session transcript. `thread-page.v1` uses `nextCursor` and `hasMore` for pagination. Public fixtures and API projections contain summaries, identifiers, statuses, and operator decisions only. Prompts, completions, tool arguments/results, environment values, bearer tokens, and repository contents are excluded; `redacted: true` marks a deliberately shortened item.
 
+The API-neutral implementation is `src/thread.js`. `Store#getTaskThread(taskId, { after, limit })` projects curated lifecycle events and redacted operator messages into a page; `Store#listDiagnosticEvents(taskId)` exposes the separate raw-event diagnostic view. Projection ordering is timestamp-first with durable event sequence (and message id) as the deterministic tie-breaker. Unknown event types are ignored, so replay remains forward-compatible.
+
+The durable event mapping is intentionally presentation-oriented: task creation/state/completion become lifecycle items; plan persistence/validation/approval become plan items; run boundaries, interruptions, failures, retries, verification, review findings, integration, revisions, readiness, and operator actions become their corresponding concise items. Full operator text comes only from `operator_messages`, is secret-redacted on write, and retains actor, timestamp, and optional stage/run target.
+
 ## Continuation and Session Surface
 
 Continuation grants preserve `taskId`, and when applicable `stageId`, `runId`, and `sessionId`. The `expectedRevision` prevents applying an operator decision to a newer result, and `expiresAt` bounds its lifetime. Review exhaustion is a human handoff, not an implicit completion.

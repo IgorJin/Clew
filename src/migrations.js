@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 13;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -213,6 +213,15 @@ const MIGRATIONS = Object.freeze([
           created_at TEXT NOT NULL
         );
       `);
+    },
+  },
+  {
+    version: 13,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(operator_messages)').all();
+
+      if (!columns.some((column) => column.name === 'target'))
+        db.exec('ALTER TABLE operator_messages ADD COLUMN target TEXT');
     },
   },
 ]);

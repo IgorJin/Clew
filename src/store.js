@@ -16,6 +16,7 @@ import { applyMigrations } from './migrations.js';
 import { redactSecrets } from './security.js';
 import { evaluateEvidence, verificationEnvironment } from './trust.js';
 import { aggregateUsage, calculateUsageCost, normalizeUsage, snapshotChecksum } from './usage.js';
+import { projectDiagnosticEvents, queryTaskThread } from './thread.js';
 
 export class Store {
   constructor(file) {
@@ -487,6 +488,56 @@ export class Store {
     return this.db
       .prepare('SELECT * FROM operator_actions WHERE task_id=? ORDER BY at, id')
       .all(taskId);
+  }
+  recordOperatorMessage({ taskId, actor = 'local-user', message, target = null } = {}) {
+    if (!taskId || !actor || typeof message !== 'string' || !message.trim())
+      throw new Error('operator message taskId, actor, and message are required');
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    const safeMessage = redactSecrets(message);
+    const safeTarget = redactSecrets(target);
+
+    this.runInTransaction(() => {
+      this.db
+        .prepare(
+          'INSERT INTO operator_messages (id,task_id,actor,message,target,created_at) VALUES (?,?,?,?,?,?)',
+        )
+        .run(
+          id,
+          taskId,
+          actor,
+          safeMessage,
+          safeTarget ? JSON.stringify(safeTarget) : null,
+          createdAt,
+        );
+      this.appendEvent(taskId, 'OPERATOR_MESSAGE_RECORDED', {
+        id,
+        actor,
+        target: safeTarget,
+        at: createdAt,
+      });
+    });
+
+    return { id, taskId, actor, message: safeMessage, target: safeTarget, created_at: createdAt };
+  }
+  listOperatorMessages(taskId) {
+    return this.db
+      .prepare('SELECT * FROM operator_messages WHERE task_id=? ORDER BY created_at,id')
+      .all(taskId)
+      .map((row) => ({ ...row, target: row.target ? JSON.parse(row.target) : null }));
+  }
+  getTaskThread(taskId, options = {}) {
+    return queryTaskThread(
+      {
+        taskId,
+        events: this.listEvents(taskId),
+        operatorMessages: this.listOperatorMessages(taskId),
+      },
+      options,
+    );
+  }
+  listDiagnosticEvents(taskId) {
+    return projectDiagnosticEvents(this.listEvents(taskId));
   }
   recordOperatorAction(requestOrTaskId, positionalAction, positionalOptions = {}) {
     const request =
