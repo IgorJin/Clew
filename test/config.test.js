@@ -52,3 +52,28 @@ test('rejects secrets and absolute paths in project config', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('resolves role-specific model configuration with environment precedence', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-model-config-'));
+
+  try {
+    writeFileSync(
+      join(dir, '.clew.json'),
+      JSON.stringify({ models: { worker: 'project-worker', reviewer: 'project-reviewer' } }),
+    );
+    const config = loadConfig(dir, {
+      CLEW_USER_CONFIG: join(dir, 'missing.json'),
+      CLEW_WORKER_MODEL: 'env-worker',
+      CLEW_ARCHITECT_MODEL: 'env-architect',
+    });
+
+    assert.deepEqual(config.models, {
+      worker: 'env-worker',
+      architect: 'env-architect',
+      reviewer: 'project-reviewer',
+      qa: null,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

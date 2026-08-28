@@ -55,6 +55,7 @@ test('persists a task, stage, run, and event history', () => {
   assert.equal(store.listRuns('T-1')[0].turn_id, 'turn-1');
   assert.equal(store.listRuns('T-1')[0].profile, 'quick');
   assert.equal(store.listRuns('T-1')[0].policy.maxAttempts, 3);
+  assert.equal(store.listRuns('T-1')[0].runtimeNamespace, null);
   assert.ok(store.listEvents('T-1').length >= 2);
   store.setStage('T-1', 'worker', 'COMPLETED');
   store.db.prepare("UPDATE tasks SET state='FAILED' WHERE id='T-1'").run();
@@ -110,6 +111,12 @@ test('upgrades persisted plans with approval status', () => {
       .prepare('PRAGMA table_info(runs)')
       .all()
       .some((column) => column.name === 'turn_id'),
+  );
+  assert.ok(
+    store.db
+      .prepare('PRAGMA table_info(runs)')
+      .all()
+      .some((column) => column.name === 'runtime_namespace'),
   );
   assert.equal(
     store.db.prepare('SELECT MAX(version) AS version FROM schema_migrations').get().version,

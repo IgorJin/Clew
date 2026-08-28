@@ -24,6 +24,7 @@ import {
 import { FakeReviewer, CodexReviewer } from './review.js';
 import { FakeArchitect, CodexArchitect } from './architect.js';
 import { verificationEnvironment } from './trust.js';
+import { createRuntimeNamespace } from './runtime.js';
 
 export class Scheduler {
   constructor(
@@ -149,6 +150,7 @@ export class Scheduler {
         policy: profile,
         workspace: workspace.path,
         startedAt,
+        runtimeNamespace: createRuntimeNamespace(taskId, runId),
       };
 
       this.store.createRun(run);
@@ -165,6 +167,8 @@ export class Scheduler {
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal: taskSignal,
         resumeSessionId,
+        model: this.adapterConfig.models?.worker ?? null,
+        runtimeNamespace: run.runtimeNamespace,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
       });
 
@@ -915,6 +919,7 @@ export class Scheduler {
       policy,
       workspace: stageWorkspace.path,
       startedAt: new Date().toISOString(),
+      runtimeNamespace: createRuntimeNamespace(taskId, runId),
     };
 
     this.store.createRun(run);
@@ -931,6 +936,8 @@ export class Scheduler {
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal,
         resumeSessionId,
+        model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
+        runtimeNamespace: run.runtimeNamespace,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, signal),
       });
 
@@ -1106,7 +1113,12 @@ export class Scheduler {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
 
     return reviewerName === HARNESS_NAME.CODEX
-      ? new CodexReviewer(new CodexHarness({ command: this.adapterConfig.codexBin }))
+      ? new CodexReviewer(
+          new CodexHarness({
+            command: this.adapterConfig.codexBin,
+            model: this.adapterConfig.models?.reviewer,
+          }),
+        )
       : new FakeReviewer();
   }
 
@@ -1114,7 +1126,12 @@ export class Scheduler {
     if (this.architectFactory) return this.architectFactory(architectName);
 
     return architectName === HARNESS_NAME.CODEX
-      ? new CodexArchitect(new CodexHarness({ command: this.adapterConfig.codexBin }))
+      ? new CodexArchitect(
+          new CodexHarness({
+            command: this.adapterConfig.codexBin,
+            model: this.adapterConfig.models?.architect,
+          }),
+        )
       : new FakeArchitect();
   }
 }

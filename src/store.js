@@ -241,7 +241,7 @@ export class Store {
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy,runtime_namespace) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -256,6 +256,7 @@ export class Store {
         run.startedAt ?? null,
         run.profile ?? null,
         run.policy ? JSON.stringify(run.policy) : null,
+        run.runtimeNamespace ? JSON.stringify(run.runtimeNamespace) : null,
       );
   }
   setRunIdentity(id, sessionId, turnId = null) {
@@ -492,6 +493,7 @@ export class Store {
         harness: run.harness,
         profile: run.profile,
         workspace: run.workspace,
+        runtimeNamespace: run.runtimeNamespace,
         revision: run.commit_sha,
         startedAt: run.started_at,
         finishedAt: run.finished_at,
@@ -615,5 +617,9 @@ export class Store {
 }
 
 function parseRun(run) {
-  return { ...run, policy: run.policy ? JSON.parse(run.policy) : null };
+  return {
+    ...run,
+    policy: run.policy ? JSON.parse(run.policy) : null,
+    runtimeNamespace: run.runtime_namespace ? JSON.parse(run.runtime_namespace) : null,
+  };
 }

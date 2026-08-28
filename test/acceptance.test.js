@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
@@ -63,6 +63,45 @@ test('clean-checkout acceptance fixture passes Quick, Standard, and Deep profile
     assert.equal(clew(['approve', 'ACC-DEEP'], repo).status, 'APPROVED');
     assert.equal(clew(['run', 'ACC-DEEP', '--harness', 'fake'], repo).state, 'READY');
     assert.equal(readFileSync(join(repo, 'README.md'), 'utf8'), 'acceptance fixture\n');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('v0.2 local lifecycle exports, completes, and cleans a pinned result', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-v02-lifecycle-'));
+  const output = join(repo, 'exported');
+
+  try {
+    run('git', ['init', '-b', 'main'], repo);
+    run('git', ['config', 'user.email', 'test@example.com'], repo);
+    run('git', ['config', 'user.name', 'Clew v0.2'], repo);
+    writeFileSync(join(repo, '.gitignore'), '.clew/\nexported/\n');
+    writeFileSync(join(repo, 'README.md'), 'v0.2 acceptance\n');
+    run('git', ['add', '.gitignore', 'README.md'], repo);
+    run('git', ['commit', '-m', 'v0.2 acceptance'], repo);
+    run(process.execPath, [cliFile, 'init'], repo);
+    createTask(repo, 'ACC-V02', 'quick');
+
+    assert.equal(clew(['run', 'ACC-V02', '--harness', 'fake'], repo).state, 'READY');
+    const result = clew(['task', 'result', 'ACC-V02'], repo);
+
+    assert.equal(result.state, 'READY');
+    assert.ok(result.revision);
+    assert.ok(result.attempts[0].runtimeNamespace.value);
+
+    const exported = clew(['export', 'ACC-V02', '--dir', output], repo);
+
+    assert.equal(exported.revision, result.revision);
+    assert.ok(existsSync(join(output, 'ACC-V02.manifest.json')));
+    assert.ok(existsSync(join(output, 'ACC-V02.bundle')));
+    assert.equal(
+      clew(['complete', 'ACC-V02', '--revision', result.revision, '--actor', 'acceptor'], repo)
+        .actor,
+      'acceptor',
+    );
+    assert.equal(clew(['task', 'show', 'ACC-V02'], repo).state, 'COMPLETED');
+    assert.ok(clew(['cleanup', '--retention-days', '0'], repo).removed.length > 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

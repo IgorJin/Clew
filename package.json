@@ -1,6 +1,6 @@
 {
   "name": "clew",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local task-centric control plane for native AI coding harnesses",
   "type": "module",
   "bin": {

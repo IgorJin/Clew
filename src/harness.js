@@ -240,18 +240,20 @@ export class CodexHarness {
     args = ['app-server'],
     timeoutMs = 30 * 60_000,
     interruptTimeoutMs = 5_000,
+    model = null,
   } = {}) {
     this.command = command;
     this.args = args;
     this.timeoutMs = timeoutMs;
     this.interruptTimeoutMs = interruptTimeoutMs;
+    this.model = model;
   }
 
   async run({
     task,
     cwd,
     onEvent,
-    model,
+    model = this.model,
     outputSchema,
     readOnly = false,
     signal,
@@ -598,6 +600,7 @@ export class OpenCodeHarness {
     cwd,
     onEvent,
     signal,
+    model = null,
     resumeSessionId = null,
     onApproval = () => APPROVAL_DECISION.DECLINE,
   }) {
@@ -651,6 +654,7 @@ export class OpenCodeHarness {
           controller,
           onEvent,
           onApproval,
+          model,
         });
       const response = await this.fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
@@ -659,6 +663,7 @@ export class OpenCodeHarness {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             parts: [{ type: 'text', text: this.buildPrompt(task) }],
+            ...(model ? { model } : {}),
           }),
           signal: controller.signal,
         },
@@ -700,7 +705,15 @@ export class OpenCodeHarness {
       signal?.removeEventListener('abort', interrupt);
     }
   }
-  async runStreamingTurn({ task, sessionId, eventResponse, controller, onEvent, onApproval }) {
+  async runStreamingTurn({
+    task,
+    sessionId,
+    eventResponse,
+    controller,
+    onEvent,
+    onApproval,
+    model = null,
+  }) {
     const promptResponse = await this.fetch(
       `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
       {
@@ -708,6 +721,7 @@ export class OpenCodeHarness {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           parts: [{ type: 'text', text: this.buildPrompt(task) }],
+          ...(model ? { model } : {}),
         }),
         signal: controller.signal,
       },

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Added deterministic runtime namespaces persisted per run.
+- Added role-specific worker, architect, reviewer, and QA model configuration.
+- Added pinned-result lifecycle acceptance for export, completion, and cleanup.
+- Added runtime namespace schema migration and v0.2 release documentation.
+
 ## 0.1.0 — initial release
 
 - Added versioned task/profile/plan/review/verification/event schemas, fixtures, runtime validation, and seven transactional SQLite migrations.
@@ -17,7 +24,7 @@ Known limitations:
 - OpenCode successful model execution depends on a reachable provider configured inside OpenCode; provider outages are reported as external failures rather than `READY`.
 - Clew resumes a native session/thread with a new tracked turn; it does not continue midway through an interrupted turn.
 - Merge conflicts require manual resolution; Clew never applies a destructive automatic fallback.
-- Runtime namespaces for ports, databases, queues, and containers are not isolated.
+- Runtime namespace identifiers are persisted per run; ports, databases, queues, and containers remain caller-managed.
 - Node's built-in SQLite API is experimental in the supported runtime.
 - Dashboard, telemetry/cost aggregation, PR automation, and remote scheduling are post-v0.1 work.
 

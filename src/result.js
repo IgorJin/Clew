@@ -73,7 +73,7 @@ export function exportResult(
     `${checksum}  ${taskId}.manifest.json\n`,
   );
   writeFileSync(join(target, `${taskId}.patch`), git(['diff', `${base}..${result}`], cwd));
-  git(['bundle', 'create', join(target, `${taskId}.bundle`), `${base}..${result}`], cwd);
+  git(['bundle', 'create', join(target, `${taskId}.bundle`), base, result], cwd);
   store.appendEvent(taskId, 'RESULT_EXPORTED', { outputDir: target, checksum, revision: result });
 
   return { taskId, outputDir: target, checksum, manifest };

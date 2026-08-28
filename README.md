@@ -2,7 +2,7 @@
 
 Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
 
-This repository contains the `v0.1.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
+This repository contains the `v0.2.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
 
 ## Requirements
 
@@ -95,6 +95,8 @@ node bin/clew.js worktree prune
 `task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
+
+Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history.
 
 ## Release evidence
 

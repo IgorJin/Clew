@@ -1,6 +1,6 @@
 # Clew — implementation backlog
 
-**Status:** v0.1.0 complete
+**Status:** v0.2.0 implementation complete
 
 **Source:** [`spec.md`](./spec.md)
 
@@ -122,6 +122,14 @@ Exit condition: all v0.1 acceptance criteria in `spec.md` pass from a clean chec
 | CLEW-039 | P1  | M    | Add cancellation, timeout, and signal hardening  | 014, 016, 029, 032      | Process signals and timeouts do not orphan owned processes/worktrees or falsify task state.                                                             |
 | CLEW-040 | P1  | M    | Build the v0.1 acceptance suite                  | 022, 028, 036, 037, 039 | The ten v0.1 criteria in `spec.md` map to automated or explicitly documented acceptance checks.                                                         |
 | CLEW-041 | P1  | M    | Package and document v0.1                        | 038, 040                | Clean install, quick-start, configuration, supported versions, architecture, troubleshooting, and limitations are reproducible on a supported platform. |
+
+## v0.2 completion record
+
+| Range                      | Status   | Release evidence                                                                                            |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
+| `CLEW-049–061`             | Complete | Versioned contracts, durable control commands, trust evaluation, pinned completion, export and safe cleanup |
+| `CLEW-044`, `CLEW-062–063` | Complete | Deterministic runtime namespaces, role model precedence, optional OpenCode model boundary                   |
+| `CLEW-064–066`             | Complete | Upgrade migration coverage, local lifecycle acceptance, package/documentation release checks                |
 
 ## v0.2 plan — Ready to Delivered
 

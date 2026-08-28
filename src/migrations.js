@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -94,6 +94,15 @@ const MIGRATIONS = Object.freeze([
           manifest TEXT NOT NULL
         );
       `);
+    },
+  },
+  {
+    version: 9,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(runs)').all();
+
+      if (!columns.some((column) => column.name === 'runtime_namespace'))
+        db.exec('ALTER TABLE runs ADD COLUMN runtime_namespace TEXT');
     },
   },
 ]);

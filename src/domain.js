@@ -112,7 +112,7 @@ export function validateCompletionDecision(decision) {
       throw new Error(`completion.${field} is required`);
   if (!Object.values(COMPLETION_DECISION).includes(decision.decision ?? COMPLETION_DECISION.ACCEPT))
     throw new Error('completion.decision is invalid');
-  if (decision.note !== undefined && typeof decision.note !== 'string')
+  if (decision.note !== undefined && decision.note !== null && typeof decision.note !== 'string')
     throw new Error('completion.note must be a string');
 
   return {

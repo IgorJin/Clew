@@ -312,11 +312,10 @@ export async function main(args) {
         join(target, `${taskId}.patch`),
         execFileSync('git', ['diff', `${base}..${revision}`], { cwd, encoding: 'utf8' }),
       );
-      execFileSync(
-        'git',
-        ['bundle', 'create', join(target, `${taskId}.bundle`), `${base}..${revision}`],
-        { cwd, stdio: 'pipe' },
-      );
+      execFileSync('git', ['bundle', 'create', join(target, `${taskId}.bundle`), base, revision], {
+        cwd,
+        stdio: 'pipe',
+      });
       store.appendEvent(taskId, 'RESULT_EXPORTED', { outputDir: target, revision, checksum });
 
       return printJson({ taskId, outputDir: target, revision, checksum });

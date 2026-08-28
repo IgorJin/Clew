@@ -1,6 +1,6 @@
 # Clew v0.2 release plan — Ready to Delivered
 
-**Status:** planning draft
+**Status:** implemented and acceptance-verified locally
 
 **Target:** `v0.2.0`
 

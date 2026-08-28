@@ -9,6 +9,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   openCodeBin: 'opencode',
   openCodeUrl: 'http://127.0.0.1:4096',
   worktreeRoot: '.clew/worktrees',
+  models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
 });
 
 function readJsonIfPresent(path) {
@@ -53,6 +54,15 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
     ...(env.CLEW_OPENCODE_BIN ? { openCodeBin: env.CLEW_OPENCODE_BIN } : {}),
     ...(env.CLEW_OPENCODE_URL ? { openCodeUrl: env.CLEW_OPENCODE_URL } : {}),
     ...(env.CLEW_WORKTREE_ROOT ? { worktreeRoot: env.CLEW_WORKTREE_ROOT } : {}),
+    models: {
+      ...DEFAULT_CONFIG.models,
+      ...(userConfig.models ?? {}),
+      ...(projectConfig.models ?? {}),
+      ...(env.CLEW_WORKER_MODEL ? { worker: env.CLEW_WORKER_MODEL } : {}),
+      ...(env.CLEW_ARCHITECT_MODEL ? { architect: env.CLEW_ARCHITECT_MODEL } : {}),
+      ...(env.CLEW_REVIEW_MODEL ? { reviewer: env.CLEW_REVIEW_MODEL } : {}),
+      ...(env.CLEW_QA_MODEL ? { qa: env.CLEW_QA_MODEL } : {}),
+    },
   };
 
   return {
