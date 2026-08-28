@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/result-manifest.v1.schema.json",
+  "type": "object",
+  "required": ["version", "taskId", "state", "contract", "attempts", "evidence"],
+  "properties": {
+    "version": { "const": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "state": { "type": "string", "minLength": 1 },
+    "contract": { "type": "object" },
+    "attempts": { "type": "array" },
+    "evidence": { "type": "array" },
+    "revision": { "type": ["string", "null"] },
+    "completion": { "type": ["object", "null"] }
+  }
+}

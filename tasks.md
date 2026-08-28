@@ -123,21 +123,78 @@ Exit condition: all v0.1 acceptance criteria in `spec.md` pass from a clean chec
 | CLEW-040 | P1  | M    | Build the v0.1 acceptance suite                  | 022, 028, 036, 037, 039 | The ten v0.1 criteria in `spec.md` map to automated or explicitly documented acceptance checks.                                                         |
 | CLEW-041 | P1  | M    | Package and document v0.1                        | 038, 040                | Clean install, quick-start, configuration, supported versions, architecture, troubleshooting, and limitations are reproducible on a supported platform. |
 
-## Post-v0.1 backlog
+## v0.2 plan — Ready to Delivered
 
-These items should not enter the critical path until real task usage demonstrates the need.
+The next release closes the local lifecycle after `READY`. A developer must be able to inspect the exact result, retry or reverify deliberately, distinguish fresh evidence from stale evidence, accept a pinned revision as `COMPLETED`, export it without mutating the primary checkout, and clean up safely.
+
+### Milestone 7 — Control and result visibility
+
+| ID       | Pri | Size | Task                                          | Depends on | Done when                                                                                                                                                  |
+| -------- | --- | ---- | --------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-049 | P0  | M    | Define v0.2 lifecycle and versioned contracts | 041        | Completion decision, result manifest, evidence trust/freshness, retry request, and runtime namespace contracts have schemas, invariants, and examples.     |
+| CLEW-050 | P0  | M    | Persist completion and operator actions       | 049        | Migrations store actor, expected revision, decision, note, timestamps, and append-only events atomically; v0.1 databases upgrade without data loss.        |
+| CLEW-051 | P1  | M    | Add `task result` human and JSON views        | 049        | One command shows contract, attention, plan, attempts, final revision, evidence coverage, review verdict, workspace, and base-to-result diff summary.      |
+| CLEW-052 | P1  | M    | Add attempt and stage history filters         | 051        | CLI can select a task/stage/attempt and returns stable JSON plus documented exit codes without requiring raw SQLite inspection.                            |
+| CLEW-053 | P0  | L    | Implement explicit `retry` command            | 049, 038   | `clew retry TASK STAGE` validates state/policy, creates exactly one new attempt, chooses resume/fresh session deterministically, and records actor/reason. |
+| CLEW-054 | P0  | L    | Implement explicit `verify` command           | 049, 020   | A user can rerun configured verification against a pinned workspace revision without rerunning implementation; evidence remains attempt/revision linked.   |
+
+### Milestone 8 — Evidence trust and completion
+
+| ID       | Pri | Size | Task                                           | Depends on    | Done when                                                                                                                                              |
+| -------- | --- | ---- | ---------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CLEW-055 | P0  | M    | Record verification environment fingerprints   | 049           | Evidence includes normalized platform, runtime, command, relevant config, workspace, and revision identity with secret-safe deterministic hashing.     |
+| CLEW-056 | P0  | L    | Implement freshness and trust evaluation       | 055           | Policy explains whether evidence is reusable, stale, skipped, or untrusted; same-revision trustworthy evidence is not rerun unnecessarily.             |
+| CLEW-057 | P0  | L    | Guard and invalidate `READY` deterministically | 050, 056      | Revision, environment, policy, or blocking-review changes invalidate readiness with an explicit event; stale evidence can never authorize completion.  |
+| CLEW-058 | P1  | M    | Produce a versioned final result manifest      | 051, 057      | Manifest pins task contract, base/result SHAs, included stage revisions, evidence coverage, review, decisions, skipped checks, and known limitations.  |
+| CLEW-059 | P1  | L    | Export patch and Git bundle artifacts          | 058           | Export is reproducible from pinned SHAs, includes the manifest and checksum, refuses dirty/ambiguous state, and never modifies the primary checkout.   |
+| CLEW-060 | P0  | M    | Implement explicit `complete` command          | 050, 057, 058 | `clew complete TASK --revision SHA --actor ACTOR` only transitions fresh `READY` work to `COMPLETED` and records the human acceptance transactionally. |
+| CLEW-061 | P1  | M    | Add completed-task retention and cleanup       | 060           | Completed task worktrees can be archived/pruned by policy; active, dirty, unexported, or unaccepted work is protected and every removal is auditable.  |
+
+### Milestone 9 — Parallel runtime and local model routing
+
+| ID       | Pri | Size | Task                                         | Depends on | Done when                                                                                                                                                |
+| -------- | --- | ---- | -------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-044 | P1  | L    | Add runtime namespace isolation              | 049        | Every run receives stable namespace/port/database/container identifiers; parallel fixture stages prove they cannot collide and cleanup is deterministic. |
+| CLEW-062 | P1  | L    | Add per-role harness and model configuration | 049        | Worker, architect, reviewer, and QA roles resolve validated Codex/OpenCode model settings through the documented config precedence without hardcoding.   |
+| CLEW-063 | P1  | M    | Prove an OpenCode local-model role           | 062        | A pinned local or user-selected OpenCode model passes a documented role smoke; unavailable hardware/provider becomes an explicit optional-gate result.   |
+
+### Milestone 10 — Upgrade and release
+
+| ID       | Pri | Size | Task                                      | Depends on                   | Done when                                                                                                                                       |
+| -------- | --- | ---- | ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-064 | P0  | L    | Build v0.1 → v0.2 upgrade acceptance      | 050, 055                     | A copied v0.1 database migrates, projections rebuild, existing tasks/events remain explainable, and downgrade limitations are documented.       |
+| CLEW-065 | P0  | L    | Build the v0.2 end-to-end acceptance flow | 053, 054, 057, 059, 060, 061 | Installed CLI runs failure → manual retry → READY → stale evidence → reverify → export → complete → cleanup with restart checks between phases. |
+| CLEW-066 | P1  | M    | Package and document v0.2.0               | 044, 063, 064, 065           | Clean install, upgrade, command reference, schemas, migrations, live adapter checks, limitations, and release evidence are reproducible.        |
+
+### v0.2 critical path
+
+```text
+CLEW-049 → 050 ────────────────┐
+         → 055 → 056 → 057 ───┼→ 058 → 059 ─┐
+         → 053 ────────────────┤             ├→ 065 → 066
+         → 054 ────────────────┤    060 → 061┘
+         → 051 → 052           │
+         → 044                 │
+         → 062 → 063           │
+               050 → 064 ──────┘
+```
+
+Recommended first batch: `CLEW-049`, `CLEW-053`, and `CLEW-055`. The lifecycle contract prevents incompatible persistence work, manual retry closes an explicit CLI gap, and environment fingerprinting retires the largest completion-policy uncertainty early.
+
+## Later backlog
+
+These items stay outside v0.2 until usage provides a concrete trigger.
 
 | ID       | Pri | Task                                               | Trigger                                                                                  |
 | -------- | --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | CLEW-042 | P2  | OpenTelemetry/Phoenix integration and trace links  | Core event history is useful and low-level debugging is the next bottleneck.             |
 | CLEW-043 | P2  | Cost/token aggregation                             | Both adapters expose sufficiently reliable usage metadata.                               |
-| CLEW-044 | P2  | Runtime namespace isolation                        | Parallel tests need independent ports, databases, queues, or Compose projects.           |
 | CLEW-045 | P2  | Task dashboard                                     | A 5–10 task friction log identifies the views and attention signals users actually need. |
-| CLEW-046 | P2  | Pull request and merge integration                 | Local `READY` flow is stable and a provider/merge policy is selected.                    |
+| CLEW-046 | P2  | Pull request and merge integration                 | Export/complete flow is stable and a provider/merge policy is selected.                  |
 | CLEW-047 | P2  | Remote or multi-process scheduler                  | Local single-process scheduling becomes a measured constraint.                           |
 | CLEW-048 | P2  | Optional external workspace/orchestration adapters | A concrete workflow gap justifies Orca, Beads, OpenHands, or another dependency.         |
 
-## Critical path
+## v0.1 historical critical path
 
 ```text
 CLEW-001 → 002 → 006 → 009 → 016 ─┐
@@ -150,7 +207,7 @@ CLEW-001 → 002 → 006 → 009 → 016 ─┐
 
 OpenCode (`007 → 009 → 029 → 035`) runs alongside the Codex/core path and joins before the Deep acceptance fixture.
 
-## Recommended first work batch
+## v0.1 historical first work batch
 
 Start with these tasks, in this order:
 

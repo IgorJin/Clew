@@ -659,7 +659,7 @@ v0.1 is accepted when:
 3. **POC 3 — Workspace:** native Git worktree lifecycle and harness `cwd` isolation.
 4. **POC 4 — Architect:** read-only native harness and schema-valid plan.
 5. **POC 5 — First parallel run:** plan, two workers, integration, review, retry.
-6. **v0.2:** task history, richer attempts/retries, human gates, local Qwen roles.
+6. **v0.2:** result/history views, explicit retry and reverify, evidence freshness/trust, pinned human completion, artifact export, runtime namespaces, and configurable local-model roles.
 7. **v0.3:** OpenTelemetry/Phoenix and cost/token metadata.
 8. **v0.4:** task dashboard derived from real workflow friction.
 
