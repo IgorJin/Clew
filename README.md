@@ -110,6 +110,8 @@ Telemetry is optional and disabled by default. `telemetry install` installs the 
 
 The local daemon is explicit and loopback-only. Start it with `clew daemon start`, inspect it with `clew daemon status`, stop it with `clew daemon stop`, and use `clew api ...` to send authenticated commands through its API. The daemon stores its bearer token and ownership metadata in `.clew`, with restrictive permissions; it never starts automatically.
 
+To open a persisted native session, use `clew session open TASK --stage worker --role worker --harness codex`. Clew resumes the exact stored session in its recorded workspace using argument-safe process launch; it does not create a Run or turn. Use `--surface none` for capability/diagnostic checks. Unsupported or stale sessions return structured `unavailable` results.
+
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 
 Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.

@@ -27,6 +27,7 @@ import { redactSecrets } from './security.js';
 import { createHash } from 'node:crypto';
 import { Observability, telemetryInstall } from './observability.js';
 import { LocalDaemon, daemonRequest, readDaemonMetadata, stopDaemon } from './daemon.js';
+import { createSessionSurface, openSessionForRun } from './session-surface.js';
 
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
@@ -129,6 +130,10 @@ function printHelp() {
   console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
   console.log('  clew daemon start [--port PORT] | status | stop');
   console.log('  clew api task list|show ID|...');
+  console.log(
+    '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|none]',
+  );
+  console.log('  clew session capabilities [--harness HARNESS]');
 }
 
 export async function main(args) {
@@ -183,6 +188,41 @@ export async function main(args) {
   store.setEventObserver(observability);
 
   try {
+    if (command === 'session' && subcommand === 'capabilities') {
+      const harness = getOptionValue(rest, '--harness', 'codex');
+
+      return printJson({
+        version: 1,
+        harness,
+        capabilities: createSessionSurface({
+          kind: getOptionValue(rest, '--surface', 'plain'),
+          codexBin: config.codexBin,
+        }).capabilities(harness),
+      });
+    }
+    if (command === 'session' && subcommand === 'open') {
+      const taskId = rest[0] && !rest[0].startsWith('--') ? rest[0] : null;
+
+      if (!taskId) throw new Error('task id is required');
+      const stageId = getOptionValue(rest, '--stage', 'worker');
+      const latestRun = store.listRuns(taskId, { stageId }).at(-1);
+      const request = {
+        version: 1,
+        taskId,
+        stageId,
+        runId: getOptionValue(rest, '--run', latestRun?.id ?? null),
+        sessionId: getOptionValue(rest, '--session', null),
+        role: getOptionValue(rest, '--role', 'worker'),
+        harness: getOptionValue(rest, '--harness', latestRun?.harness ?? 'codex'),
+        mode: getOptionValue(rest, '--mode', 'resume'),
+      };
+      const surface = createSessionSurface({
+        kind: getOptionValue(rest, '--surface', 'plain'),
+        codexBin: config.codexBin,
+      });
+
+      return printJson(await openSessionForRun(store, request, surface));
+    }
     if (command === 'task' && subcommand === 'create') {
       let contract;
       const file = getOptionValue(rest, '--file');

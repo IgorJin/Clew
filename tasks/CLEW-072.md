@@ -1,7 +1,7 @@
 ---
 id: CLEW-072
 title: Native Session Surface
-status: planned
+status: done
 release: v0.4
 priority: P1
 size: L
@@ -86,8 +86,10 @@ Primary ownership: Session Surface abstraction and terminal adapters. Avoid Sche
 
 ## Blockers
 
-Waiting for `CLEW-068` Session Surface contract.
+None.
 
 ## Completion record
 
-Not completed.
+- Implementation: capability-based `SessionSurface`, `NoneSurface`, safe plain-terminal Codex resume launcher, persisted Task/Run/session/workspace identity checks, structured stale/unsupported diagnostics, and CLI `session open`/`session capabilities` operations.
+- Verification: `node --test test/session-surface.test.js` passed 3/3 on 2026-08-28; full project gate follows.
+- Live Codex attach smoke remains optional because it requires a configured native Codex installation and an existing resumable session.
