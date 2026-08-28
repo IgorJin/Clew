@@ -301,6 +301,46 @@ export class Store {
     this.db
       .prepare('INSERT INTO events (task_id,type,payload,at,version) VALUES (?,?,?,?,1)')
       .run(event.task_id, event.type, JSON.stringify(event.payload), event.at);
+    try {
+      if (typeof this.eventObserver === 'function') this.eventObserver({ ...event });
+      else this.eventObserver?.onEvent?.({ ...event });
+    } catch {
+      // Telemetry is diagnostic and must never alter durable task behavior.
+    }
+  }
+  setEventObserver(observer) {
+    this.eventObserver = observer;
+    observer?.setStore?.(this);
+  }
+  getTelemetryTask(taskId) {
+    const row = this.db.prepare('SELECT * FROM telemetry_tasks WHERE task_id=?').get(taskId);
+
+    return row ? { ...row, rootSpanContext: JSON.parse(row.root_span_context) } : null;
+  }
+  saveTelemetryTask(taskId, context) {
+    this.db
+      .prepare(
+        'INSERT INTO telemetry_tasks (task_id,trace_id,root_span_id,root_span_context,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET trace_id=excluded.trace_id,root_span_id=excluded.root_span_id,root_span_context=excluded.root_span_context,updated_at=excluded.updated_at',
+      )
+      .run(
+        taskId,
+        context.traceId,
+        context.spanId,
+        JSON.stringify(context),
+        new Date().toISOString(),
+      );
+  }
+  getTelemetryRun(runId) {
+    const row = this.db.prepare('SELECT * FROM telemetry_runs WHERE run_id=?').get(runId);
+
+    return row ? { ...row, spanContext: JSON.parse(row.span_context) } : null;
+  }
+  saveTelemetryRun(runId, taskId, context) {
+    this.db
+      .prepare(
+        'INSERT INTO telemetry_runs (run_id,task_id,span_id,span_context,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET span_id=excluded.span_id,span_context=excluded.span_context,updated_at=excluded.updated_at',
+      )
+      .run(runId, taskId, context.spanId, JSON.stringify(context), new Date().toISOString());
   }
   listEvents(taskId) {
     return this.db

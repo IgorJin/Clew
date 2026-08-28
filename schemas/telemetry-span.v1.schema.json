@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.dev/schemas/telemetry-span.v1.schema.json",
+  "title": "Clew telemetry span",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "traceId", "spanId", "attributes"],
+  "properties": {
+    "schema": { "const": "clew.telemetry-span.v1" },
+    "name": { "type": "string", "minLength": 1 },
+    "traceId": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+    "spanId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "parentSpanId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "attributes": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "task_id",
+          "stage_id",
+          "run_id",
+          "attempt",
+          "profile",
+          "role",
+          "harness",
+          "workspace_id",
+          "commit_sha",
+          "session_id",
+          "turn_id",
+          "state",
+          "status",
+          "event_type",
+          "action",
+          "decision",
+          "failure_class",
+          "trace_id"
+        ]
+      }
+    }
+  }
+}

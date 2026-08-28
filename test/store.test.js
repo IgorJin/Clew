@@ -214,6 +214,14 @@ test('upgrades a populated v0.1 database without losing task history', () => {
   assert.equal(store.getTask('LEGACY-1').contract.title, 'Legacy');
   assert.equal(store.listRuns('LEGACY-1')[0].session_id, 'legacy-session');
   assert.equal(store.listEvents('LEGACY-1')[0].type, 'TASK_CREATED');
+  assert.equal(
+    store.db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('telemetry_tasks','telemetry_runs','telemetry_exports')",
+      )
+      .get().count,
+    3,
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

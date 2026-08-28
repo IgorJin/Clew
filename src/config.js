@@ -10,6 +10,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   openCodeUrl: 'http://127.0.0.1:4096',
   worktreeRoot: '.clew/worktrees',
   models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
+  observability: Object.freeze({
+    enabled: false,
+    serviceName: 'clew',
+    endpoint: null,
+    maxQueueSize: 256,
+    exportTimeoutMs: 5_000,
+  }),
 });
 
 function readJsonIfPresent(path) {
@@ -54,6 +61,14 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
     ...(env.CLEW_OPENCODE_BIN ? { openCodeBin: env.CLEW_OPENCODE_BIN } : {}),
     ...(env.CLEW_OPENCODE_URL ? { openCodeUrl: env.CLEW_OPENCODE_URL } : {}),
     ...(env.CLEW_WORKTREE_ROOT ? { worktreeRoot: env.CLEW_WORKTREE_ROOT } : {}),
+    observability: {
+      ...DEFAULT_CONFIG.observability,
+      ...(userConfig.observability ?? {}),
+      ...(projectConfig.observability ?? {}),
+      ...(env.CLEW_TELEMETRY_ENABLED ? { enabled: env.CLEW_TELEMETRY_ENABLED === 'true' } : {}),
+      ...(env.OTEL_SERVICE_NAME ? { serviceName: env.OTEL_SERVICE_NAME } : {}),
+      ...(env.OTEL_EXPORTER_OTLP_ENDPOINT ? { endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT } : {}),
+    },
     models: {
       ...DEFAULT_CONFIG.models,
       ...(userConfig.models ?? {}),

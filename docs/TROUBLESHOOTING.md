@@ -32,3 +32,7 @@ node bin/clew.js worktree prune
 ```
 
 Prune skips active and dirty worktrees. Explicit removal of a dirty worktree requires `worktree remove PATH --force`.
+
+## Telemetry is unavailable
+
+Telemetry is optional. Run `node bin/clew.js telemetry install`, set `CLEW_TELEMETRY_ENABLED=true`, and configure `OTEL_EXPORTER_OTLP_ENDPOINT` when an OTLP collector is available. A missing or unavailable collector does not block task execution; inspect `node bin/clew.js telemetry status` and `node bin/clew.js doctor` for the local state.
