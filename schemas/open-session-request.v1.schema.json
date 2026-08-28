@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/open-session-request.v1.schema.json",
+  "type": "object",
+  "required": ["version", "taskId", "role", "harness"],
+  "properties": {
+    "version": { "const": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "stageId": { "type": ["string", "null"] },
+    "runId": { "type": ["string", "null"] },
+    "sessionId": { "type": ["string", "null"] },
+    "role": { "enum": ["architect", "worker", "reviewer", "qa"] },
+    "harness": { "enum": ["codex", "opencode", "fake"] },
+    "mode": { "enum": ["new", "resume"] }
+  },
+  "additionalProperties": true
+}

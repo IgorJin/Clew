@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/thread-source.v1.schema.json",
+  "type": "object",
+  "required": ["kind", "id"],
+  "properties": {
+    "kind": {
+      "enum": ["event", "operator_action", "operator_message", "run", "review", "verification"]
+    },
+    "id": { "type": "string", "minLength": 1 },
+    "eventType": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

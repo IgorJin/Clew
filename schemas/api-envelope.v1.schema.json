@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/api-envelope.v1.schema.json",
+  "type": "object",
+  "required": ["version", "requestId", "kind"],
+  "properties": {
+    "version": { "const": 1 },
+    "requestId": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["command", "query", "response", "error"] },
+    "name": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "error": { "$ref": "api-error.v1.schema.json" }
+  },
+  "additionalProperties": true
+}

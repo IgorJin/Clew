@@ -46,12 +46,12 @@ updated: YYYY-MM-DD
 | [CLEW-042](./CLEW-042.md) | v0.3    | done    | —          | —                  |
 | [CLEW-043](./CLEW-043.md) | v0.3    | done    | CLEW-042   | —                  |
 | [CLEW-067](./CLEW-067.md) | v0.3    | ready   | 042, 043   | —                  |
-| [CLEW-068](./CLEW-068.md) | v0.4    | planned | 067        | —                  |
-| [CLEW-069](./CLEW-069.md) | v0.4    | planned | 068        | v0.4-control-plane |
-| [CLEW-070](./CLEW-070.md) | v0.4    | planned | 068        | v0.4-control-plane |
-| [CLEW-071](./CLEW-071.md) | v0.4    | planned | 068        | v0.4-control-plane |
-| [CLEW-072](./CLEW-072.md) | v0.4    | planned | 068        | v0.4-control-plane |
-| [CLEW-073](./CLEW-073.md) | v0.4    | planned | 068        | v0.4-control-plane |
+| [CLEW-068](./CLEW-068.md) | v0.4    | done    | 067        | —                  |
+| [CLEW-069](./CLEW-069.md) | v0.4    | ready   | 068        | v0.4-control-plane |
+| [CLEW-070](./CLEW-070.md) | v0.4    | ready   | 068        | v0.4-control-plane |
+| [CLEW-071](./CLEW-071.md) | v0.4    | ready   | 068        | v0.4-control-plane |
+| [CLEW-072](./CLEW-072.md) | v0.4    | ready   | 068        | v0.4-control-plane |
+| [CLEW-073](./CLEW-073.md) | v0.4    | ready   | 068        | v0.4-control-plane |
 | [CLEW-074](./CLEW-074.md) | v0.4    | planned | 069–073    | —                  |
 | [CLEW-075](./CLEW-075.md) | v0.5    | planned | 074        | —                  |
 | [CLEW-076](./CLEW-076.md) | v0.5    | planned | 075        | —                  |

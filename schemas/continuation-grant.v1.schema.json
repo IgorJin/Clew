@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/continuation-grant.v1.schema.json",
+  "type": "object",
+  "required": ["version", "id", "taskId", "actor", "reason", "expectedRevision", "expiresAt"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "stageId": { "type": ["string", "null"] },
+    "runId": { "type": ["string", "null"] },
+    "sessionId": { "type": ["string", "null"] },
+    "actor": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "expectedRevision": { "type": "string", "minLength": 1 },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

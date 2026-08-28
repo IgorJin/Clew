@@ -13,6 +13,7 @@ test('all published schemas and fixtures are valid JSON', () => {
     'fixtures/plans',
     'fixtures/profiles',
     'fixtures/reviews',
+    'fixtures/control-plane',
   ]) {
     const files = readdirSync(join(projectRoot, directory)).filter((file) =>
       file.endsWith('.json'),

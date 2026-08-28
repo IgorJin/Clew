@@ -16,6 +16,7 @@
     "fixtures/plans/",
     "fixtures/profiles/",
     "fixtures/reviews/",
+    "fixtures/control-plane/",
     "docs/",
     "CHANGELOG.md",
     "DONE.md",

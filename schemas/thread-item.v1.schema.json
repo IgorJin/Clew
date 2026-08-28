@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/thread-item.v1.schema.json",
+  "type": "object",
+  "required": ["version", "id", "cursor", "kind", "at", "source", "summary"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "cursor": { "type": "integer", "minimum": 1 },
+    "kind": { "type": "string", "minLength": 1 },
+    "at": { "type": "string", "format": "date-time" },
+    "source": { "$ref": "thread-source.v1.schema.json" },
+    "summary": { "type": "string", "minLength": 1 },
+    "taskId": { "type": ["string", "null"] },
+    "stageId": { "type": ["string", "null"] },
+    "runId": { "type": ["string", "null"] },
+    "redacted": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

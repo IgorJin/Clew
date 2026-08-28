@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/thread-page.v1.schema.json",
+  "type": "object",
+  "required": ["version", "items", "nextCursor", "hasMore"],
+  "properties": {
+    "version": { "const": 1 },
+    "items": { "type": "array", "items": { "$ref": "thread-item.v1.schema.json" } },
+    "nextCursor": { "type": ["integer", "null"], "minimum": 1 },
+    "hasMore": { "type": "boolean" },
+    "redaction": { "const": "public-safe" }
+  },
+  "additionalProperties": true
+}

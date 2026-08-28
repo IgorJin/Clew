@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/daemon-identity.v1.schema.json",
+  "type": "object",
+  "required": [
+    "version",
+    "daemonId",
+    "stateDirectory",
+    "pid",
+    "startedAt",
+    "endpoint",
+    "tokenFile"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "daemonId": { "type": "string", "minLength": 1 },
+    "stateDirectory": { "type": "string", "minLength": 1 },
+    "pid": { "type": "integer", "minimum": 1 },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "endpoint": { "const": "http://127.0.0.1" },
+    "tokenFile": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}

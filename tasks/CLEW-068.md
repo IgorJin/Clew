@@ -1,7 +1,7 @@
 ---
 id: CLEW-068
 title: Local control plane contracts
-status: planned
+status: done
 release: v0.4
 priority: P0
 size: M
@@ -84,8 +84,10 @@ Primary ownership: `schemas/`, shared protocol/domain modules, and fixtures. Avo
 
 ## Blockers
 
-Waiting for `CLEW-067`.
+None.
 
 ## Completion record
 
-Not completed.
+- Implementation: v1 API/WebSocket/Thread/continuation/Session Surface schemas, forward-compatible runtime validators, safe fixture corpus, protocol documentation, and additive migration 012.
+- Verification: `npm run check` passed with 83 tests on 2026-08-28; schema artifacts and runtime validator parity tests passed.
+- Unblocked: `CLEW-069`–`CLEW-073` are now ready for parallel implementation.

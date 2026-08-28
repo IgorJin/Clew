@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "api": {
+    "command": {
+      "version": 1,
+      "requestId": "req-quick-run",
+      "kind": "command",
+      "name": "task.run",
+      "payload": { "taskId": "ACC-QUICK", "profile": "quick" },
+      "futureField": "ignored-by-v1-consumers"
+    },
+    "response": {
+      "version": 1,
+      "requestId": "req-quick-run",
+      "kind": "response",
+      "name": "task.run",
+      "payload": { "taskId": "ACC-QUICK", "state": "READY" }
+    },
+    "error": {
+      "version": 1,
+      "requestId": "req-expired",
+      "kind": "error",
+      "error": { "code": "CURSOR_EXPIRED", "message": "replay cursor expired", "retryable": false }
+    }
+  },
+  "events": [
+    {
+      "version": 1,
+      "cursor": 41,
+      "eventId": "evt-41",
+      "type": "TASK_STATE_CHANGED",
+      "at": "2026-08-28T10:00:00.000Z",
+      "taskId": "ACC-QUICK",
+      "payload": { "state": "READY" }
+    },
+    {
+      "version": 1,
+      "cursor": 42,
+      "eventId": "evt-42",
+      "type": "TASK_COMPLETED",
+      "at": "2026-08-28T10:00:01.000Z",
+      "taskId": "ACC-QUICK",
+      "payload": { "actor": "operator" }
+    }
+  ],
+  "thread": {
+    "version": 1,
+    "items": [
+      {
+        "version": 1,
+        "id": "thread-1",
+        "cursor": 41,
+        "kind": "task_ready",
+        "at": "2026-08-28T10:00:00.000Z",
+        "source": { "kind": "event", "id": "evt-41", "eventType": "TASK_STATE_CHANGED" },
+        "summary": "Task is ready for operator acceptance",
+        "taskId": "ACC-QUICK",
+        "redacted": false
+      },
+      {
+        "version": 1,
+        "id": "thread-2",
+        "cursor": 42,
+        "kind": "operator_message",
+        "at": "2026-08-28T10:00:01.000Z",
+        "source": { "kind": "operator_message", "id": "msg-1" },
+        "summary": "Operator requested continuation",
+        "taskId": "ACC-STANDARD",
+        "redacted": true
+      }
+    ],
+    "nextCursor": null,
+    "hasMore": false,
+    "redaction": "public-safe"
+  },
+  "continuation": {
+    "version": 1,
+    "id": "grant-1",
+    "taskId": "ACC-STANDARD",
+    "stageId": "worker",
+    "runId": "run-2",
+    "sessionId": "session-2",
+    "actor": "operator",
+    "reason": "address review findings",
+    "expectedRevision": "abc123",
+    "expiresAt": "2026-08-29T10:00:00.000Z"
+  },
+  "session": {
+    "request": {
+      "version": 1,
+      "taskId": "ACC-DEEP",
+      "stageId": "worker",
+      "runId": "run-3",
+      "sessionId": null,
+      "role": "worker",
+      "harness": "codex",
+      "mode": "new"
+    },
+    "result": {
+      "version": 1,
+      "taskId": "ACC-DEEP",
+      "stageId": "worker",
+      "runId": "run-3",
+      "role": "worker",
+      "harness": "codex",
+      "sessionId": "session-3",
+      "turnId": null,
+      "state": "opened",
+      "capabilities": ["open", "resume", "interrupt", "inspect", "send_message"]
+    }
+  },
+  "reviewExhaustion": {
+    "version": 1,
+    "taskId": "ACC-STANDARD",
+    "stageId": "worker",
+    "runId": "run-2",
+    "attempts": 3,
+    "reason": "review correction limit reached",
+    "requiresHuman": true
+  },
+  "completionOverride": {
+    "version": 1,
+    "taskId": "ACC-STANDARD",
+    "expectedRevision": "abc123",
+    "actor": "operator",
+    "reason": "accepted after manual review",
+    "at": "2026-08-28T10:05:00.000Z"
+  }
+}

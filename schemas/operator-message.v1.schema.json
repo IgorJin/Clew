@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/operator-message.v1.schema.json",
+  "type": "object",
+  "required": ["version", "id", "taskId", "actor", "message", "at"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "actor": { "type": "string", "minLength": 1 },
+    "message": { "type": "string", "minLength": 1, "maxLength": 10000 },
+    "at": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

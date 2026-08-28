@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/session-surface.v1.schema.json",
+  "type": "object",
+  "required": ["version", "harness", "capabilities"],
+  "properties": {
+    "version": { "const": 1 },
+    "harness": { "enum": ["codex", "opencode", "fake"] },
+    "capabilities": {
+      "type": "array",
+      "items": { "enum": ["open", "resume", "interrupt", "inspect", "send_message"] },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": true
+}

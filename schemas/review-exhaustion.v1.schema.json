@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/review-exhaustion.v1.schema.json",
+  "type": "object",
+  "required": ["version", "taskId", "stageId", "attempts", "reason", "requiresHuman"],
+  "properties": {
+    "version": { "const": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "stageId": { "type": "string", "minLength": 1 },
+    "runId": { "type": ["string", "null"] },
+    "attempts": { "type": "integer", "minimum": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "requiresHuman": { "const": true }
+  },
+  "additionalProperties": true
+}
