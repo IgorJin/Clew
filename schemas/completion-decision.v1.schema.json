@@ -9,6 +9,9 @@
     "expectedRevision": { "type": "string", "minLength": 1 },
     "decision": { "const": "accept" },
     "actor": { "type": "string", "minLength": 1 },
-    "note": { "type": ["string", "null"] }
+    "note": { "type": ["string", "null"] },
+    "reviewOverride": { "type": "boolean" },
+    "unresolvedFindings": { "type": "array" },
+    "idempotencyKey": { "type": ["string", "null"] }
   }
 }

@@ -1,7 +1,7 @@
 ---
 id: CLEW-073
 title: Continue and review exhaustion handoff
-status: planned
+status: in_review
 release: v0.4
 priority: P0
 size: M
@@ -9,6 +9,7 @@ depends_on: [CLEW-068]
 parallel_group: v0.4-control-plane
 owner: null
 updated: 2026-08-28
+evidence_policy: v1
 ---
 
 # CLEW-073 — Continue and review exhaustion handoff
@@ -67,6 +68,18 @@ Current retry paths are failure-oriented and review exhaustion ends in failure. 
 6. Operator completion with findings is allowed, attributable, and immutable.
 7. `COMPLETED` remains terminal; later problems require a follow-up Task.
 
+## Acceptance evidence
+
+| Criterion | Automated evidence                                    | Logical scenarios                                           | Result |
+| --------- | ----------------------------------------------------- | ----------------------------------------------------------- | ------ |
+| AC-1      | `test/scheduler.test.js`, `test/continuation.test.js` | Standard and Deep initial plus two corrections              | pass   |
+| AC-2      | `test/continuation.test.js`                           | Standard/Deep exhaustion and immediate ambiguity handoff    | pass   |
+| AC-3      | `test/continuation.test.js`, `test/cli.test.js`       | duplicate command; restart after Run and worker completion  | pass   |
+| AC-4      | `test/cli.test.js`, `test/continuation.test.js`       | READY; WAITING_FOR_HUMAN; Standard; Deep                    | pass   |
+| AC-5      | `test/cli.test.js`, `test/continuation.test.js`       | redaction; stage/run/session target; stale-session fallback | pass   |
+| AC-6      | `test/continuation.test.js`, `test/domain.test.js`    | attributed override and immutable findings snapshot         | pass   |
+| AC-7      | `test/continuation.test.js`, `test/domain.test.js`    | COMPLETED rejects later execution and completion            | pass   |
+
 ## Verification
 
 - domain transition tests;
@@ -75,6 +88,12 @@ Current retry paths are failure-oriented and review exhaustion ends in failure. 
 - process restart between grant, Run creation, worker completion, and reviewer completion;
 - duplicate command/idempotency tests;
 - override completion manifest checks.
+
+## Review record
+
+- Verdict: pass
+- Reviewer: independent Codex review
+- Findings: None after correction of completion transitions, durable grant/Run recovery, Deep review budgeting, ambiguity handoff, and causal session targeting.
 
 ## Dependencies and parallelization
 
@@ -90,8 +109,10 @@ Primary ownership: domain transitions, Store records, Scheduler correction budge
 
 ## Blockers
 
-Waiting for `CLEW-068` continuation contracts.
+None.
 
 ## Completion record
 
-Not completed.
+- Implementation: durable continuation lifecycle with one correction Run per grant, replay recovery, Standard/Deep bounded review, immediate ambiguity handoff, native-session fallback, and attributable human completion.
+- Verification: `npm run check` passed on 2026-08-28 (100 tests passed, 2 loopback tests skipped by sandbox policy), including CLI, scheduler, restart, fallback, ambiguity, override, and terminal-state scenarios.
+- Merge evidence: pending merge to `main`; keep status `in_review` until then.

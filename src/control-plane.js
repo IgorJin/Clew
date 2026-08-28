@@ -4,6 +4,7 @@ const API_KINDS = new Set(['command', 'query', 'response', 'error']);
 const SESSION_ROLES = new Set(['architect', 'worker', 'reviewer', 'qa']);
 const HARNESSES = new Set(['codex', 'opencode', 'fake']);
 const SESSION_STATES = new Set(['opened', 'resumed', 'unavailable']);
+const CONTINUATION_STATES = new Set(['GRANTED', 'RUNNING', 'WORKER_COMPLETED', 'COMPLETED']);
 
 function assertObject(value, name) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -111,6 +112,10 @@ export function validateContinuationGrant(grant) {
   for (const field of ['stageId', 'runId', 'sessionId'])
     if (grant[field] !== undefined && grant[field] !== null)
       assertString(grant[field], `continuation.${field}`);
+  if (grant.idempotencyKey !== undefined && grant.idempotencyKey !== null)
+    assertString(grant.idempotencyKey, 'continuation.idempotencyKey');
+  if (grant.status !== undefined && !CONTINUATION_STATES.has(grant.status))
+    throw new Error('continuation.status is invalid');
 
   return copy(grant);
 }

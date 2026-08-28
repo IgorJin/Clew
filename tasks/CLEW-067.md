@@ -9,6 +9,7 @@ depends_on: [CLEW-042, CLEW-043]
 parallel_group: null
 owner: null
 updated: 2026-08-28
+evidence_policy: legacy
 ---
 
 # CLEW-067 — v0.3 upgrade, acceptance, and release

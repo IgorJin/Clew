@@ -287,6 +287,11 @@ export class Store {
       .all(...params)
       .map(parseRun);
   }
+  getRun(runId) {
+    const row = this.db.prepare('SELECT * FROM runs WHERE id=?').get(runId);
+
+    return row ? parseRun(row) : null;
+  }
   recordUsage(input) {
     const usage = normalizeUsage(input, input);
 
@@ -526,6 +531,165 @@ export class Store {
       .all(taskId)
       .map((row) => ({ ...row, target: row.target ? JSON.parse(row.target) : null }));
   }
+  recordContinuationGrant(grant) {
+    const existing = grant.idempotencyKey
+      ? this.db
+          .prepare('SELECT * FROM continuation_grants WHERE idempotency_key=?')
+          .get(grant.idempotencyKey)
+      : null;
+
+    if (existing) return existing;
+    const createdAt = new Date().toISOString();
+
+    this.db
+      .prepare(
+        'INSERT INTO continuation_grants (id,task_id,stage_id,run_id,session_id,actor,reason,expected_revision,expires_at,created_at,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        grant.id,
+        grant.taskId,
+        grant.stageId ?? null,
+        grant.runId ?? null,
+        grant.sessionId ?? null,
+        grant.actor,
+        grant.reason,
+        grant.expectedRevision,
+        grant.expiresAt,
+        createdAt,
+        grant.idempotencyKey ?? null,
+      );
+    this.appendEvent(grant.taskId, 'CONTINUATION_GRANTED', { ...grant, createdAt });
+
+    return { ...grant, createdAt };
+  }
+  recordContinuationRequest({ grant, message, target }) {
+    return this.runInTransaction(() => {
+      const existing = this.getContinuationGrantByKey(grant.idempotencyKey);
+
+      if (existing) return existing;
+      const operatorMessage = this.recordOperatorMessage({
+        taskId: grant.taskId,
+        actor: grant.actor,
+        message,
+        target,
+      });
+      const recorded = this.recordContinuationGrant({
+        ...grant,
+        reason: operatorMessage.message,
+      });
+
+      this.db
+        .prepare('UPDATE continuation_grants SET operator_message_id=? WHERE id=?')
+        .run(operatorMessage.id, recorded.id);
+
+      return { ...recorded, operatorMessageId: operatorMessage.id };
+    });
+  }
+  getContinuationGrantByKey(idempotencyKey) {
+    return this.db
+      .prepare('SELECT * FROM continuation_grants WHERE idempotency_key=?')
+      .get(idempotencyKey);
+  }
+  getContinuationGrant(id) {
+    return this.db.prepare('SELECT * FROM continuation_grants WHERE id=?').get(id);
+  }
+  claimContinuationRun(grantId, run) {
+    return this.runInTransaction(() => {
+      const grant = this.getContinuationGrant(grantId);
+
+      if (!grant) throw new Error(`continuation grant not found: ${grantId}`);
+      if (grant.correction_run_id) return this.getRun(grant.correction_run_id);
+      this.createRun(run);
+      this.db
+        .prepare(
+          "UPDATE continuation_grants SET correction_run_id=?,status='RUNNING' WHERE id=? AND correction_run_id IS NULL",
+        )
+        .run(run.id, grantId);
+
+      return this.getRun(run.id);
+    });
+  }
+  markContinuationWorkerCompleted(grantId) {
+    this.db
+      .prepare("UPDATE continuation_grants SET status='WORKER_COMPLETED' WHERE id=?")
+      .run(grantId);
+  }
+  completeContinuation(grantId, { state, review = null, runId = null } = {}) {
+    return this.runInTransaction(() => {
+      const grant = this.getContinuationGrant(grantId);
+
+      if (!grant) throw new Error(`continuation grant not found: ${grantId}`);
+      if (grant.status === 'COMPLETED') return grant;
+      const completedAt = new Date().toISOString();
+
+      this.db
+        .prepare(
+          "UPDATE continuation_grants SET status='COMPLETED',completed_at=?,result_state=?,review_verdict=? WHERE id=?",
+        )
+        .run(completedAt, state, review?.verdict ?? null, grantId);
+      this.appendEvent(grant.task_id, 'CONTINUATION_COMPLETED', {
+        grantId,
+        runId: runId ?? grant.correction_run_id,
+        state,
+        reviewVerdict: review?.verdict ?? null,
+        completedAt,
+      });
+
+      return this.getContinuationGrant(grantId);
+    });
+  }
+  recordCompletionOverride({
+    taskId,
+    expectedRevision,
+    actor,
+    reason,
+    unresolvedFindings = [],
+    idempotencyKey = null,
+  }) {
+    const existing = idempotencyKey
+      ? this.db
+          .prepare('SELECT * FROM completion_overrides WHERE idempotency_key=?')
+          .get(idempotencyKey)
+      : null;
+
+    if (existing) return existing;
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+
+    this.db
+      .prepare(
+        'INSERT INTO completion_overrides (id,task_id,expected_revision,actor,reason,created_at,idempotency_key,unresolved_findings) VALUES (?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        id,
+        taskId,
+        expectedRevision,
+        actor,
+        reason,
+        createdAt,
+        idempotencyKey,
+        JSON.stringify(unresolvedFindings),
+      );
+    this.appendEvent(taskId, 'COMPLETION_OVERRIDE_RECORDED', {
+      id,
+      expectedRevision,
+      actor,
+      reason,
+      unresolvedFindings,
+      createdAt,
+    });
+
+    return {
+      id,
+      taskId,
+      expectedRevision,
+      actor,
+      reason,
+      unresolvedFindings,
+      createdAt,
+      idempotencyKey,
+    };
+  }
   getTaskThread(taskId, options = {}) {
     return queryTaskThread(
       {
@@ -606,7 +770,10 @@ export class Store {
       const task = this.getTask(normalized.taskId);
 
       if (!task) throw new Error(`task not found: ${normalized.taskId}`);
-      if (task.state !== TASK_STATE.READY)
+      if (
+        task.state !== TASK_STATE.READY &&
+        !(task.state === TASK_STATE.WAITING_FOR_HUMAN && normalized.reviewOverride)
+      )
         throw new Error(`task ${task.id} must be READY before completion`);
       const currentResult = this.getResultManifest(task.id);
 
@@ -616,6 +783,16 @@ export class Store {
         throw new Error('completion revision does not match result manifest');
       if (this.getCompletion(task.id)) throw new Error(`task ${task.id} is already completed`);
       const at = new Date().toISOString();
+
+      if (normalized.reviewOverride)
+        this.recordCompletionOverride({
+          taskId: task.id,
+          expectedRevision: normalized.expectedRevision,
+          actor: normalized.actor,
+          reason: normalized.note ?? 'operator accepted unresolved review findings',
+          unresolvedFindings: normalized.unresolvedFindings,
+          idempotencyKey: normalized.idempotencyKey ?? null,
+        });
 
       assertValidTaskTransition(task.state, TASK_STATE.COMPLETED);
       this.db
@@ -629,7 +806,12 @@ export class Store {
           normalized.note,
           normalized.actor,
           at,
-          JSON.stringify(result),
+          JSON.stringify({
+            ...result,
+            reviewOverride: normalized.reviewOverride,
+            unresolvedFindings: normalized.unresolvedFindings,
+            completionActor: normalized.actor,
+          }),
         );
       this.recordOperatorAction({
         taskId: task.id,
@@ -644,6 +826,8 @@ export class Store {
         decision: normalized.decision,
         actor: normalized.actor,
         note: normalized.note,
+        reviewOverride: normalized.reviewOverride,
+        unresolvedFindings: normalized.unresolvedFindings,
         at,
       });
 

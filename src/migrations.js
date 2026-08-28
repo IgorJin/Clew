@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -222,6 +222,50 @@ const MIGRATIONS = Object.freeze([
 
       if (!columns.some((column) => column.name === 'target'))
         db.exec('ALTER TABLE operator_messages ADD COLUMN target TEXT');
+    },
+  },
+  {
+    version: 14,
+    apply(db) {
+      const grants = db.prepare('PRAGMA table_info(continuation_grants)').all();
+      const overrides = db.prepare('PRAGMA table_info(completion_overrides)').all();
+
+      if (!grants.some((column) => column.name === 'idempotency_key'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN idempotency_key TEXT');
+      if (!overrides.some((column) => column.name === 'idempotency_key'))
+        db.exec('ALTER TABLE completion_overrides ADD COLUMN idempotency_key TEXT');
+      if (!overrides.some((column) => column.name === 'unresolved_findings'))
+        db.exec('ALTER TABLE completion_overrides ADD COLUMN unresolved_findings TEXT');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS continuation_grants_idempotency ON continuation_grants(idempotency_key) WHERE idempotency_key IS NOT NULL',
+      );
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS completion_overrides_idempotency ON completion_overrides(idempotency_key) WHERE idempotency_key IS NOT NULL',
+      );
+    },
+  },
+  {
+    version: 15,
+    apply(db) {
+      const grants = db.prepare('PRAGMA table_info(continuation_grants)').all();
+
+      if (!grants.some((column) => column.name === 'status'))
+        db.exec(
+          "ALTER TABLE continuation_grants ADD COLUMN status TEXT NOT NULL DEFAULT 'GRANTED'",
+        );
+      if (!grants.some((column) => column.name === 'correction_run_id'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN correction_run_id TEXT');
+      if (!grants.some((column) => column.name === 'operator_message_id'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN operator_message_id TEXT');
+      if (!grants.some((column) => column.name === 'completed_at'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN completed_at TEXT');
+      if (!grants.some((column) => column.name === 'result_state'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN result_state TEXT');
+      if (!grants.some((column) => column.name === 'review_verdict'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN review_verdict TEXT');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS continuation_grants_run ON continuation_grants(correction_run_id) WHERE correction_run_id IS NOT NULL',
+      );
     },
   },
 ]);

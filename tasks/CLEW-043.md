@@ -9,6 +9,7 @@ depends_on: [CLEW-042]
 parallel_group: null
 owner: null
 updated: 2026-08-28
+evidence_policy: legacy
 ---
 
 # CLEW-043 — Usage, token, and cost accounting

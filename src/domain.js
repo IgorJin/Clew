@@ -114,11 +114,24 @@ export function validateCompletionDecision(decision) {
     throw new Error('completion.decision is invalid');
   if (decision.note !== undefined && decision.note !== null && typeof decision.note !== 'string')
     throw new Error('completion.note must be a string');
+  if (decision.reviewOverride !== undefined && typeof decision.reviewOverride !== 'boolean')
+    throw new Error('completion.reviewOverride must be boolean');
+  if (decision.unresolvedFindings !== undefined && !Array.isArray(decision.unresolvedFindings))
+    throw new Error('completion.unresolvedFindings must be an array');
+  if (
+    decision.idempotencyKey !== undefined &&
+    decision.idempotencyKey !== null &&
+    typeof decision.idempotencyKey !== 'string'
+  )
+    throw new Error('completion.idempotencyKey must be a string');
 
   return {
     ...decision,
     decision: decision.decision ?? COMPLETION_DECISION.ACCEPT,
     note: decision.note ?? null,
+    reviewOverride: decision.reviewOverride ?? false,
+    unresolvedFindings: decision.unresolvedFindings ?? [],
+    idempotencyKey: decision.idempotencyKey ?? null,
   };
 }
 
@@ -197,6 +210,7 @@ const transitions = {
     TASK_STATE.QUEUED,
     TASK_STATE.PLAN_READY,
     TASK_STATE.READY,
+    TASK_STATE.COMPLETED,
     TASK_STATE.CANCELLED,
     TASK_STATE.FAILED,
   ],

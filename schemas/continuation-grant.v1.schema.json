@@ -13,7 +13,14 @@
     "actor": { "type": "string", "minLength": 1 },
     "reason": { "type": "string", "minLength": 1 },
     "expectedRevision": { "type": "string", "minLength": 1 },
-    "expiresAt": { "type": "string", "format": "date-time" }
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "idempotencyKey": { "type": ["string", "null"], "minLength": 1 },
+    "status": { "enum": ["GRANTED", "RUNNING", "WORKER_COMPLETED", "COMPLETED"] },
+    "correctionRunId": { "type": ["string", "null"] },
+    "operatorMessageId": { "type": ["string", "null"] },
+    "completedAt": { "type": ["string", "null"], "format": "date-time" },
+    "resultState": { "type": ["string", "null"] },
+    "reviewVerdict": { "type": ["string", "null"] }
   },
   "additionalProperties": true
 }
