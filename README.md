@@ -87,6 +87,8 @@ node bin/clew.js task history DEMO-1 --stage worker --attempt 1
 node bin/clew.js retry DEMO-1 worker --actor your-name --reason "rerun after inspection"
 node bin/clew.js verify DEMO-1 --revision <worker-sha> --actor your-name
 node bin/clew.js task result DEMO-1 --human
+node bin/clew.js task usage DEMO-1 --human
+node bin/clew.js pricing sync --url https://pricing.example/catalog.json --source provider-catalog
 node bin/clew.js complete DEMO-1 --revision <worker-sha> --actor your-name
 node bin/clew.js export DEMO-1 --dir /tmp/clew-export
 node bin/clew.js cleanup --retention-days 7
@@ -99,6 +101,8 @@ node bin/clew.js worktree prune
 `worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
 
 `task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
+
+Each completed native turn records reported token usage when the harness exposes it. `task usage` aggregates the complete task lifecycle, including retries and Deep stages. Missing provider data remains `unknown` or `partial`; Clew never estimates tokens or silently treats them as zero. Pricing is synced by an external cron via configured JSON endpoints (`pricing.sources`) or an explicit `--url`; every successful sync is an immutable catalog snapshot.
 
 Telemetry is optional and disabled by default. `telemetry install` installs the official OpenTelemetry trace runtime under `.clew/telemetry`; enable it with `CLEW_TELEMETRY_ENABLED=true` or project configuration, then point the official OTLP exporter at Phoenix or another collector with `OTEL_EXPORTER_OTLP_ENDPOINT`. Collector failures are reported as diagnostics and never change task state.
 

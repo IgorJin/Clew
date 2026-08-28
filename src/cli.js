@@ -68,6 +68,9 @@ function printResult(result, args) {
   console.log(`Evidence: ${result.evidence.length} item(s)`);
   console.log(`Acceptance coverage: ${result.evidenceCoverage.join(', ') || 'none'}`);
   console.log(`Workspace: ${result.workspace ?? 'not available'}`);
+  console.log(
+    `Usage: ${result.usage?.status ?? 'unknown'} ${JSON.stringify(result.usage?.total ?? {})}`,
+  );
 }
 function printHumanHistory(history) {
   console.log(`Task: ${history.taskId}`);
@@ -122,6 +125,7 @@ function printHelp() {
   console.log('  clew export TASK --dir DIR [--revision SHA]');
   console.log('  clew cleanup [--retention-days N]');
   console.log('  clew telemetry install | status');
+  console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
 }
 
 export async function main(args) {
@@ -201,6 +205,29 @@ export async function main(args) {
 
       return printResult(store.getResultManifest(rest[0]), rest);
     }
+    if (command === 'task' && subcommand === 'usage') {
+      const taskId = rest[0];
+
+      if (!taskId) throw new Error('task id is required');
+      const attemptValue = getOptionValue(rest, '--attempt');
+      const attempt = attemptValue === undefined ? null : Number(attemptValue);
+
+      if (attempt !== null && (!Number.isInteger(attempt) || attempt < 1))
+        throw new Error('--attempt must be a positive integer');
+      store.refreshUsageCosts(taskId);
+      const filters = { stageId: getOptionValue(rest, '--stage', null), attempt };
+      const summary = store.getUsageSummary(taskId, filters);
+
+      if (rest.includes('--human')) {
+        console.log(
+          `Task: ${taskId}\nStatus: ${summary.status}\nTurns: ${summary.turns}\nPriced: ${summary.pricedTurns}\nTotal: ${JSON.stringify(summary.total)}`,
+        );
+
+        return;
+      }
+
+      return printJson({ taskId, ...summary, records: store.listUsage(taskId, filters) });
+    }
     if (command === 'task' && subcommand === 'history') {
       const taskId = rest[0];
 
@@ -230,6 +257,39 @@ export async function main(args) {
       if (!plan) throw new Error(`plan not found for task ${subcommand}`);
 
       return printJson({ ...plan, approvals: store.listApprovals(subcommand) });
+    }
+    if (command === 'pricing' && subcommand === 'sync') {
+      const url = getOptionValue(rest, '--url');
+      const source = getOptionValue(rest, '--source', 'configured');
+      const provider = getOptionValue(rest, '--provider', null);
+      const sources = url ? [{ source, provider, url }] : (config.pricing?.sources ?? []);
+
+      if (!sources.length)
+        throw new Error(
+          'no pricing sources configured; pass --url URL or configure pricing.sources',
+        );
+      const synced = [];
+
+      for (const item of sources) {
+        const response = await fetch(item.url);
+
+        if (!response.ok)
+          throw new Error(
+            `pricing source ${item.source ?? item.url} failed: HTTP ${response.status}`,
+          );
+        const body = await response.json();
+
+        synced.push(
+          store.recordPricingSnapshot({
+            source: item.source ?? item.url,
+            provider: item.provider ?? provider,
+            currency: body.currency ?? item.currency ?? 'USD',
+            catalog: body.catalog ?? body.prices ?? body,
+          }),
+        );
+      }
+
+      return printJson({ synced, count: synced.length });
     }
     if (command === 'approve' || command === 'reject') {
       const id = subcommand;

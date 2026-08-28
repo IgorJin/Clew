@@ -11,6 +11,7 @@
     "attempts": { "type": "array" },
     "evidence": { "type": "array" },
     "revision": { "type": ["string", "null"] },
-    "completion": { "type": ["object", "null"] }
+    "completion": { "type": ["object", "null"] },
+    "usage": { "type": "object" }
   }
 }

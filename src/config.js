@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   openCodeUrl: 'http://127.0.0.1:4096',
   worktreeRoot: '.clew/worktrees',
   models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
+  pricing: Object.freeze({ sources: [] }),
   observability: Object.freeze({
     enabled: false,
     serviceName: 'clew',
@@ -77,6 +78,11 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
       ...(env.CLEW_ARCHITECT_MODEL ? { architect: env.CLEW_ARCHITECT_MODEL } : {}),
       ...(env.CLEW_REVIEW_MODEL ? { reviewer: env.CLEW_REVIEW_MODEL } : {}),
       ...(env.CLEW_QA_MODEL ? { qa: env.CLEW_QA_MODEL } : {}),
+    },
+    pricing: {
+      ...DEFAULT_CONFIG.pricing,
+      ...(userConfig.pricing ?? {}),
+      ...(projectConfig.pricing ?? {}),
     },
   };
 

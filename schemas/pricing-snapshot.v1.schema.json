@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/pricing-snapshot.v1.schema.json",
+  "type": "object",
+  "required": ["source", "currency", "catalog", "fetchedAt", "effectiveFrom", "checksum"],
+  "properties": {
+    "source": { "type": "string", "minLength": 1 },
+    "provider": { "type": ["string", "null"] },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "catalog": { "type": "object" },
+    "fetchedAt": { "type": "string", "format": "date-time" },
+    "effectiveFrom": { "type": "string", "format": "date-time" },
+    "checksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}
