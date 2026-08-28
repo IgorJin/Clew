@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
+import { extractUsage } from './usage.js';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -120,6 +121,7 @@ export class FakeHarness {
     approval = null,
     verification = null,
     skippedChecks = [],
+    usage = null,
   } = {}) {
     this.delayMs = delayMs;
     this.events = events;
@@ -127,6 +129,7 @@ export class FakeHarness {
     this.approval = approval;
     this.verification = verification;
     this.skippedChecks = skippedChecks;
+    this.usage = usage;
     this.runCount = 0;
   }
 
@@ -214,6 +217,7 @@ export class FakeHarness {
       verification,
       rationale: 'Deterministic fake harness completed its scripted verification',
       skippedChecks: this.skippedChecks,
+      usage: this.usage,
     };
   }
 }
@@ -394,6 +398,7 @@ export class CodexHarness {
                 params.turn?.output ??
                 parseAgentMessageOutput(finalAgentMessage) ??
                 params,
+              usage: extractUsage(params.turn ?? params),
             },
             HARNESS_EVENT_TYPE.HARNESS_COMPLETED,
           );
@@ -679,6 +684,7 @@ export class OpenCodeHarness {
         sessionId,
         turnId,
         verification: this.extractVerification(responseBody),
+        usage: extractUsage(responseBody),
         output: responseBody,
       };
     } catch (error) {
@@ -835,7 +841,13 @@ export class OpenCodeHarness {
             onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId, turnId });
             controller.abort();
 
-            return { sessionId, turnId, verification, output: output.join('') };
+            return {
+              sessionId,
+              turnId,
+              verification,
+              usage: extractUsage(properties),
+              output: output.join(''),
+            };
           }
           onEvent({
             type: HARNESS_EVENT_TYPE.HARNESS_EVENT,
@@ -860,7 +872,13 @@ export class OpenCodeHarness {
           onEvent({ type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED, sessionId, turnId });
           controller.abort();
 
-          return { sessionId, turnId, verification, output: output.join('') };
+          return {
+            sessionId,
+            turnId,
+            verification,
+            usage: extractUsage(properties),
+            output: output.join(''),
+          };
         } else if (event.type !== 'server.connected') {
           onEvent({
             type: HARNESS_EVENT_TYPE.HARNESS_EVENT,

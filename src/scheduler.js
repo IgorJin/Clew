@@ -172,6 +172,18 @@ export class Scheduler {
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
       });
 
+      this.store.recordUsage({
+        ...(result.usage ?? {}),
+        taskId,
+        runId,
+        stageId: 'worker',
+        attempt,
+        sessionId: result.sessionId,
+        turnId: result.turnId,
+        harness: harnessName,
+        model: this.adapterConfig.models?.worker ?? null,
+      });
+
       this.assertVerificationPassed(result.verification);
       this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
       const status = this.workspaceManager.getWorktreeStatus(workspace.path);
@@ -939,6 +951,18 @@ export class Scheduler {
         model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
         runtimeNamespace: run.runtimeNamespace,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, signal),
+      });
+
+      this.store.recordUsage({
+        ...(result.usage ?? {}),
+        taskId,
+        runId,
+        stageId: stage.id,
+        attempt,
+        sessionId: result.sessionId,
+        turnId: result.turnId,
+        harness: harnessName,
+        model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
       });
 
       this.assertVerificationPassed(result.verification);

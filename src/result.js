@@ -45,6 +45,7 @@ export function buildResultManifest(store, taskId, { cwd = process.cwd(), revisi
     decisions: store.listOperatorActions(taskId),
     skippedChecks: verifications.flatMap((report) => report.skippedChecks ?? []),
     knownLimitations: [],
+    usage: store.refreshUsageCosts(taskId),
     generatedAt: new Date().toISOString(),
   };
   const checksum = createHash('sha256').update(JSON.stringify(manifest)).digest('hex');

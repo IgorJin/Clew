@@ -36,3 +36,7 @@ Prune skips active and dirty worktrees. Explicit removal of a dirty worktree req
 ## Telemetry is unavailable
 
 Telemetry is optional. Run `node bin/clew.js telemetry install`, set `CLEW_TELEMETRY_ENABLED=true`, and configure `OTEL_EXPORTER_OTLP_ENDPOINT` when an OTLP collector is available. A missing or unavailable collector does not block task execution; inspect `node bin/clew.js telemetry status` and `node bin/clew.js doctor` for the local state.
+
+## Usage or cost is unknown
+
+Run `node bin/clew.js task usage TASK --human`. Unknown usage means the native harness did not report token counters; partial means only some counters were reported. Configure a provider catalog and run `node bin/clew.js pricing sync`, preferably from an external daily cron. Historical snapshots are retained, so a later price change does not rewrite an already calculated lifecycle total.

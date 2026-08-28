@@ -15,6 +15,7 @@ import {
 import { applyMigrations } from './migrations.js';
 import { redactSecrets } from './security.js';
 import { evaluateEvidence, verificationEnvironment } from './trust.js';
+import { aggregateUsage, calculateUsageCost, normalizeUsage, snapshotChecksum } from './usage.js';
 
 export class Store {
   constructor(file) {
@@ -284,6 +285,133 @@ export class Store {
       .prepare(`SELECT * FROM runs WHERE ${conditions.join(' AND ')} ORDER BY rowid`)
       .all(...params)
       .map(parseRun);
+  }
+  recordUsage(input) {
+    const usage = normalizeUsage(input, input);
+
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO usage_records
+      (id,idempotency_key,task_id,run_id,stage_id,attempt,session_id,turn_id,provider,harness,model,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,reasoning_tokens,completeness,source,recorded_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        usage.id,
+        usage.idempotencyKey,
+        usage.taskId,
+        usage.runId,
+        usage.stageId,
+        usage.attempt,
+        usage.sessionId,
+        usage.turnId,
+        usage.provider,
+        usage.harness,
+        usage.model,
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.cacheReadTokens,
+        usage.cacheWriteTokens,
+        usage.reasoningTokens,
+        usage.completeness,
+        usage.source,
+        usage.recordedAt,
+      );
+
+    return this.listUsage(input.taskId).find(
+      (item) => item.idempotency_key === usage.idempotencyKey,
+    );
+  }
+  listUsage(taskId, { stageId = null, attempt = null } = {}) {
+    const conditions = ['task_id=?'];
+    const params = [taskId];
+
+    if (stageId !== null) {
+      conditions.push('stage_id=?');
+      params.push(stageId);
+    }
+    if (attempt !== null) {
+      conditions.push('attempt=?');
+      params.push(attempt);
+    }
+
+    return this.db
+      .prepare(
+        `SELECT * FROM usage_records WHERE ${conditions.join(' AND ')} ORDER BY recorded_at, id`,
+      )
+      .all(...params);
+  }
+  recordPricingSnapshot({
+    source,
+    provider = null,
+    currency = 'USD',
+    catalog,
+    fetchedAt = new Date().toISOString(),
+    effectiveFrom = fetchedAt,
+  }) {
+    const checksum = snapshotChecksum(catalog);
+    const id = randomUUID();
+
+    this.db
+      .prepare(
+        'INSERT OR IGNORE INTO pricing_snapshots (id,source,provider,currency,catalog,fetched_at,effective_from,checksum) VALUES (?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        id,
+        source,
+        provider,
+        currency,
+        JSON.stringify(catalog),
+        fetchedAt,
+        effectiveFrom,
+        checksum,
+      );
+
+    return this.db.prepare('SELECT * FROM pricing_snapshots WHERE checksum=?').get(checksum);
+  }
+  listPricingSnapshots() {
+    return this.db
+      .prepare('SELECT * FROM pricing_snapshots ORDER BY fetched_at DESC')
+      .all()
+      .map((row) => ({ ...row, catalog: JSON.parse(row.catalog) }));
+  }
+  refreshUsageCosts(taskId) {
+    const records = this.listUsage(taskId);
+    const snapshots = this.listPricingSnapshots();
+
+    for (const record of records) {
+      const snapshot = snapshots.find((item) => item.currency === 'USD') ?? snapshots[0];
+      const usage = {
+        ...record,
+        input_tokens: record.input_tokens,
+        output_tokens: record.output_tokens,
+      };
+      const cost = calculateUsageCost(usage, snapshot);
+
+      this.db
+        .prepare(
+          'INSERT OR REPLACE INTO usage_costs (usage_id,pricing_snapshot_id,amount,currency,status,calculated_at) VALUES (?,?,?,?,?,?)',
+        )
+        .run(
+          record.id,
+          snapshot?.id ?? null,
+          cost.amount,
+          cost.currency,
+          cost.status,
+          new Date().toISOString(),
+        );
+    }
+
+    return this.getUsageSummary(taskId);
+  }
+  getUsageSummary(taskId, filters = {}) {
+    const records = this.listUsage(taskId, filters);
+    const costs = this.db
+      .prepare(
+        `SELECT c.* FROM usage_costs c JOIN usage_records u ON u.id=c.usage_id WHERE u.task_id=?`,
+      )
+      .all(taskId);
+
+    return aggregateUsage(records, costs);
   }
   listAllRuns() {
     return this.db.prepare('SELECT * FROM runs ORDER BY rowid').all().map(parseRun);
@@ -571,6 +699,7 @@ export class Store {
       review: this.latestReview(taskId),
       workspace: latestCompletedRun?.workspace ?? latestVerification?.workspace ?? null,
       completion: this.getCompletion(taskId),
+      usage: this.refreshUsageCosts(taskId),
     };
 
     return validateResultManifest(manifest);

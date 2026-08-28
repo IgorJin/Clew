@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/usage-record.v1.schema.json",
+  "type": "object",
+  "required": ["taskId", "runId", "stageId", "attempt", "harness", "completeness", "source"],
+  "properties": {
+    "taskId": { "type": "string", "minLength": 1 },
+    "runId": { "type": "string", "minLength": 1 },
+    "stageId": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "harness": { "type": "string", "minLength": 1 },
+    "model": { "type": ["string", "null"] },
+    "completeness": { "enum": ["complete", "partial", "unknown"] },
+    "source": { "enum": ["reported", "derived", "unknown"] }
+  }
+}
