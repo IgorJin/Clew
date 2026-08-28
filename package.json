@@ -1,6 +1,6 @@
 {
   "name": "clew",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A local task-centric control plane for native AI coding harnesses",
   "type": "module",
   "bin": {
@@ -21,7 +21,11 @@
     "DONE.md",
     "RELEASE.md",
     "RELEASE-0.2.md",
+    "RELEASE-0.3.md",
+    "ROADMAP.md",
+    "VISION.md",
     "spec.md",
+    "tasks/",
     "tasks.md"
   ],
   "scripts": {
@@ -29,10 +33,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "check": "npm run format:check && npm run lint && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/compatibility.js && node --check src/config.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
+    "tasks:check": "node scripts/check-task-cards.js",
+    "check": "npm run format:check && npm run lint && npm run tasks:check && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/compatibility.js && node --check src/config.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
     "smoke:codex": "node scripts/live-adapter-smoke.js codex",
     "smoke:codex-roles": "node scripts/live-codex-roles-smoke.js",
     "smoke:opencode": "node scripts/live-adapter-smoke.js opencode",
+    "acceptance:installed": "node scripts/installed-package-acceptance.js",
     "start": "node bin/clew.js"
   },
   "engines": {

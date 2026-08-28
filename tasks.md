@@ -1,12 +1,14 @@
 # Clew — implementation backlog
 
-**Status:** v0.2.0 released; v0.3.0 planned
+**Status:** v0.2.0 released; CLEW-042 and CLEW-043 implemented on `main`; CLEW-067 remains for v0.3.0
 
-**Source:** [`spec.md`](./spec.md)
+**Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Target:** Clew v0.3.0
+**Active target:** Clew v0.3.0; v0.4 and v0.5 are planned in [`ROADMAP.md`](./ROADMAP.md)
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
+
+Detailed cards and canonical status fields for the active roadmap horizon are maintained in [`tasks/`](./tasks/README.md).
 
 ## Conventions
 
@@ -29,7 +31,7 @@ This backlog is ordered by risk reduction and vertical product value. A task is 
 | `CLEW-029–036` | Complete | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
 | `CLEW-037–041` | Complete | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
 
-All work selected for v0.1 and v0.2 is complete. Deferred stable IDs `CLEW-042` and `CLEW-043` now form the first two v0.3 work packages; `CLEW-045`–`048` remain later backlog.
+All work selected for v0.1 and v0.2 is complete. `CLEW-042` and `CLEW-043` are implemented on `main`; `CLEW-067` is the remaining v0.3 release package. Later release outcomes are maintained in `ROADMAP.md`.
 
 ## Milestone 0 — Repository foundation
 
@@ -193,6 +195,8 @@ Recommended first batch: `CLEW-049`, `CLEW-053`, and `CLEW-055`. The lifecycle c
 
 v0.3 is deliberately compressed into three substantial work packages. Detailed scope, negative cases, data contracts, candidate gates, and release decisions are in [`RELEASE-0.3.md`](./RELEASE-0.3.md).
 
+Implementation status: `CLEW-042` and `CLEW-043` are complete on `main`; `CLEW-067` is next.
+
 | ID       | Pri | Size | Work package                                        | Depends on | Done when                                                                                                                                                                                                                                                                |
 | -------- | --- | ---- | --------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | CLEW-042 | P1  | L    | Observability contract and OTLP/Phoenix integration | 066        | Versioned correlation contracts, persisted trace identity, lifecycle spans, bounded OTLP export, strict attribute allowlisting, restart idempotency, diagnostics, fake-collector acceptance, and an optional Phoenix smoke are reproducible.                             |
@@ -205,11 +209,48 @@ Critical path:
 CLEW-042 → CLEW-043 → CLEW-067
 ```
 
-Recommended first slice: implement the `CLEW-042` contracts, persisted correlation, and fake collector failure matrix before adding a live backend or broad span coverage.
+Next slice: complete `CLEW-067` and publish `v0.3.0` before starting the local daemon work in `ROADMAP.md`.
+
+## v0.4 plan — Local control plane UX
+
+The detailed API boundaries, negative cases, ownership split, and release gates are in [`ROADMAP.md`](./ROADMAP.md). `CLEW-068` is the contract-first gate; `CLEW-069`–`073` are intentionally parallelizable.
+
+| ID       | Pri | Size | Work package                           | Depends on | Done when                                                                                                                                                        |
+| -------- | --- | ---- | -------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-068 | P0  | M    | Local control plane contracts          | 067        | Versioned API, stream, Thread, continuation, Session Surface, migration, and fixture contracts let every parallel package build without implementation coupling. |
+| CLEW-069 | P0  | L    | Local daemon and API server            | 068        | Explicit loopback daemon owns SQLite/Scheduler, authenticates local clients, streams events, serves existing CLI operations, and recovers without duplicates.    |
+| CLEW-070 | P0  | M    | Task Thread projection                 | 068        | Append-only events rebuild into a deterministic causal Thread with stable cursors, operator messages, structured results, and a separate diagnostic view.        |
+| CLEW-071 | P1  | L    | React Web UI                           | 068        | React/TypeScript/Vite UI works fixture-first, then shows Tasks, Thread, Runs, findings, attention, completion, Continue, and Open Session through stable APIs.   |
+| CLEW-072 | P1  | L    | Native Session Surface                 | 068        | A plain terminal opens the correct Codex session/workspace without duplicating execution; unsupported surfaces degrade through explicit capabilities.            |
+| CLEW-073 | P0  | M    | Continue and review exhaustion handoff | 068        | Durable continuation, bounded review corrections, `WAITING_FOR_HUMAN`, one-cycle operator grants, and completion override semantics survive restart.             |
+| CLEW-074 | P0  | L    | v0.4 upgrade, acceptance, and release  | 069–073    | Installed daemon/API/UI/session/continuation acceptance passes from a v0.3 upgrade and clean tarball; CI and `v0.4.0` release evidence are reproducible.         |
+
+Parallel batch after `CLEW-068`:
+
+```text
+CLEW-069 + CLEW-070 + CLEW-071 + CLEW-072 + CLEW-073
+```
+
+Ownership boundaries minimize merge conflicts:
+
+- `CLEW-069`: daemon runtime and transport;
+- `CLEW-070`: Thread read model and query boundary;
+- `CLEW-071`: isolated `ui/` workspace;
+- `CLEW-072`: Session Surface and terminal adapters;
+- `CLEW-073`: domain, Store, Scheduler, and CLI continuation workflow.
+
+## v0.5 plan — Self-hosted Controller and paired Runner
+
+| ID       | Pri | Size | Work package                                | Depends on | Done when                                                                                                                                                              |
+| -------- | --- | ---- | ------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-075 | P1  | L    | Controller/Runner split                     | 074        | One paired Runner uses authenticated outbound transport, leases Stages idempotently, and keeps repositories, host access, and credentials local.                       |
+| CLEW-076 | P1  | L    | Docker packaging and self-hosted acceptance | 075        | Docker Controller/UI plus installed local Runner survive pairing, reconnect, upgrade, backup/restore, and clean self-hosted acceptance without privileged host mounts. |
 
 ## Later backlog
 
 These items stay outside v0.2 until usage provides a concrete trigger.
+
+`CLEW-045` is superseded by the focused React Web UI package `CLEW-071`. `CLEW-047` is superseded by the local daemon and later Controller/Runner packages `CLEW-069` and `CLEW-075`. Stable IDs remain in this historical backlog.
 
 | ID       | Pri | Task                                               | Trigger                                                                                  |
 | -------- | --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |

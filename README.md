@@ -113,7 +113,10 @@ Role-specific models can be selected with `models.worker`, `models.architect`, `
 ## Release evidence
 
 - [`spec.md`](./spec.md) — product and technical contract;
+- [`VISION.md`](./VISION.md) — long-term product direction and target architecture;
+- [`ROADMAP.md`](./ROADMAP.md) — release outcomes and planned work packages;
 - [`tasks.md`](./tasks.md) — implementation record and current backlog;
+- [`tasks/`](./tasks/) — detailed active/planned task cards and canonical status fields;
 - [`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md) — mapping of all ten acceptance criteria;
 - [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
 - [`RELEASE-0.2.md`](./RELEASE-0.2.md) — v0.2 scope and release gates;

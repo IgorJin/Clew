@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0
+
+- Added optional OpenTelemetry trace export with persisted correlation, redaction, bounded failure handling, and disabled-by-default behavior.
+- Added provider-reported usage normalization, idempotent lifecycle aggregation, immutable pricing provenance, and explicit unknown/partial cost states.
+- Added v0.2 migration coverage for completion and evidence history plus a clean installed-package Quick, Standard, and Deep acceptance script.
+- Documented v0.3 configuration, compatibility, troubleshooting, security boundaries, and release verification.
+
 ## 0.2.0
 
 - Added deterministic runtime namespaces persisted per run.

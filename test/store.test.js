@@ -133,7 +133,7 @@ test('invalidates READY when persisted verification environment becomes stale', 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('upgrades a populated v0.1 database without losing task history', () => {
+test('upgrades a populated v0.2 database without losing task history, completion, or evidence', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-store-migration-'));
   const databaseFile = join(dir, 'state.sqlite');
   const legacyDatabase = new DatabaseSync(databaseFile);
@@ -163,7 +163,8 @@ test('upgrades a populated v0.1 database without losing task history', () => {
       started_at TEXT,
       finished_at TEXT,
       profile TEXT,
-      policy TEXT
+      policy TEXT,
+      runtime_namespace TEXT
     );
     CREATE TABLE events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -174,16 +175,39 @@ test('upgrades a populated v0.1 database without losing task history', () => {
       version INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+    CREATE TABLE operator_actions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      stage_id TEXT,
+      attempt INTEGER,
+      actor TEXT NOT NULL,
+      reason TEXT,
+      expected_revision TEXT,
+      at TEXT NOT NULL
+    );
+    CREATE TABLE completions (
+      task_id TEXT PRIMARY KEY,
+      expected_revision TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      note TEXT,
+      actor TEXT NOT NULL,
+      at TEXT NOT NULL,
+      manifest TEXT NOT NULL
+    );
     INSERT INTO schema_migrations(version, applied_at)
       VALUES (1, '2026-01-01T00:00:00.000Z'), (2, '2026-01-01T00:00:00.000Z'),
         (3, '2026-01-01T00:00:00.000Z'), (4, '2026-01-01T00:00:00.000Z'),
         (5, '2026-01-01T00:00:00.000Z'), (6, '2026-01-01T00:00:00.000Z'),
-        (7, '2026-01-01T00:00:00.000Z');
+        (7, '2026-01-01T00:00:00.000Z'), (8, '2026-01-01T00:00:00.000Z'),
+        (9, '2026-01-01T00:00:00.000Z');
     INSERT INTO tasks VALUES ('LEGACY-1', '{"id":"LEGACY-1","title":"Legacy","goal":"Preserve","acceptance":[{"id":"AC-1","criterion":"works"}],"profile":"quick","base_ref":"HEAD"}', 'READY', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     INSERT INTO stages VALUES ('LEGACY-1', 'worker', 'COMPLETED', '[]');
     INSERT INTO plans VALUES ('LEGACY-1', 1, '{"stages":[{"id":"worker","dependsOn":[]}]}', 'APPROVED', '2026-01-01T00:00:00.000Z');
-    INSERT INTO runs VALUES ('legacy-run', 'LEGACY-1', 'worker', 1, 'COMPLETED', 'fake', 'legacy-session', 'legacy-turn', 'legacy-worktree', 'abc123', '2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', 'quick', '{"maxAttempts":3}');
+    INSERT INTO runs VALUES ('legacy-run', 'LEGACY-1', 'worker', 1, 'COMPLETED', 'fake', 'legacy-session', 'legacy-turn', 'legacy-worktree', 'abc123', '2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', 'quick', '{"maxAttempts":3}', '"clew-legacy-runtime"');
     INSERT INTO events(task_id, type, payload, at) VALUES ('LEGACY-1', 'TASK_CREATED', '{"legacy":true}', '2026-01-01T00:00:00.000Z');
+    INSERT INTO operator_actions VALUES ('legacy-action', 'LEGACY-1', 'VERIFY', 'worker', 1, 'legacy-user', 'legacy evidence', 'abc123', '2026-01-01T00:02:00.000Z');
+    INSERT INTO completions VALUES ('LEGACY-1', 'abc123', 'accept', 'legacy completion', 'legacy-user', '2026-01-01T00:03:00.000Z', '{"taskId":"LEGACY-1","revision":"abc123"}');
   `);
   legacyDatabase.close();
 
@@ -214,6 +238,8 @@ test('upgrades a populated v0.1 database without losing task history', () => {
   assert.equal(store.getTask('LEGACY-1').contract.title, 'Legacy');
   assert.equal(store.listRuns('LEGACY-1')[0].session_id, 'legacy-session');
   assert.equal(store.listEvents('LEGACY-1')[0].type, 'TASK_CREATED');
+  assert.equal(store.listOperatorActions('LEGACY-1')[0].actor, 'legacy-user');
+  assert.equal(store.getCompletion('LEGACY-1').expected_revision, 'abc123');
   assert.equal(
     store.db
       .prepare(

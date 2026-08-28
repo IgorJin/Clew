@@ -1,183 +1,142 @@
 # Clew — Product and Technical Specification
 
-**Status:** v0.1 final
+**Implementation baseline:** current `main`
 
-**Product type:** local, task-centric control plane for AI-assisted software development
+**Package version:** `0.2.0` with unreleased v0.3 work already present on `main`
+
+**Product type:** local, task-centric control plane for native coding harnesses
 
 **Positioning:** _Bring your harness. Clew keeps the thread._
 
+This document describes behavior implemented on `main`. Future product direction belongs in [`VISION.md`](./VISION.md); release sequencing belongs in [`ROADMAP.md`](./ROADMAP.md).
+
 ## 1. Summary
 
-Clew coordinates the lifecycle of a software-development task across native AI coding harnesses, Git workspaces, verification, review, retries, and human approvals.
+Clew coordinates a software-development Task across native coding harnesses, Git workspaces, plans, stages, retries, review, verification records, operator decisions, result export, optional telemetry, and usage accounting.
 
-Clew is not an AI coding agent and does not implement its own agent loop. Codex, OpenCode, and future harnesses retain control of their native tools, context management, shell and browser behavior, approvals, sandboxing, and verification. Clew supplies the layer above them: one durable task thread that explains what is running, where it is running, what evidence was produced, why a retry occurred, and whether a human action is required.
+The primary product object is a **Task**, not an agent session. A Task keeps a durable relationship between its contract, native sessions and turns, worktrees, runs, revisions, observed checks, reviews, interruptions, operator actions, and completion decision.
 
-The primary product object is a **Task**, not an agent session.
+Clew does not implement a coding agent or LLM tool loop. Codex and OpenCode retain control of their native tools, context, shell behavior, browser behavior, approvals, sandbox, and code-editing strategy.
 
-## 2. Problem
+## 2. Current product boundary
 
-AI-assisted development is currently session-centric. A single feature or fix may span:
+Clew currently owns:
 
-- one or more Codex/OpenCode sessions;
-- branches and Git worktrees;
-- planning and architecture decisions;
-- test, type-check, build, and browser evidence;
-- retries and reviewer feedback;
-- CI, pull request, and human approval state.
+- durable Task contracts and lifecycle state;
+- Quick, Standard, and Deep execution profiles;
+- native Codex and OpenCode adapter boundaries;
+- structured harness lifecycle events;
+- Git worktree creation, status, integration, retention, and safe cleanup;
+- Deep planning, approval-gated DAG execution, bounded parallelism, and integration;
+- native reviewer execution and bounded correction attempts;
+- recorded verification commands and structured worker rationale;
+- explicit interruption, retry, re-verification, export, and human completion;
+- append-only event history and restart reconciliation;
+- optional OpenTelemetry trace export;
+- provider-reported usage capture and pricing-based cost summaries.
 
-These artifacts do not form a coherent lifecycle. Developers must manually remember which session belongs to which requirement, which attempt failed, whether checks actually ran, and what currently needs attention.
+Clew does not currently provide:
 
-Clew turns those disconnected artifacts into one inspectable development task.
+- a daemon, HTTP API, or Web UI;
+- remote or multi-host runners;
+- an interactive native-session launcher;
+- formal QA orchestration or a claim that recorded checks prove product correctness;
+- a general Evidence Graph or quality-policy engine;
+- task memory or RAG;
+- cross-repository Tasks;
+- autonomous task intake or merge;
+- PR creation, CI control, or release orchestration.
 
-## 3. Product goals
+Final acceptance belongs to a human operator. `READY` is a mechanical Clew state; it is not a guarantee that independent QA has passed.
 
-Clew must:
+## 3. Core principles
 
-1. Preserve the native behavior of every supported coding harness.
-2. Represent a development task as a durable contract and lifecycle.
-3. Route stages to an appropriate harness and model independently.
-4. Support direct, isolated, and parallel execution profiles.
-5. Allocate and track native Git worktrees and branches.
-6. Normalize harness lifecycle and tool events into a common event model.
-7. Aggregate verification evidence without needlessly repeating harness work.
-8. Distinguish harness completion from task completion.
-9. Route failures and reviewer findings into explicit retry paths.
-10. Make human approvals policy-driven and visible.
-11. Preserve an auditable history of stages, sessions, attempts, evidence, decisions, and reviews.
+### 3.1 Task-centric lifecycle
 
-## 4. Non-goals
+The durable source of truth is a Task contract and its records, not conversation history. Sessions and turns are execution details linked to the Task.
 
-Clew must not become:
+### 3.2 Preserve native harnesses
 
-- a custom LLM coding loop;
-- a replacement for Codex, OpenCode, or their native tools;
-- a browser, shell, or Git implementation;
-- a stdout parser for interactive agent TUIs;
-- a general-purpose tracing UI;
-- a proprietary PR review engine;
-- a general RAG, memory, or issue-tracking platform;
-- an orchestration ceremony imposed on every small change.
-
-Third-party systems such as Phoenix, OpenChamber, OpenHands, Orca, and Beads may become optional integrations, but none is a critical dependency of v0.1.
-
-## 5. Core principles
-
-### 5.1 Task-centric lifecycle
-
-The source of truth is a task contract, not conversation history. Harness sessions, workspaces, attempts, commits, checks, reviews, and traces are related records within the task.
-
-### 5.2 Preserve native harnesses
-
-`model` and `harness` are separate routing dimensions. A model used through a generic runtime is not equivalent to the same model used through Codex or OpenCode.
-
-Initial integrations:
-
-- Codex through `codex app-server` and its structured lifecycle protocol;
-- OpenCode through its SDK/server API and event stream;
-- Git through non-interactive native Git commands.
-
-No harness-specific protocol object may escape its adapter into the Clew domain.
-
-### 5.3 Minimum necessary workflow
-
-Small tasks use a small pipeline. Architecture, scouting, parallel workers, independent completion judging, and mandatory review are enabled only by profile or policy.
-
-### 5.4 Evidence over claims
-
-Harness tool events are the authoritative record of what actually ran. An agent's structured verification report explains why it considers the evidence sufficient. Review decides whether that evidence satisfies the task contract.
-
-### 5.5 Human control by policy
-
-Approvals are explicit task states produced by policy, not ad hoc prompt conventions. Risky architecture decisions, dependency changes, and merges can require human gates.
-
-## 6. Users and primary use cases
-
-The initial user is a developer working locally with one or more AI coding harnesses.
-
-Primary use cases:
-
-1. Run a small change through one native Codex session and retain its task history.
-2. Run a normal feature in an isolated worktree, verify it, and optionally review it with a separate session/model.
-3. Plan a large task, approve a structured DAG, run independent stages in parallel worktrees, integrate them, and review the result.
-4. See why a stage retried and continue the correct native session with reviewer feedback.
-5. Determine at a glance whether the task is progressing, blocked, ready, or waiting for a human.
-
-## 7. Conceptual architecture
+Execution intelligence remains inside the selected harness:
 
 ```text
-                            Clew
-                              │
-                     Task contract/policy
-                              │
-                         Task scheduler
-                              │
-             ┌────────────────┴────────────────┐
-             │                                 │
-       Workspace layer                   Harness layer
-             │                                 │
-     GitWorktreeManager          ┌─────────────┴─────────────┐
-                                 │                           │
-                           CodexHarness                OpenCodeHarness
-                                 │                           │
-                         codex app-server             OpenCode SDK/server
-                                 └─────────────┬─────────────┘
-                                               │
-                                      normalized events
-                                               │
-                                  verification and review
-                                               │
-                                        task readiness
+execution intelligence → native harness
+task lifecycle          → Clew
 ```
 
-The initial implementation is a local Node.js ECMAScript-module application with runtime-validated boundaries, composed of:
+`harness` and `model` are separate routing dimensions. Running a model through Codex is not equivalent to running it through OpenCode or a generic model API.
 
-- a domain and application layer;
-- a small persistent scheduler;
-- a SQLite state store;
-- `CodexHarness` and `OpenCodeHarness` adapters;
-- `GitWorktreeManager`;
-- a CLI;
-- structured logs and an append-only task event history.
+### 3.3 Minimum necessary workflow
 
-A web dashboard is intentionally deferred until real usage reveals which task views are essential.
+Small Tasks use Quick. Standard adds isolation and review. Deep adds architecture, an approval-gated plan, a DAG, parallel worktrees, integration, and review.
 
-## 8. Domain model
+### 3.4 Durable history over hidden state
+
+Task transitions, stage transitions, attempts, approvals, findings, checks, revisions, interruptions, retries, exports, and completion are persisted. Restart recovery operates from durable state.
+
+### 3.5 Human acceptance
+
+Only an explicit operator action moves a Task from `READY` to `COMPLETED`. Completion pins a known result revision and is immutable in the current state machine.
+
+## 4. Current architecture
 
 ```text
-Project
-└── Task
-    ├── Contract
-    ├── Profile and Policy
-    ├── Plan
-    │   └── Stage[]
-    ├── StageRun[]
-    │   ├── HarnessSession
-    │   ├── Workspace
-    │   ├── Attempt[]
-    │   └── VerificationRun[]
-    ├── Decision[]
-    ├── HumanApproval[]
-    ├── Review[]
-    └── Event[]
+Clew CLI
+   │
+   ▼
+Scheduler / application layer
+   ├── SQLite Store and append-only events
+   ├── GitWorktreeManager
+   ├── CodexHarness
+   ├── OpenCodeHarness
+   ├── Architect and Reviewer adapters
+   ├── optional OpenTelemetry observer
+   └── usage and pricing accounting
 ```
 
-Required correlation identifiers:
+The implementation is a local Node.js ECMAScript-module application. SQLite state lives under `.clew/`; owned worktrees live under `.clew/worktrees/` unless configured otherwise.
 
-- `project_id`
-- `task_id`
-- `stage_id`
-- `stage_run_id`
-- `attempt_id`
-- `harness_session_id`
-- `workspace_id`
-- `trace_id`, when available
-- `commit_sha`, when available
+Harness protocol objects remain inside adapters. The scheduler and Store consume normalized Clew records.
 
-Identifiers are stable and never inferred from display names.
+## 5. Domain model
 
-## 9. Task contract
+```text
+Task
+├── Contract
+├── State
+├── Plan and approval decisions
+├── Stage[]
+│   └── Run[]
+│       ├── attempt number
+│       ├── harness session and turn
+│       ├── workspace and runtime namespace
+│       ├── result revision
+│       └── verification report
+├── Review[]
+├── OperatorAction[]
+├── Completion
+├── UsageRecord[] and CostRecord[]
+├── optional trace correlation
+└── Event[]
+```
 
-A task contract is the durable, versioned source of truth for execution and completion.
+A Run is the current durable representation of one Stage attempt. Attempt is not a separate entity.
+
+Stable identifiers include, where available:
+
+- `task_id`;
+- `stage_id`;
+- `run_id`;
+- `attempt`;
+- `session_id`;
+- `turn_id`;
+- `commit_sha`;
+- runtime namespace;
+- trace and span identifiers.
+
+## 6. Task contract
+
+A normalized contract requires `id`, `title`, `goal`, `profile`, and at least one acceptance criterion. It materializes `risk` and `base_ref` defaults before persistence.
 
 ```yaml
 id: AUTH-142
@@ -188,491 +147,273 @@ acceptance:
     criterion: A successful refresh issues a new refresh token.
   - id: AC-2
     criterion: The previous token becomes invalid.
-  - id: AC-3
-    criterion: Replaying the previous token returns HTTP 401.
-  - id: AC-4
-    criterion: Existing login behavior remains unchanged.
 risk: high
 profile: deep
 base_ref: main
+verification:
+  - command: npm test
+    args: []
 ```
 
-Minimum input fields are `id`, `title`, `goal`, at least one acceptance criterion, and `profile`. Normalization always materializes `risk` (default `medium`) and `base_ref` (default `HEAD`) before persistence.
+Acceptance IDs are stable references for worker reports and reviewer findings. Clew currently records their coverage but does not implement a general acceptance-policy or QA engine.
 
-Acceptance criteria have stable IDs so verification evidence and reviewer findings can reference them.
+## 7. Execution profiles
 
-## 10. Plans and stages
+Profiles express workflow depth. Execution mode is an internal policy dimension, so Parallel is not a separate user-facing profile.
 
-For deep tasks, an architect runs through a native harness in read-only mode and produces a plan conforming to a versioned JSON Schema.
-
-```json
-{
-  "parallelizable": true,
-  "stages": [
-    {
-      "id": "backend",
-      "goal": "Implement refresh-token persistence and rotation",
-      "dependsOn": []
-    },
-    {
-      "id": "api",
-      "goal": "Update the refresh endpoint",
-      "dependsOn": ["backend"]
-    },
-    {
-      "id": "integration",
-      "goal": "Integrate changes and run broad verification",
-      "dependsOn": ["api"]
-    }
-  ]
-}
-```
-
-Clew validates the schema, unique stage IDs, existing dependencies, and acyclicity before the plan can become runnable. A queued stage is runnable when all its dependencies have completed successfully and all applicable human gates are approved.
-
-Every parallel plan must end in an integration stage before final review.
-
-## 11. Task profiles
-
-### 11.1 Quick
-
-For small, local, low-risk work in a known area.
-
-```yaml
-profile: quick
-scout: false
-architecture: false
-execution:
-  mode: direct
-  harness: codex
-  model: luna
-review: optional
-```
-
-Flow: task → branch or current workspace → worker → targeted verification → ready/human review.
-
-### 11.2 Standard
-
-For a normal feature or bug fix that benefits from workspace isolation.
-
-```yaml
-profile: standard
-scout: auto
-architecture: false
-execution:
-  mode: isolated
-  harness: codex
-  model: luna
-review:
-  required: true
-  harness: codex
-  model: sol
-```
-
-Flow: task → isolated worktree → worker → verification → review → ready.
-
-### 11.3 Deep
-
-For large, cross-cutting, uncertain, or high-risk work.
-
-```yaml
-profile: deep
-scout: auto
-architecture:
-  required: true
-  harness: codex
-  model: sol
-  read_only: true
-  human_approval: true
-execution:
-  mode: parallel
-  max_workers: 3
-  harness: codex
-  model: luna
-qa:
-  harness: opencode
-  model: qwen-local
-integration:
-  required: true
-review:
-  required: true
-  harness: codex
-  model: sol
-```
-
-Flow: task → optional scout → architecture → plan approval → DAG workers → integration → review → ready.
-
-`scout: auto` enables discovery for an unknown repository area, unclear blast radius, legacy code, a bug without a known cause, or a cross-service change. It remains off for known, local changes.
-
-## 12. Lifecycle and state machines
-
-### 12.1 Task state
+### 7.1 Quick
 
 ```text
-DRAFT → PLANNING → PLAN_READY → QUEUED → EXECUTING
-                                      → VERIFYING
-                                      → REVIEWING
-                                      → READY
-                                      → COMPLETED
+Task → direct worker → targeted checks → READY
 ```
 
-Additional terminal or waiting states:
+Defaults:
 
-- `FAILED`
-- `CANCELLED`
-- `WAITING_FOR_HUMAN`
-- `BLOCKED`
+- Codex worker;
+- direct execution mode;
+- one worker;
+- no architecture stage;
+- no independent review;
+- at most three worker attempts.
 
-`READY` means all automated completion policy has passed and the task is ready for its configured final human action. `COMPLETED` means that final action has occurred or the profile does not require one.
-
-### 12.2 Stage run state
+### 7.2 Standard
 
 ```text
+Task → isolated worktree → worker → targeted checks → reviewer
+     → correction when requested → READY or FAILED
+```
+
+Defaults:
+
+- Codex worker and reviewer;
+- isolated execution mode;
+- one worker at a time;
+- no architecture stage;
+- structured independent review;
+- at most three worker attempts in total.
+
+Blocking review findings are returned to the worker while the attempt limit permits another run.
+
+### 7.3 Deep
+
+```text
+Task → read-only architect → schema-valid plan → human approval
+     → bounded parallel stage runs → integration → broad checks
+     → reviewer → READY or routed failure
+```
+
+Defaults:
+
+- Codex architect, workers, and reviewer;
+- parallel execution mode with at most three workers;
+- a validated acyclic DAG;
+- explicit plan approval;
+- isolated worktrees and commit integration;
+- broad verification scope;
+- independent review.
+
+## 8. Lifecycle
+
+Implemented Task states:
+
+```text
+DRAFT
+PLAN_READY
 QUEUED
-  → RUNNING
-  → HARNESS_FINISHED
-  → VERIFYING
-  → REVIEWING
-  → COMPLETED
+RECOVERING
+EXECUTING
+VERIFYING
+REVIEWING
+WAITING_FOR_HUMAN
+READY
+COMPLETED
+FAILED
+CANCELLED
+BLOCKED
 ```
 
-Feedback paths:
+The common successful path is:
 
 ```text
-VERIFYING → RETRYING → RUNNING
-REVIEWING → CHANGES_REQUESTED → RETRYING → RUNNING
+DRAFT → QUEUED → EXECUTING → VERIFYING
+      → REVIEWING when configured
+      → READY → COMPLETED
 ```
 
-`HARNESS_FINISHED` only means the native harness completed its turn. It never implies that the stage or task satisfies the contract.
+Deep planning may pass through `PLAN_READY` and `WAITING_FOR_HUMAN` before execution. Restart reconciliation uses `RECOVERING`.
 
-All state changes are validated domain transitions and emit immutable task events.
+`READY` currently means the configured automated execution path produced passing recorded verification and any configured review passed. It means the result is ready for operator inspection; it is not independent QA certification.
 
-## 13. Harness abstraction
+`COMPLETED` requires an explicit operator, a known current result revision, and a completion record. `COMPLETED` has no outgoing transition.
 
-```ts
-interface CodingHarness {
-  startSession(options: SessionOptions): Promise<HarnessSession>;
-  run(sessionId: string, input: HarnessInput): Promise<HarnessTurn>;
-  send(sessionId: string, message: string): Promise<void>;
-  subscribe(sessionId: string): AsyncIterable<ClewHarnessEvent>;
-  interrupt(sessionId: string): Promise<void>;
-}
+Implemented Stage states are `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `BLOCKED`, and `CANCELLED`. Implemented Run states are `RUNNING`, `COMPLETED`, `FAILED`, and `INTERRUPTED`.
+
+## 9. Harness integrations
+
+### 9.1 Codex
+
+Codex runs through `codex app-server` over its structured protocol. Clew starts or resumes a thread, starts a turn, handles native approvals, consumes item and lifecycle events, requests interruption through the protocol, and persists thread/turn identity.
+
+`turn/completed` means one harness turn finished. It does not mean the Task is completed.
+
+### 9.2 OpenCode
+
+OpenCode runs through its HTTP server and event stream. Clew creates or resumes a session, submits a prompt, consumes session/tool/permission events, handles abort, and persists session/message identity.
+
+### 9.3 Normalized events
+
+The adapter boundary emits normalized events such as:
+
+```text
+SESSION_STARTED
+SESSION_RESUMED
+TURN_STARTED
+TOOL_STARTED
+TOOL_COMPLETED
+VERIFICATION_DETECTED
+APPROVAL_REQUIRED
+APPROVAL_DECIDED
+HARNESS_COMPLETED
+HARNESS_INTERRUPTED
+HARNESS_TIMED_OUT
+HARNESS_FAILED
 ```
 
-The adapter owns protocol initialization, version compatibility, lifecycle mapping, approval handling, reconnection, and raw event persistence where needed for diagnostics.
+Secret redaction occurs before durable event persistence.
 
-### 13.1 Codex adapter
+## 10. Plans, scheduling, and retries
 
-The Codex integration must:
+Deep plans are schema-validated for required fields, safe and unique Stage IDs, existing dependencies, acyclicity, supported harness routing, and an integration path.
 
-- launch or connect to `codex app-server`;
-- initialize its structured protocol;
-- create or resume threads and start turns;
-- consume lifecycle, item, tool, approval, and completion events;
-- treat `turn/completed` as harness completion only;
-- continue an existing thread for eligible retries;
-- preserve native sandbox and approval behavior;
-- never scrape the Codex TUI or replace Codex with a generic model API.
+A queued Stage is runnable when its dependencies have completed. Independent Stages may execute concurrently up to `maxWorkers`. Their commits are integrated deterministically before final review.
 
-### 13.2 OpenCode adapter
+Retries create new Runs and increment the Stage attempt number; prior Runs are never overwritten. Clew supports automatic bounded retries for configured failures and blocking review findings, plus explicit operator retry from supported states.
 
-The OpenCode integration must:
+On restart, abandoned `RUNNING` records are marked interrupted. Clew rebuilds runnable state from durable records and resumes a native session when the adapter and retry path allow it.
 
-- use the official SDK/server API;
-- create, send to, abort, and inspect sessions;
-- subscribe to its event stream;
-- translate session, tool, permission, idle, failure, and completion events;
-- pin the supported SDK/server version exactly;
-- isolate all version-sensitive code inside the adapter.
+## 11. Native review
 
-### 13.3 Normalized events
+Standard and Deep may run a separate native reviewer. The reviewer returns a structured verdict and findings containing severity, criterion, and reason.
 
-At minimum, adapters emit:
+Blocking findings route back into worker correction while attempts remain. A passing review allows the Task to proceed toward `READY`. The reviewer is an execution aid, not the final acceptance authority; the operator controls `COMPLETED`.
 
-```ts
-type ClewHarnessEvent =
-  | SessionStarted
-  | TurnStarted
-  | ToolStarted
-  | ToolCompleted
-  | VerificationDetected
-  | ApprovalRequired
-  | HarnessIdle
-  | HarnessCompleted
-  | HarnessFailed;
-```
+## 12. Verification boundary
 
-Every event carries its task, stage-run, attempt, session, source-harness, timestamp, and source-event identifiers.
+Workers execute checks through their native harness. Clew records observed command/tool results and a structured verification rationale. A run cannot reach `READY` without at least one passing verification item.
+
+Clew can also rerun configured commands explicitly against a pinned known revision with `clew verify`. Records carry revision and environment identity so changed code or environment can invalidate reuse.
+
+These records answer what ran and against which revision. They do not replace independent CI, Playwright testing, manual QA, or operator judgment. A richer Evidence Graph and quality-policy model are future research, not part of the current product contract.
+
+## 13. Human control
+
+Implemented human actions include:
+
+- approve or reject a Deep plan;
+- accept or decline a native harness approval request;
+- request interruption;
+- explicitly retry a Task/Stage;
+- rerun verification against a pinned revision;
+- inspect result and history;
+- complete a `READY` Task at a pinned revision.
+
+Operator actions and completion decisions are durable and auditable. A completed Task is immutable in the current implementation.
 
 ## 14. Workspace management
 
-```ts
-interface WorkspaceManager {
-  create(input: { taskId: string; stageId: string; baseSha: string }): Promise<Workspace>;
+`GitWorktreeManager` uses native Git commands with argument arrays. It validates refs and paths, records base/current revisions, and creates isolated task/stage worktrees.
 
-  remove(id: string): Promise<void>;
-  status(id: string): Promise<WorkspaceStatus>;
-}
+Cleanup is ownership-aware:
+
+- active worktrees are retained;
+- dirty worktrees are retained by default;
+- safe prune removes only inactive, clean, Clew-owned worktrees;
+- force removal is explicit.
+
+Clew does not implement Git internals or automatic conflict resolution. Integration conflicts become explicit failures with inspectable workspaces.
+
+## 15. Persistence and result projection
+
+SQLite is the local source of truth. Schema migrations are transactional and versioned. The Store persists Tasks, Stages, Plans, Runs, Events, approvals, operator actions, completion, telemetry correlation, usage records, pricing snapshots, and cost projections.
+
+`task result` projects the durable result, including contract, attempts, revision, workspace, observed verification, review, completion, runtime namespace, and usage summary.
+
+Export writes a manifest, checksum, patch, and Git bundle outside the primary checkout. Completion and export pin a known result revision.
+
+## 16. Optional observability
+
+Tracing is disabled by default and must not affect Task correctness or state.
+
+```sh
+clew telemetry install
+CLEW_TELEMETRY_ENABLED=true clew telemetry status
 ```
 
-The initial implementation, `GitWorktreeManager`, uses `spawn`/`execFile` with argument arrays and never interpolates user-controlled values into a shell command.
+The core package has no required OpenTelemetry runtime dependency. The install command places the official trace runtime under `.clew/telemetry`. When enabled, Clew exports allowlisted lifecycle spans through OTLP and persists correlation identifiers. Raw prompts, completions, source files, environment values, and tool payloads are excluded from span attributes.
 
-Default conventions:
+Missing runtime or collector failure remains diagnostic and does not change execution behavior.
+
+## 17. Usage and cost accounting
+
+Each completed native turn receives one idempotent usage record. Clew stores provider-reported input, output, cache, and reasoning token counts when available. Missing data remains `unknown` or `partial`; Clew does not estimate tokens.
+
+```sh
+clew pricing sync --url https://pricing.example/catalog.json --source provider-catalog
+clew task usage TASK --human
+```
+
+Pricing sync stores immutable catalog snapshots. Decimal cost projection links usage to a snapshot and aggregates the complete Task lifecycle across attempts and Stages. Mixed currencies remain separate.
+
+## 18. CLI surface
+
+The implemented CLI includes:
 
 ```text
-worktree: ~/.clew/worktrees/<project>/<task>/<stage>
-branch:   ai/<task>/<stage>
+init
+task create | list | show | result | history | usage
+plan
+approve | reject
+approve-run | reject-run
+run | retry | verify | interrupt
+status | events
+complete | export | cleanup
+worktree list | remove | prune
+telemetry install | status
+pricing sync
+doctor
 ```
 
-Clew records the base SHA, worktree path, branch, current SHA, dirty state, and lifecycle. Removal must refuse a dirty worktree unless an explicit force policy is applied. The primary checkout must never be modified by an isolated or parallel stage.
+There is currently no `continue` command; operator continuation uses the implemented retry/session-resume paths. A dedicated continuation workflow is planned in `ROADMAP.md`.
 
-Git worktrees isolate files and branches but not ports, databases, queues, containers, or other runtime resources. Runtime namespace isolation is deferred beyond v0.1 and must be addressed before reliable parallel integration testing.
+## 19. Configuration and security
 
-## 15. Verification
+Configuration precedence is command flag, environment, project `.clew.json`, user config, then defaults.
 
-Clew uses progressive verification:
+Role-specific model configuration exists for worker, architect, reviewer, and optional plan-defined roles. Project config rejects secret-like keys and absolute worktree roots. Credentials remain in native harness or user-level configuration.
 
-1. **Worker iteration:** the smallest relevant check, such as one test or affected package.
-2. **Worker completion:** affected tests, type-check/build scope, and task-specific browser path.
-3. **Integration:** broader unit/integration suite, build, and smoke paths.
-4. **Release/nightly:** full suites and expensive quality checks.
+Security requirements include:
 
-Clew should not automatically rerun a command when fresh, trustworthy evidence from the same revision and environment already satisfies the configured policy.
+- no shell interpolation for user-controlled Git arguments;
+- path and ref validation;
+- event redaction before persistence;
+- no credential capture in telemetry;
+- explicit approvals for native privileged actions;
+- bounded cleanup and interruption behavior;
+- no external service required for the default fake/local acceptance path.
 
-A verification evidence record contains:
+## 20. Current guarantees and intentional limits
 
-- evidence type and scope;
-- command/tool identity;
-- start/end time and exit status;
-- working directory/workspace;
-- commit SHA and attempt ID;
-- parsed result counts when available;
-- related acceptance criteria;
-- source event/session;
-- freshness and trust status.
+The maintained acceptance suite covers Quick, Standard, and Deep flows; native adapter protocol fixtures; plan approval; bounded parallel DAG execution; retry and restart; worktree integration; review; verification trust; explicit completion; export; cleanup; optional telemetry isolation; and usage idempotency.
 
-The agent may also return a structured verification report describing why the evidence is sufficient and why checks were skipped. This report supplements but does not replace observed tool evidence.
+Current limitations:
 
-Interactive browser verification demonstrates current behavior. Durable Playwright tests provide regression protection. Task runs use related scenarios; smoke suites belong at integration; full E2E belongs in release/nightly policy unless explicitly required by the contract.
+- single local process and SQLite;
+- no daemon or browser UI;
+- no remote Runner;
+- no live terminal attachment contract;
+- no cross-repository transaction;
+- no team identity or RBAC;
+- no formal QA/evidence-policy product surface;
+- Node's built-in SQLite API remains experimental.
 
-## 16. Review and completion policy
-
-A reviewer evaluates:
-
-- acceptance-criteria compliance;
-- architectural correctness and invariants;
-- regression and security risk;
-- scope creep;
-- test quality and missing evidence.
-
-The reviewer returns a schema-validated result:
-
-```json
-{
-  "verdict": "request_changes",
-  "findings": [
-    {
-      "severity": "blocking",
-      "criterion": "AC-3",
-      "reason": "The previous refresh token remains valid",
-      "evidence": "The replay test returned HTTP 200",
-      "target": "implementation"
-    }
-  ]
-}
-```
-
-Allowed verdicts are `pass`, `request_changes`, and `needs_human`. Blocking findings prevent completion. A separate independent completion judge is optional and reserved for critical profiles.
-
-## 17. Failures and retries
-
-Failures use an explicit classification:
-
-- `IMPLEMENTATION_FAILURE`
-- `TEST_FAILURE`
-- `ARCHITECTURE_FAILURE`
-- `ENVIRONMENT_FAILURE`
-- `CONTRACT_AMBIGUITY`
-- `AGENT_STUCK`
-- `TOOL_FAILURE`
-
-Default routing:
-
-| Failure                    | Default target                |
-| -------------------------- | ----------------------------- |
-| Implementation             | same worker/session retry     |
-| Test defect or missing QA  | QA stage                      |
-| Architecture               | architect                     |
-| Environment/tool transient | infrastructure retry          |
-| Contract ambiguity         | human                         |
-| Repeated or stuck worker   | fresh worker session or human |
-
-Default retry policy:
-
-```yaml
-retry:
-  max_attempts: 3
-  simple_failure:
-    reuse_session: true
-  repeated_failure:
-    fresh_session: true
-```
-
-Reviewer feedback is sent back through the native harness. Retrying by directly invoking the underlying model outside the harness is forbidden.
-
-## 18. Human gates
-
-Example policy:
-
-```yaml
-human_gates:
-  architecture:
-    when:
-      - database_migration
-      - breaking_api
-      - security_tradeoff
-  dependency_change:
-    enabled: true
-  merge:
-    always: true
-```
-
-An approval records the policy trigger, proposed action, relevant diff/decision, requester, approver, timestamp, and outcome. Clew must not silently downgrade a required gate.
-
-## 19. Scheduler and persistence
-
-The v0.1 scheduler is local and intentionally small. It must:
-
-- identify runnable stages from dependency and approval state;
-- enforce profile concurrency limits;
-- create a stage run and workspace before starting a harness;
-- recover persisted non-terminal tasks after process restart;
-- avoid starting the same stage run twice;
-- route completion, failure, retry, and cancellation deterministically;
-- serialize state changes transactionally.
-
-SQLite stores the current projections and task event log. Minimum tables/collections correspond to the domain entities in section 8. Event payloads and schemas are versioned to allow future migration.
-
-An external queue such as BullMQ is out of scope until multi-process or remote execution is required.
-
-## 20. CLI v0.1
-
-The first usable interface is a CLI.
-
-```text
-clew init
-clew task create [--file task.yaml]
-clew task show <task-id>
-clew task list
-clew plan <task-id>
-clew approve <task-id> [gate-id]
-clew run <task-id> [--profile quick|standard|deep]
-clew status <task-id> [--watch]
-clew events <task-id>
-clew retry <task-id> <stage-id>
-clew interrupt <task-id> [stage-id]
-```
-
-Commands that start work print the task, stage, attempt, harness session, workspace, branch, and current attention state. Machine-readable JSON output should be available for automation.
-
-## 21. Configuration
-
-Configuration precedence:
-
-1. CLI flags;
-2. task contract/profile overrides;
-3. project configuration;
-4. user configuration;
-5. built-in defaults.
-
-Project configuration must be safe to commit. Credentials, auth tokens, and user-specific absolute paths must remain outside it. Exact adapter compatibility versions are recorded and diagnosed at startup.
-
-## 22. Safety and security requirements
-
-- Preserve native harness sandbox and approval semantics.
-- Never execute worktree operations through shell-string interpolation.
-- Validate task IDs, stage IDs, branch names, refs, and filesystem paths.
-- Prevent workspace paths from escaping the configured Clew worktree root.
-- Never remove a dirty workspace without explicit authorization.
-- Redact secrets from persisted normalized events and structured logs.
-- Treat harness output and repository content as untrusted input.
-- Require explicit policy approval for destructive Git operations, dependency changes when configured, and merge.
-- Keep raw protocol events local by default.
-
-## 23. Observability
-
-The task event history is a product feature and remains inside Clew. Low-level traces are delegated to an observability backend when configured.
-
-Correlation follows:
-
-```text
-Task → Stage → StageRun → Attempt → HarnessSession → Trace
-```
-
-Clew records duration, result, retry count, token/cost metadata when exposed, and an optional trace link. Phoenix/OpenTelemetry integration is deferred until core execution works.
-
-## 24. v0.1 scope and acceptance criteria
-
-v0.1 proves the architecture through two end-to-end flows.
-
-### 24.1 Quick flow
-
-```text
-task contract
-→ isolated Git worktree
-→ native Codex worker turn
-→ normalized lifecycle/tool events
-→ captured verification evidence
-→ completion policy
-→ READY
-```
-
-### 24.2 Parallel flow
-
-```text
-task contract
-→ native Codex architect in read-only mode
-→ schema-valid plan and human approval
-→ at least two independent worktrees/workers
-→ integration stage
-→ native Codex review
-→ READY or routed retry
-```
-
-v0.1 is accepted when:
-
-1. Codex app-server can be initialized, a thread/turn started, tool events observed, and turn completion recorded.
-2. OpenCode can create a session, run a turn, stream normalized events, and report completion/failure.
-3. A harness runs with its working directory set to a Clew-created worktree and does not modify the primary checkout.
-4. An architect plan is validated against a versioned schema before execution.
-5. The scheduler runs a dependency DAG without double-starting stages.
-6. Observed verification commands are linked to the correct task, stage, attempt, workspace, and revision.
-7. Harness completion cannot directly mark a task completed.
-8. A blocking review finding creates a new attempt through the configured retry route.
-9. Restarting Clew preserves task state and can reconcile in-flight work.
-10. Every task can be explained from its persisted event history without relying on chat history.
-
-## 25. Delivery sequence
-
-1. **POC 1 — Codex:** app-server protocol and lifecycle events.
-2. **POC 2 — OpenCode:** SDK/server session and event stream.
-3. **POC 3 — Workspace:** native Git worktree lifecycle and harness `cwd` isolation.
-4. **POC 4 — Architect:** read-only native harness and schema-valid plan.
-5. **POC 5 — First parallel run:** plan, two workers, integration, review, retry.
-6. **v0.2:** result/history views, explicit retry and reverify, evidence freshness/trust, pinned human completion, artifact export, runtime namespaces, and configurable local-model roles.
-7. **v0.3:** optional OTLP/Phoenix traces plus honest, provenance-preserving usage and cost accounting; see [`RELEASE-0.3.md`](./RELEASE-0.3.md).
-8. **v0.4:** task dashboard derived from real workflow friction.
-
-## 26. Deferred decisions
-
-The following remain deliberately open beyond v0.1:
-
-- runtime isolation for ports, databases, queues, and containers;
-- exact verification freshness/trust rules;
-- PR provider and merge automation;
-- dashboard technology and information architecture;
-- packaging and distribution (`brew`, npm, standalone binary, or other).
-
-The v0.1 POCs resolved the local toolchain, supported adapter versions, session resume behavior, deterministic commit integration, and retention-based worktree cleanup; those decisions are recorded in ADR/release/compatibility documents.
-
-These decisions must not weaken the core boundary: Clew owns the task lifecycle; native harnesses own coding intelligence.
+For future direction and release order, see [`VISION.md`](./VISION.md) and [`ROADMAP.md`](./ROADMAP.md).

@@ -1,6 +1,6 @@
 # Clew v0.3 release plan — Explainable execution economics
 
-**Status:** `CLEW-042` in progress
+**Status:** `v0.3.0` acceptance complete; tag publication requires the release commit
 
 **Target:** `v0.3.0`
 
@@ -139,19 +139,19 @@ Acceptance:
 
 ## Candidate sequence
 
-### v0.3.0-alpha.1 — correlation and failure isolation
+### v0.3.0-alpha.1 — correlation and failure isolation (implemented on `main`)
 
 Task: `CLEW-042` through schemas, persistence, fake collector, and failure-path acceptance.
 
 Exit gate: traces are restart-stable, secret-safe, structurally valid, and cannot affect task state.
 
-### v0.3.0-beta.1 — honest execution economics
+### v0.3.0-beta.1 — honest execution economics (implemented on `main`)
 
-Tasks: remaining `CLEW-042` plus `CLEW-043`.
+Tasks: `CLEW-042` plus `CLEW-043`.
 
 Exit gate: supported adapters produce idempotent usage records, unknown data stays explicit, aggregates are reproducible, and task result links to traces.
 
-### v0.3.0-rc.1 — upgrade and packaging
+### v0.3.0-rc.1 — upgrade and packaging (next)
 
 Task: `CLEW-067`.
 
@@ -170,6 +170,15 @@ The final tag may be created only when:
 7. Historical costs are reproducible from stored provenance and never silently repriced.
 8. A clean v0.2 database upgrades and a clean tarball install passes acceptance.
 9. GitHub Actions passes on `main` and the release tag.
+
+## v0.3.0 sign-off record — 2026-08-28
+
+- `npm run check`: passed.
+- Populated v0.2 migration fixture: passed; task, stage, run, event, operator action, completion, revision, and runtime namespace history survived migration 11.
+- Clean installed-package acceptance: passed for Quick, Standard, and Deep fake-harness flows; tarball contents included migrations 010/011 and excluded telemetry data, credentials, and `node_modules`.
+- Telemetry disabled and missing-runtime paths: passed; lifecycle remains available without an external service.
+- Usage fixtures: passed for idempotency, exact decimal cost, unknown usage, and partial usage.
+- Live Codex/OpenCode/Phoenix checks remain optional and are skipped unless their local services and credentials are explicitly configured.
 
 ## Decisions fixed for this release
 
