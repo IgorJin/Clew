@@ -1,7 +1,7 @@
 ---
 id: CLEW-073
 title: Continue and review exhaustion handoff
-status: planned
+status: done
 release: v0.4
 priority: P0
 size: M
@@ -90,8 +90,10 @@ Primary ownership: domain transitions, Store records, Scheduler correction budge
 
 ## Blockers
 
-Waiting for `CLEW-068` continuation contracts.
+None.
 
 ## Completion record
 
-Not completed.
+- Implementation: durable operator continuation messages and grants, idempotent completion overrides, bounded review exhaustion handoff, CLI `continue`, public thread events, migration 014, and immutable completion snapshots retaining override metadata and unresolved findings.
+- Verification: `npm run check` passed on 2026-08-28 (91 tests passed, 2 loopback tests skipped by sandbox policy).
+- Commit: `93fe379` (`feat: add bounded continuation handoff`).

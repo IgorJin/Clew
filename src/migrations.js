@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 13;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -222,6 +222,26 @@ const MIGRATIONS = Object.freeze([
 
       if (!columns.some((column) => column.name === 'target'))
         db.exec('ALTER TABLE operator_messages ADD COLUMN target TEXT');
+    },
+  },
+  {
+    version: 14,
+    apply(db) {
+      const grants = db.prepare('PRAGMA table_info(continuation_grants)').all();
+      const overrides = db.prepare('PRAGMA table_info(completion_overrides)').all();
+
+      if (!grants.some((column) => column.name === 'idempotency_key'))
+        db.exec('ALTER TABLE continuation_grants ADD COLUMN idempotency_key TEXT');
+      if (!overrides.some((column) => column.name === 'idempotency_key'))
+        db.exec('ALTER TABLE completion_overrides ADD COLUMN idempotency_key TEXT');
+      if (!overrides.some((column) => column.name === 'unresolved_findings'))
+        db.exec('ALTER TABLE completion_overrides ADD COLUMN unresolved_findings TEXT');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS continuation_grants_idempotency ON continuation_grants(idempotency_key) WHERE idempotency_key IS NOT NULL',
+      );
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS completion_overrides_idempotency ON completion_overrides(idempotency_key) WHERE idempotency_key IS NOT NULL',
+      );
     },
   },
 ]);

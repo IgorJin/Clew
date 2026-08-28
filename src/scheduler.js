@@ -66,6 +66,7 @@ export class Scheduler {
     requestedArchitect = null,
     resumeSessionId = null,
     retryFeedback = [],
+    options = {},
   ) {
     const taskSignal = this.getTaskSignal(taskId);
 
@@ -79,6 +80,7 @@ export class Scheduler {
         taskSignal,
         resumeSessionId,
         retryFeedback,
+        options,
       );
     } finally {
       this.releaseTaskSignal(taskId);
@@ -93,6 +95,7 @@ export class Scheduler {
     taskSignal = this.getTaskSignal(taskId),
     resumeSessionId = null,
     retryFeedback = [],
+    options = {},
   ) {
     const row = this.store.getTask(taskId);
 
@@ -114,9 +117,13 @@ export class Scheduler {
       );
     resumeSessionId = this.reconcileSingleWorker(row, resumeSessionId);
     if (
-      ![TASK_STATE.DRAFT, TASK_STATE.QUEUED, TASK_STATE.READY, TASK_STATE.FAILED].includes(
-        row.state,
-      )
+      ![
+        TASK_STATE.DRAFT,
+        TASK_STATE.QUEUED,
+        TASK_STATE.READY,
+        TASK_STATE.FAILED,
+        TASK_STATE.WAITING_FOR_HUMAN,
+      ].includes(row.state)
     )
       throw new Error(`task ${taskId} is already ${row.state}`);
     if (!this.store.listStages(taskId).length)
@@ -247,9 +254,24 @@ export class Scheduler {
         if (review.verdict === REVIEW_VERDICT.PASS)
           this.store.setTaskState(taskId, TASK_STATE.READY);
         else {
-          this.store.setTaskState(taskId, TASK_STATE.FAILED);
+          const exhausted = options.correctionOnly || attempt >= profile.maxAttempts;
+
+          this.store.setTaskState(
+            taskId,
+            exhausted ? TASK_STATE.WAITING_FOR_HUMAN : TASK_STATE.FAILED,
+          );
           this.store.appendEvent(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
-          if (attempt < profile.maxAttempts) {
+          if (exhausted) {
+            this.store.appendEvent(taskId, 'REVIEW_EXHAUSTED', {
+              stageId: 'worker',
+              runId,
+              attempts: attempt,
+              findings: review.findings,
+              reason: options.correctionOnly
+                ? 'explicit continuation correction completed'
+                : 'automatic review correction budget exhausted',
+            });
+          } else if (attempt < profile.maxAttempts) {
             this.store.appendEvent(taskId, 'RETRY_SCHEDULED', {
               failedAttempt: attempt,
               nextAttempt: attempt + 1,
@@ -266,6 +288,7 @@ export class Scheduler {
               requestedArchitect,
               attempt === 1 ? (result.sessionId ?? null) : null,
               review.findings,
+              options,
             );
           }
         }

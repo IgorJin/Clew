@@ -38,6 +38,8 @@ The durable event mapping is intentionally presentation-oriented: task creation/
 
 Continuation grants preserve `taskId`, and when applicable `stageId`, `runId`, and `sessionId`. The `expectedRevision` prevents applying an operator decision to a newer result, and `expiresAt` bounds its lifetime. Review exhaustion is a human handoff, not an implicit completion.
 
+`clew continue TASK --message TEXT` records a redacted operator message and a durable, idempotent continuation grant. It runs exactly one Worker correction and reviewer pass. A failed correction returns to `WAITING_FOR_HUMAN` with its findings; completion from that state requires `--review-override`, and the immutable completion record retains the actor and unresolved findings.
+
 `SessionSurface` is capability-based. An open-session request names the task, role, harness, and optional existing identity. The result must return the same task/run identity and the native `sessionId`; a resume operation never silently creates a new session. Unsupported capabilities are omitted rather than inferred.
 
 ## Persistence and compatibility

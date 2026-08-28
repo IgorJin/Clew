@@ -80,6 +80,19 @@ const EVENT_KINDS = new Map([
   ['TASK_RECOVERY_STARTED', ['recovery_started', () => 'Task recovery started']],
   ['COMPLETION_OVERRIDE_RECORDED', ['completion_override', () => 'Completion override recorded']],
   [
+    'CONTINUATION_GRANTED',
+    ['continuation_granted', (p) => `Continuation granted by ${p.actor ?? 'operator'}`],
+  ],
+  ['CONTINUATION_COMPLETED', ['continuation_completed', () => 'Continuation correction completed']],
+  [
+    'REVIEW_EXHAUSTED',
+    ['review_exhausted', () => 'Review correction budget exhausted; human attention required'],
+  ],
+  [
+    'OPERATOR_MESSAGE_RECORDED',
+    ['operator_message_recorded', (p) => `Operator message recorded for ${p.actor ?? 'operator'}`],
+  ],
+  [
     'OPERATOR_ACTION_RECORDED',
     ['operator_action', (p) => `Operator ${p.action ?? 'action'} recorded`],
   ],

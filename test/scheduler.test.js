@@ -294,7 +294,7 @@ test('routes blocking review findings into bounded retries', async () => {
   });
   const result = await new Scheduler(store, workspaceManager).runTask('T-5', 'standard', 'fake');
 
-  assert.equal(result.state, 'FAILED');
+  assert.equal(result.state, 'WAITING_FOR_HUMAN');
   assert.equal(store.listRuns('T-5').length, 3);
   assert.equal(
     store.listEvents('T-5').filter((event) => event.type === 'RETRY_SCHEDULED').length,
