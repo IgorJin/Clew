@@ -94,18 +94,27 @@ Scope:
 - publish a versioned usage/cost schema covering provider, model, harness, role, task/stage/run/attempt, token categories, timestamps, source, and completeness;
 - normalize Codex and OpenCode usage only where their supported protocols expose reliable fields, preserving unknown fields and provider diagnostics;
 - persist usage records idempotently so event replay, session resume, and restart do not double-count them;
-- support decimal multi-currency cost records with explicit pricing provenance; project configuration may select a pricing table, while credentials and user-specific paths remain outside committed config;
+- support decimal multi-currency cost records with explicit pricing provenance; a daily external cron invokes an idempotent pricing-sync command against configured provider/catalog APIs, while credentials and user-specific paths remain outside committed config;
+- persist immutable pricing snapshots with source, fetched time, effective time, checksum, and freshness state; a failed sync keeps the last snapshot and marks it stale instead of silently repricing history;
 - aggregate by task, stage, run, role, harness, and model while keeping unknown and mixed-currency totals separate;
 - add `clew task usage TASK [--stage STAGE] [--attempt N] [--json|--human]` and include a compact usage summary plus trace link in `task result`;
+- report one lifecycle total for the task across all attempts, retries, stages, sessions, and turns, with a currency breakdown and an explicit unknown/partial remainder;
 - export usage and cost provenance in the final result manifest without changing completion trust rules.
+
+Implementation phases:
+
+1. **Usage capture:** normalize one idempotent record per native turn, linked to task/stage/run/attempt/session/turn, preserving reported, partial, and unknown values without storing raw prompts or completions.
+2. **Pricing sync:** add a provider-agnostic catalog source interface and `clew pricing sync`; the caller schedules it daily with cron. Provider-specific APIs are adapters, not hardcoded assumptions. Manual/local catalog input remains the fallback where a provider has no pricing API.
+3. **Cost projection:** calculate decimal costs from the usage record plus the immutable price snapshot, aggregate the complete task lifecycle, and expose stable JSON/human output and manifest provenance.
 
 Acceptance:
 
 1. Adapter fixtures cover complete usage, partial usage, missing usage, cached/reasoning tokens, unknown models, changed pricing, and mixed currencies.
 2. Aggregates equal the underlying idempotent records across retry, resume, restart, and Deep parallel execution.
 3. Missing data renders as unknown/partial and never as a fabricated zero.
-4. Historical cost remains reproducible from its recorded pricing provenance when a pricing table changes later.
-5. Human and JSON output agree, remain stable under filtering, and require no direct SQLite or backend access.
+4. A scheduled pricing sync is idempotent, records source/freshness/checksum, and preserves the previous snapshot on API failure.
+5. Historical cost remains reproducible from its recorded pricing snapshot when a pricing catalog changes later.
+6. Human and JSON output agree, show the total for the complete task lifecycle, and require no direct SQLite or backend access.
 
 ### CLEW-067 — v0.3 upgrade, acceptance, and release
 
@@ -170,7 +179,9 @@ The final tag may be created only when:
 - Span attributes use an allowlist. Raw prompts, completions, tool payloads, environment values, and repository content are excluded.
 - Provider-reported usage is preferred; absent usage remains unknown. v0.3 does not add a tokenizer-based estimator.
 - Money uses decimal strings plus ISO currency, never binary floating-point.
-- Recorded pricing provenance freezes historical calculations; automatic internet price lookup is outside v0.3.
+- Provider/catalog API pricing sync is opt-in and caller-scheduled; a provider without a usable pricing API can use an explicit local catalog.
+- Recorded pricing snapshots freeze historical calculations; a failed daily sync retains the last snapshot and exposes stale freshness.
+- The primary cost number is the complete task lifecycle total, with stage/run/attempt/turn breakdowns available for explanation.
 
 ## Risks to retire first
 
