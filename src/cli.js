@@ -123,7 +123,9 @@ function printHelp() {
   console.log(
     `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID\n  clew doctor [--harness codex|opencode]`,
   );
-  console.log('  clew complete TASK --revision SHA [--actor ACTOR]');
+  console.log(
+    '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
+  );
   console.log('  clew export TASK --dir DIR [--revision SHA]');
   console.log('  clew cleanup [--retention-days N]');
   console.log('  clew telemetry install | status');
@@ -232,10 +234,6 @@ export async function main(args) {
       const task = store.getTask(taskId);
 
       if (!task) throw new Error(`task not found: ${taskId}`);
-      if (![TASK_STATE.READY, TASK_STATE.WAITING_FOR_HUMAN].includes(task.state))
-        throw new Error(`task ${taskId} cannot be continued from ${task.state}`);
-      const stageId = getOptionValue(rest, '--stage', 'worker');
-      const latestRun = store.listRuns(taskId, { stageId }).at(-1);
       const actor = getOptionValue(rest, '--actor', process.env.USER || 'local-user');
       const idempotencyKey = getOptionValue(
         rest,
@@ -244,41 +242,53 @@ export async function main(args) {
       );
       const existingGrant = store.getContinuationGrantByKey(idempotencyKey);
 
-      if (existingGrant) {
-        const completed = store
-          .listEvents(taskId)
-          .find(
-            (event) =>
-              event.type === 'CONTINUATION_COMPLETED' &&
-              event.payload?.grantId === existingGrant.id,
-          );
-
-        if (completed)
-          return printJson({
-            taskId,
-            grant: existingGrant,
-            state: store.getTask(taskId).state,
-            duplicate: true,
-          });
-      }
-      store.recordOperatorMessage({
-        taskId,
-        actor,
-        message,
-        target: { stageId, runId: latestRun?.id ?? null, cause: 'review_exhaustion' },
-      });
-      const grant = store.recordContinuationGrant({
-        id: randomUUID(),
-        taskId,
+      if (existingGrant?.status === 'COMPLETED')
+        return printJson({
+          taskId,
+          grant: existingGrant,
+          state: existingGrant.result_state ?? task.state,
+          duplicate: true,
+        });
+      if (!existingGrant && ![TASK_STATE.READY, TASK_STATE.WAITING_FOR_HUMAN].includes(task.state))
+        throw new Error(`task ${taskId} cannot be continued from ${task.state}`);
+      const events = store.listEvents(taskId);
+      const exhaustion = events.filter((event) => event.type === 'REVIEW_EXHAUSTED').at(-1);
+      const stageId = getOptionValue(
+        rest,
+        '--stage',
+        existingGrant?.stage_id ?? exhaustion?.payload?.stageId ?? 'worker',
+      );
+      const latestRun =
+        (existingGrant?.run_id ? store.getRun(existingGrant.run_id) : null) ??
+        store.listRuns(taskId, { stageId }).at(-1) ??
+        (exhaustion?.payload?.runId ? store.getRun(exhaustion.payload.runId) : null);
+      const target = {
         stageId,
         runId: latestRun?.id ?? null,
         sessionId: latestRun?.session_id ?? null,
-        actor,
-        reason: message,
-        expectedRevision: latestRun?.commit_sha ?? 'unresolved',
-        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
-        idempotencyKey,
-      });
+        cause:
+          task.state === TASK_STATE.WAITING_FOR_HUMAN ? 'review_exhaustion' : 'operator_feedback',
+        causeEventSeq: exhaustion?.seq ?? null,
+      };
+      const grant =
+        existingGrant ??
+        store.recordContinuationRequest({
+          message,
+          target,
+          grant: {
+            version: 1,
+            id: randomUUID(),
+            taskId,
+            stageId,
+            runId: latestRun?.id ?? null,
+            sessionId: latestRun?.session_id ?? null,
+            actor,
+            reason: message,
+            expectedRevision: latestRun?.commit_sha ?? 'unresolved',
+            expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+            idempotencyKey,
+          },
+        });
       const feedback = [{ severity: 'blocking', criterion: 'operator', reason: message }];
       const runtimeConfig = resolveCommandConfig(config, rest);
       const manager = new GitWorktreeManager(runtimeConfig.worktreeRoot);
@@ -288,17 +298,17 @@ export async function main(args) {
         getOptionValue(rest, '--harness', latestRun?.harness),
         getOptionValue(rest, '--review-harness'),
         getOptionValue(rest, '--architect'),
-        latestRun?.session_id ?? null,
+        existingGrant?.session_id ?? latestRun?.session_id ?? null,
         feedback,
-        { correctionOnly: true },
+        {
+          correctionOnly: true,
+          forceSingleWorker: true,
+          stageId,
+          continuationGrantId: grant.id,
+        },
       );
 
-      store.appendEvent(taskId, 'CONTINUATION_COMPLETED', {
-        grantId: grant.id,
-        state: result.state,
-      });
-
-      return printJson({ taskId, grant, result });
+      return printJson({ taskId, grant: store.getContinuationGrant(grant.id), result });
     }
     if (command === 'task' && subcommand === 'create') {
       let contract;

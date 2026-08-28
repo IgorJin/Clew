@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import { Store } from '../src/store.js';
 
 const cliFile = fileURLToPath(new URL('../bin/clew.js', import.meta.url));
 
@@ -111,6 +112,116 @@ test('CLI records an interrupt request for an active task', () => {
     const events = JSON.parse(runCli(['events', 'CLI-INT'], repo));
 
     assert.ok(events.some((event) => event.type === 'INTERRUPT_REQUESTED'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('CLI continue from READY is redacted and duplicate-safe', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-continue-ready-'));
+
+  try {
+    runCommand('git', ['init', '-b', 'main'], repo);
+    runCommand('git', ['config', 'user.email', 'test@example.com'], repo);
+    runCommand('git', ['config', 'user.name', 'Clew Test'], repo);
+    writeFileSync(join(repo, '.gitignore'), '.clew/\n');
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    runCommand('git', ['add', '.gitignore', 'README.md'], repo);
+    runCommand('git', ['commit', '-m', 'fixture'], repo);
+    runCli(['init'], repo);
+    runCli(
+      [
+        'task',
+        'create',
+        '--id',
+        'CLI-CONT-READY',
+        '--title',
+        'Continue ready',
+        '--goal',
+        'Exercise continuation',
+        '--accept',
+        'continuation completes',
+        '--profile',
+        'standard',
+      ],
+      repo,
+    );
+    const initial = JSON.parse(runCli(['run', 'CLI-CONT-READY', '--harness', 'fake'], repo));
+    const message = 'Apply Bearer secret-value';
+    const continued = JSON.parse(
+      runCli(['continue', 'CLI-CONT-READY', '--message', message, '--actor', 'fixture'], repo),
+    );
+    const replay = JSON.parse(
+      runCli(['continue', 'CLI-CONT-READY', '--message', message, '--actor', 'fixture'], repo),
+    );
+    const history = JSON.parse(runCli(['task', 'history', 'CLI-CONT-READY'], repo));
+    const store = new Store(join(repo, '.clew', 'clew.sqlite'));
+    const operatorMessage = store.listOperatorMessages('CLI-CONT-READY')[0];
+
+    store.close();
+    assert.equal(initial.state, 'READY');
+    assert.equal(continued.result.state, 'READY');
+    assert.equal(replay.duplicate, true);
+    assert.equal(history.runs.length, 2);
+    assert.equal(
+      history.events.filter((event) => event.type === 'CONTINUATION_COMPLETED').length,
+      1,
+    );
+    assert.equal(operatorMessage.message, 'Apply Bearer [REDACTED]');
+    assert.ok(operatorMessage.target.sessionId);
+    assert.equal(operatorMessage.target.cause, 'operator_feedback');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('CLI continue grants one correction from WAITING_FOR_HUMAN', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-continue-waiting-'));
+
+  try {
+    runCommand('git', ['init', '-b', 'main'], repo);
+    runCommand('git', ['config', 'user.email', 'test@example.com'], repo);
+    runCommand('git', ['config', 'user.name', 'Clew Test'], repo);
+    writeFileSync(join(repo, '.gitignore'), '.clew/\n');
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    runCommand('git', ['add', '.gitignore', 'README.md'], repo);
+    runCommand('git', ['commit', '-m', 'fixture'], repo);
+    runCli(['init'], repo);
+    runCli(
+      [
+        'task',
+        'create',
+        '--id',
+        'CLI-CONT-WAIT',
+        '--title',
+        'Continue waiting',
+        '--goal',
+        'Exercise human handoff',
+        '--accept',
+        'correction completes',
+        '--profile',
+        'standard',
+      ],
+      repo,
+    );
+    const waiting = JSON.parse(
+      runCommand(process.execPath, [cliFile, 'run', 'CLI-CONT-WAIT', '--harness', 'fake'], repo, {
+        CLEW_FAKE_REVIEW: 'request_changes',
+      }),
+    );
+    const before = JSON.parse(runCli(['task', 'history', 'CLI-CONT-WAIT'], repo));
+    const continued = JSON.parse(
+      runCli(['continue', 'CLI-CONT-WAIT', '--message', 'Resolve the final finding'], repo),
+    );
+    const after = JSON.parse(runCli(['task', 'history', 'CLI-CONT-WAIT'], repo));
+
+    assert.equal(waiting.state, 'WAITING_FOR_HUMAN');
+    assert.equal(continued.result.state, 'READY');
+    assert.equal(after.runs.length, before.runs.length + 1);
+    assert.equal(
+      after.events.filter((event) => event.type === 'REVIEW_RECORDED').length,
+      before.events.filter((event) => event.type === 'REVIEW_RECORDED').length + 1,
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

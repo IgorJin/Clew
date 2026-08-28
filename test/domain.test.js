@@ -11,6 +11,7 @@ import {
   validateVerificationReport,
   validateNormalizedEvent,
   resolveProfile,
+  TASK_STATE,
 } from '../src/domain.js';
 
 test('validates and normalizes a task contract', () => {
@@ -53,6 +54,16 @@ test('rejects invalid transitions', () => {
   );
   assert.doesNotThrow(() => assertValidTaskTransition('EXECUTING', 'RECOVERING'));
   assert.doesNotThrow(() => assertValidTaskTransition('RECOVERING', 'EXECUTING'));
+});
+
+test('allows an attributed human completion from WAITING_FOR_HUMAN', () => {
+  assert.doesNotThrow(() =>
+    assertValidTaskTransition(TASK_STATE.WAITING_FOR_HUMAN, TASK_STATE.COMPLETED),
+  );
+  assert.throws(
+    () => assertValidTaskTransition(TASK_STATE.COMPLETED, TASK_STATE.READY),
+    /invalid task transition/,
+  );
 });
 test('classifies operational failures for retry policy', () => {
   assert.equal(classifyFailure({ code: 'HARNESS_TIMED_OUT' }), FAILURE_CLASS.TIMEOUT);

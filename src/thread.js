@@ -89,6 +89,14 @@ const EVENT_KINDS = new Map([
     ['review_exhausted', () => 'Review correction budget exhausted; human attention required'],
   ],
   [
+    'CONTINUATION_INTERRUPTED',
+    ['continuation_interrupted', () => 'Continuation paused and can be resumed safely'],
+  ],
+  [
+    'SESSION_RESUME_FALLBACK',
+    ['session_resume_fallback', () => 'Stale native session replaced with a fresh session'],
+  ],
+  [
     'OPERATOR_MESSAGE_RECORDED',
     ['operator_message_recorded', (p) => `Operator message recorded for ${p.actor ?? 'operator'}`],
   ],
