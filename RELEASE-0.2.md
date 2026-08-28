@@ -1,6 +1,6 @@
 # Clew v0.2 release plan — Ready to Delivered
 
-**Status:** implemented and acceptance-verified locally
+**Status:** `v0.2.0` released on 2026-08-28
 
 **Target:** `v0.2.0`
 

@@ -660,7 +660,7 @@ v0.1 is accepted when:
 4. **POC 4 — Architect:** read-only native harness and schema-valid plan.
 5. **POC 5 — First parallel run:** plan, two workers, integration, review, retry.
 6. **v0.2:** result/history views, explicit retry and reverify, evidence freshness/trust, pinned human completion, artifact export, runtime namespaces, and configurable local-model roles.
-7. **v0.3:** OpenTelemetry/Phoenix and cost/token metadata.
+7. **v0.3:** optional OTLP/Phoenix traces plus honest, provenance-preserving usage and cost accounting; see [`RELEASE-0.3.md`](./RELEASE-0.3.md).
 8. **v0.4:** task dashboard derived from real workflow friction.
 
 ## 26. Deferred decisions

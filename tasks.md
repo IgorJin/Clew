@@ -1,10 +1,10 @@
 # Clew — implementation backlog
 
-**Status:** v0.2.0 implementation complete
+**Status:** v0.2.0 released; v0.3.0 planned
 
 **Source:** [`spec.md`](./spec.md)
 
-**Target:** Clew v0.1
+**Target:** Clew v0.3.0
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -29,7 +29,7 @@ This backlog is ordered by risk reduction and vertical product value. A task is 
 | `CLEW-029–036` | Complete | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
 | `CLEW-037–041` | Complete | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
 
-All implementation work and release sign-off through `CLEW-041` are complete.
+All work selected for v0.1 and v0.2 is complete. Deferred stable IDs `CLEW-042` and `CLEW-043` now form the first two v0.3 work packages; `CLEW-045`–`048` remain later backlog.
 
 ## Milestone 0 — Repository foundation
 
@@ -189,14 +189,30 @@ CLEW-049 → 050 ────────────────┐
 
 Recommended first batch: `CLEW-049`, `CLEW-053`, and `CLEW-055`. The lifecycle contract prevents incompatible persistence work, manual retry closes an explicit CLI gap, and environment fingerprinting retires the largest completion-policy uncertainty early.
 
+## v0.3 plan — Explainable execution economics
+
+v0.3 is deliberately compressed into three substantial work packages. Detailed scope, negative cases, data contracts, candidate gates, and release decisions are in [`RELEASE-0.3.md`](./RELEASE-0.3.md).
+
+| ID       | Pri | Size | Work package                                        | Depends on | Done when                                                                                                                                                                                                                                     |
+| -------- | --- | ---- | --------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-042 | P1  | L    | Observability contract and OTLP/Phoenix integration | 066        | Versioned correlation contracts, persisted trace identity, lifecycle spans, bounded OTLP export, strict attribute allowlisting, restart idempotency, diagnostics, fake-collector acceptance, and an optional Phoenix smoke are reproducible.  |
+| CLEW-043 | P1  | L    | Usage, token, and cost accounting                   | 042        | Supported adapter usage is normalized and persisted idempotently; partial/unknown data stays explicit; decimal costs retain pricing provenance; filtered human/JSON summaries and manifest export agree across retry, restart, and Deep runs. |
+| CLEW-067 | P1  | L    | v0.3 upgrade, acceptance, and release               | 042, 043   | A real v0.2 database upgrades losslessly; disabled/degraded/enabled observability has identical lifecycle outcomes; installed Quick/Standard/Deep acceptance, documentation, tarball, CI, and release evidence pass.                          |
+
+Critical path:
+
+```text
+CLEW-042 → CLEW-043 → CLEW-067
+```
+
+Recommended first slice: implement the `CLEW-042` contracts, persisted correlation, and fake collector failure matrix before adding a live backend or broad span coverage.
+
 ## Later backlog
 
 These items stay outside v0.2 until usage provides a concrete trigger.
 
 | ID       | Pri | Task                                               | Trigger                                                                                  |
 | -------- | --- | -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| CLEW-042 | P2  | OpenTelemetry/Phoenix integration and trace links  | Core event history is useful and low-level debugging is the next bottleneck.             |
-| CLEW-043 | P2  | Cost/token aggregation                             | Both adapters expose sufficiently reliable usage metadata.                               |
 | CLEW-045 | P2  | Task dashboard                                     | A 5–10 task friction log identifies the views and attention signals users actually need. |
 | CLEW-046 | P2  | Pull request and merge integration                 | Export/complete flow is stable and a provider/merge policy is selected.                  |
 | CLEW-047 | P2  | Remote or multi-process scheduler                  | Local single-process scheduling becomes a measured constraint.                           |

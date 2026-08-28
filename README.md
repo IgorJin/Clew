@@ -105,10 +105,11 @@ Role-specific models can be selected with `models.worker`, `models.architect`, `
 ## Release evidence
 
 - [`spec.md`](./spec.md) — product and technical contract;
-- [`tasks.md`](./tasks.md) — implementation record and post-v0.1 backlog;
+- [`tasks.md`](./tasks.md) — implementation record and current backlog;
 - [`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md) — mapping of all ten acceptance criteria;
 - [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
-- [`RELEASE-0.2.md`](./RELEASE-0.2.md) — planned next-release scope, candidate gates, and fixed decisions;
+- [`RELEASE-0.2.md`](./RELEASE-0.2.md) — v0.2 scope and release gates;
+- [`RELEASE-0.3.md`](./RELEASE-0.3.md) — planned observability and execution-economics release;
 - [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
 
 ## Intentional limits
