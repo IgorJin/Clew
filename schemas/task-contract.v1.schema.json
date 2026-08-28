@@ -23,6 +23,18 @@
     },
     "risk": { "enum": ["low", "medium", "high"] },
     "profile": { "enum": ["quick", "standard", "deep"] },
-    "base_ref": { "type": "string", "minLength": 1 }
+    "base_ref": { "type": "string", "minLength": 1 },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "args"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "args": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
   }
 }

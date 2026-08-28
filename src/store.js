@@ -14,7 +14,7 @@ import {
 } from './domain.js';
 import { applyMigrations } from './migrations.js';
 import { redactSecrets } from './security.js';
-import { evaluateEvidenceSet, verificationEnvironment } from './trust.js';
+import { evaluateEvidence, verificationEnvironment } from './trust.js';
 
 export class Store {
   constructor(file) {
@@ -448,8 +448,26 @@ export class Store {
     return reports.at(-1) ?? null;
   }
   evaluateTaskTrust(taskId, context = {}) {
-    const result = evaluateEvidenceSet(this.latestVerification(taskId)?.evidence ?? [], context);
+    const report = this.latestVerification(taskId);
     const task = this.getTask(taskId);
+    const revision = context.revision ?? report?.revision;
+    const policy = context.policy ?? this.listRuns(taskId).at(-1)?.policy ?? {};
+    const evaluated = (report?.evidence ?? []).map((item) => ({
+      ...item,
+      trust: evaluateEvidence(item, {
+        ...context,
+        revision,
+        policy,
+        environment:
+          context.environment ??
+          verificationEnvironment({ command: item.command, cwd: report.workspace, revision }),
+      }),
+    }));
+    const result = {
+      evidence: evaluated,
+      evaluated,
+      reusable: evaluated.some((item) => item.trust.reusable),
+    };
 
     if (task?.state === TASK_STATE.READY && !result.reusable) {
       this.runInTransaction(() => {
@@ -575,6 +593,11 @@ export class Store {
         expectedRevision: revision,
       });
       this.appendEvent(taskId, 'VERIFICATION_RECORDED', report);
+      if (
+        task.state === TASK_STATE.VERIFYING &&
+        normalizedEvidence.some((item) => item.result === 'passed')
+      )
+        this.setTaskState(taskId, TASK_STATE.READY);
 
       return report;
     });

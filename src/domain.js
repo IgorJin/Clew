@@ -257,6 +257,22 @@ export function validateTaskContract(contract) {
   const baseRef = contract.base_ref ?? 'HEAD';
 
   if (!isSafeGitRef(baseRef)) throw new Error('task.base_ref must be a safe Git ref');
+  const verification = contract.verification ?? [];
+
+  if (!Array.isArray(verification)) throw new Error('task.verification must be an array');
+  const normalizedVerification = verification.map((item, index) => {
+    const value = typeof item === 'string' ? { command: item } : item;
+
+    if (!value || typeof value.command !== 'string' || !value.command.trim())
+      throw new Error(`task.verification[${index}].command is required`);
+    if (
+      value.args !== undefined &&
+      (!Array.isArray(value.args) || value.args.some((arg) => typeof arg !== 'string'))
+    )
+      throw new Error(`task.verification[${index}].args must be an array of strings`);
+
+    return { command: value.command, args: value.args ?? [] };
+  });
 
   return {
     id: contract.id,
@@ -265,6 +281,7 @@ export function validateTaskContract(contract) {
     profile: contract.profile,
     risk,
     base_ref: baseRef,
+    ...(normalizedVerification.length ? { verification: normalizedVerification } : {}),
     acceptance: acceptance.map((acceptanceItem, acceptanceIndex) =>
       typeof acceptanceItem === 'string'
         ? { id: `AC-${acceptanceIndex + 1}`, criterion: acceptanceItem }

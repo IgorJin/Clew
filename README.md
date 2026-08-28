@@ -86,6 +86,10 @@ node bin/clew.js task result DEMO-1
 node bin/clew.js task history DEMO-1 --stage worker --attempt 1
 node bin/clew.js retry DEMO-1 worker --actor your-name --reason "rerun after inspection"
 node bin/clew.js verify DEMO-1 --revision <worker-sha> --actor your-name
+node bin/clew.js task result DEMO-1 --human
+node bin/clew.js complete DEMO-1 --revision <worker-sha> --actor your-name
+node bin/clew.js export DEMO-1 --dir /tmp/clew-export
+node bin/clew.js cleanup --retention-days 7
 node bin/clew.js worktree list
 node bin/clew.js worktree prune
 ```
@@ -96,7 +100,7 @@ node bin/clew.js worktree prune
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 
-Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history.
+Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.
 
 ## Release evidence
 
@@ -107,8 +111,8 @@ Role-specific models can be selected with `models.worker`, `models.architect`, `
 - [`RELEASE-0.2.md`](./RELEASE-0.2.md) — planned next-release scope, candidate gates, and fixed decisions;
 - [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
 
-## Intentional v0.1 limits
+## Intentional limits
 
-Clew has no dashboard, remote scheduler, PR/merge automation, runtime namespace isolation for ports/databases/containers, or automatic merge-conflict resolution. Node's built-in SQLite API is still marked experimental by Node.js. These are explicit post-v0.1 boundaries, not hidden dependencies.
+Clew has no dashboard, remote scheduler, PR/merge automation, or automatic merge-conflict resolution. Runtime namespaces are identifiers and coordination metadata; Clew does not provision ports, databases, or containers. Node's built-in SQLite API is still marked experimental by Node.js.
 
 Clew does not implement a model loop: native harnesses own coding intelligence and tools; Clew owns the durable task lifecycle above them.

@@ -1,19 +1,22 @@
-# v0.1 acceptance matrix
+# v0.2 acceptance matrix
 
-The release criteria in `spec.md` section 24 map to the following evidence.
+The release criteria in `spec.md` section 24 and the v0.2 lifecycle gates map to the following evidence.
 
-| #   | Criterion                                            | Evidence                                                                    |
-| --- | ---------------------------------------------------- | --------------------------------------------------------------------------- |
-| 1   | Codex initialize/thread/turn/tool/completion         | Automated fixture: `test/harness-conformance.test.js`; live procedure below |
-| 2   | OpenCode session/turn/events/completion/failure      | Automated SSE conformance; live `1.18.23` session/SSE/failure sign-off      |
-| 3   | Harness cwd uses an isolated worktree                | `test/acceptance.test.js`, `test/workspace.test.js`                         |
-| 4   | Architect plan is schema-valid before execution      | `test/architect.test.js`, scheduler Deep tests                              |
-| 5   | DAG dependencies do not double-start                 | scheduler DAG/concurrency tests                                             |
-| 6   | Verification is correlated to run/workspace/revision | Quick/Deep tests and successful native Codex command-evidence smoke         |
-| 7   | Harness completion cannot directly complete a task   | harness conformance and Quick scheduler tests                               |
-| 8   | Blocking review creates a bounded new attempt        | Standard feedback/session retry and Deep routed-timeout tests               |
-| 9   | Restart preserves and reconciles in-flight work      | single-worker and Deep recovery scheduler tests                             |
-| 10  | Event history explains every task                    | store, CLI and clean-checkout acceptance tests                              |
+| #   | Criterion                                                                  | Evidence                                                                    |
+| --- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1   | Codex initialize/thread/turn/tool/completion                               | Automated fixture: `test/harness-conformance.test.js`; live procedure below |
+| 2   | OpenCode session/turn/events/completion/failure                            | Automated SSE conformance; live `1.18.23` session/SSE/failure sign-off      |
+| 3   | Harness cwd uses an isolated worktree                                      | `test/acceptance.test.js`, `test/workspace.test.js`                         |
+| 4   | Architect plan is schema-valid before execution                            | `test/architect.test.js`, scheduler Deep tests                              |
+| 5   | DAG dependencies do not double-start                                       | scheduler DAG/concurrency tests                                             |
+| 6   | Verification is correlated to run/workspace/revision                       | Quick/Deep tests and successful native Codex command-evidence smoke         |
+| 7   | Harness completion cannot directly complete a task                         | harness conformance and Quick scheduler tests                               |
+| 8   | Blocking review creates a bounded new attempt                              | Standard feedback/session retry and Deep routed-timeout tests               |
+| 9   | Restart preserves and reconciles in-flight work                            | single-worker and Deep recovery scheduler tests                             |
+| 10  | Event history explains every task                                          | store, CLI and clean-checkout acceptance tests                              |
+| 11  | Verification re-runs pinned commands and invalidates stale READY evidence  | CLI verify, trust tests, v0.2 lifecycle acceptance                          |
+| 12  | Accepted results export outside the checkout and cleanup is retention-safe | result export, completion, cleanup acceptance                               |
+| 13  | v0.1 data upgrades without loss                                            | migration upgrade fixture                                                   |
 
 ## Live Codex procedure
 

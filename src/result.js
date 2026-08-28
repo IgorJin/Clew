@@ -59,13 +59,18 @@ export function exportResult(
 ) {
   const { manifest, checksum } = buildResultManifest(store, taskId, { cwd, revision });
   const target = resolve(outputDir);
+  const primaryCheckout = resolve(cwd);
+
+  if (target === primaryCheckout || target.startsWith(`${primaryCheckout}/`))
+    throw new Error('refusing export inside the primary checkout');
+
+  if (git(['status', '--porcelain'], cwd))
+    throw new Error('refusing export from a dirty primary checkout');
 
   mkdirSync(target, { recursive: true });
   const base = manifest.baseRevision;
   const result = manifest.resultRevision;
 
-  if (git(['status', '--porcelain'], cwd))
-    throw new Error('refusing export from a dirty primary checkout');
   git(['diff', '--quiet', base, result], cwd);
   writeFileSync(join(target, `${taskId}.manifest.json`), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(

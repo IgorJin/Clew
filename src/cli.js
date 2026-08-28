@@ -24,7 +24,6 @@ import { GitWorktreeManager } from './workspace.js';
 import { Scheduler } from './scheduler.js';
 import { loadConfig } from './config.js';
 import { redactSecrets } from './security.js';
-import { evaluateEvidenceSet } from './trust.js';
 import { createHash } from 'node:crypto';
 
 const cwd = process.cwd();
@@ -59,10 +58,68 @@ function getOptionValues(args, name) {
 function printJson(data) {
   console.log(JSON.stringify(data, null, 2));
 }
+function printResult(result, args) {
+  if (!args.includes('--human')) return printJson(result);
+  console.log(`Task: ${result.taskId}`);
+  console.log(`State: ${result.state}`);
+  console.log(`Revision: ${result.revision ?? 'not available'}`);
+  console.log(`Attempts: ${result.attempts.length}`);
+  console.log(`Evidence: ${result.evidence.length} item(s)`);
+  console.log(`Acceptance coverage: ${result.evidenceCoverage.join(', ') || 'none'}`);
+  console.log(`Workspace: ${result.workspace ?? 'not available'}`);
+}
+function printHumanHistory(history) {
+  console.log(`Task: ${history.taskId}`);
+  console.log(`Stages: ${history.stages.length}`);
+  console.log(`Runs: ${history.runs.length}`);
+  console.log(`Operator actions: ${history.actions.length}`);
+  console.log(`Events: ${history.events.length}`);
+}
+function parseCommand(command) {
+  if (Array.isArray(command)) return command;
+  const parts = command.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+
+  return parts.map((part) =>
+    part.startsWith('"') && part.endsWith('"') ? part.slice(1, -1) : part,
+  );
+}
+function executeVerification(check, cwd) {
+  const parts = parseCommand(check.command);
+  const [command, ...inlineArgs] = parts;
+  const args = [...inlineArgs, ...(check.args ?? [])];
+  const startedAt = new Date().toISOString();
+
+  try {
+    const output = execFileSync(command, args, { cwd, encoding: 'utf8', timeout: 120_000 });
+
+    return {
+      type: 'command',
+      command: [command, ...args].join(' '),
+      result: 'passed',
+      exitCode: 0,
+      output: redactSecrets(output),
+      startedAt,
+      endedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    return {
+      type: 'command',
+      command: [command, ...args].join(' '),
+      result: 'failed',
+      exitCode: error.status ?? 1,
+      output: redactSecrets(`${error.stdout ?? ''}${error.stderr ?? ''}`),
+      startedAt,
+      endedAt: new Date().toISOString(),
+    };
+  }
+}
 function printHelp() {
   console.log(
     `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID\n  clew doctor [--harness codex|opencode]`,
   );
+  console.log('  clew complete TASK --revision SHA [--actor ACTOR]');
+  console.log('  clew export TASK --dir DIR [--revision SHA]');
+  console.log('  clew cleanup [--retention-days N]');
 }
 
 export async function main(args) {
@@ -95,6 +152,7 @@ export async function main(args) {
           risk: getOptionValue(rest, '--risk', 'medium'),
           base_ref: getOptionValue(rest, '--base', 'HEAD'),
           acceptance: getOptionValues(rest, '--accept'),
+          verification: getOptionValues(rest, '--verify').map((command) => ({ command, args: [] })),
         };
       contract = validateTaskContract(contract);
       store.createTask(contract);
@@ -119,7 +177,9 @@ export async function main(args) {
       });
     }
     if (command === 'task' && subcommand === 'result') {
-      return printJson(store.getResultManifest(rest[0]));
+      store.evaluateTaskTrust(rest[0]);
+
+      return printResult(store.getResultManifest(rest[0]), rest);
     }
     if (command === 'task' && subcommand === 'history') {
       const taskId = rest[0];
@@ -131,7 +191,7 @@ export async function main(args) {
       if (attempt !== null && (!Number.isInteger(attempt) || attempt < 1))
         throw new Error('--attempt must be a positive integer');
 
-      return printJson({
+      const history = {
         taskId,
         stages: store.listStages(taskId),
         runs: store.listRuns(taskId, {
@@ -140,7 +200,9 @@ export async function main(args) {
         }),
         actions: store.listOperatorActions(taskId),
         events: store.listEvents(taskId),
-      });
+      };
+
+      return rest.includes('--human') ? printHumanHistory(history) : printJson(history);
     }
     if (command === 'plan') {
       const plan = store.getLatestPlan(subcommand);
@@ -207,8 +269,6 @@ export async function main(args) {
         throw new Error(`task ${taskId} cannot be retried from ${task.state}`);
       if (!store.listStages(taskId).some((stage) => stage.id === stageId))
         throw new Error(`stage not found: ${stageId}`);
-      if (stageId !== 'worker')
-        throw new Error('manual retry currently supports the worker stage only');
       const previousRuns = store.listRuns(taskId, { stageId });
       const maxAttempts =
         previousRuns.at(-1)?.policy?.maxAttempts ??
@@ -226,6 +286,9 @@ export async function main(args) {
         actor,
         reason: request.reason,
       });
+
+      store.setStage(taskId, stageId, 'QUEUED');
+      store.setTaskState(taskId, TASK_STATE.QUEUED);
       const runtimeConfig = resolveCommandConfig(config, rest);
       const manager = new GitWorktreeManager(runtimeConfig.worktreeRoot);
       const result = await new Scheduler(store, manager, { adapterConfig: runtimeConfig }).runTask(
@@ -234,6 +297,7 @@ export async function main(args) {
         getOptionValue(rest, '--harness'),
         getOptionValue(rest, '--review-harness'),
         getOptionValue(rest, '--architect'),
+        previousRuns.length === 1 ? previousRuns.at(-1).session_id : null,
       );
 
       return printJson({ action, result });
@@ -243,11 +307,37 @@ export async function main(args) {
       const revision = getOptionValue(rest, '--revision');
       const stageId = getOptionValue(rest, '--stage', 'worker');
       const actor = getOptionValue(rest, '--actor', process.env.USER || 'local-user');
+      const task = store.getTask(taskId);
 
       if (!taskId) throw new Error('task id is required');
       if (!revision) throw new Error('--revision is required');
+      if (!task) throw new Error(`task not found: ${taskId}`);
+      const commands = getOptionValues(rest, '--command').map((command) => ({ command, args: [] }));
+      const configured = commands.length ? commands : (task.contract.verification ?? []);
+      const previous = store.latestVerification(taskId, stageId)?.evidence ?? [];
+      const checks = configured.length
+        ? configured
+        : previous.filter((item) => item.type === 'command' && item.command);
 
-      return printJson(store.recordVerification({ taskId, stageId, revision, actor }));
+      if (!checks.length)
+        throw new Error('no verification commands configured; pass --command COMMAND');
+      const run = store
+        .listRuns(taskId, { stageId })
+        .reverse()
+        .find((item) => item.commit_sha === revision);
+
+      if (!run) throw new Error(`revision ${revision} is not a known ${stageId} run revision`);
+      const evidence = checks.map((check) => executeVerification(check, run?.workspace));
+      const report = store.recordVerification({ taskId, stageId, revision, actor, evidence });
+
+      if (evidence.some((item) => item.result !== 'passed')) {
+        const error = new Error('verification command failed');
+
+        error.code = 'VERIFICATION_FAILED';
+        throw error;
+      }
+
+      return printJson(report);
     }
     if (command === 'complete') {
       const taskId = subcommand;
@@ -257,16 +347,17 @@ export async function main(args) {
 
       if (!task) throw new Error(`task not found: ${taskId}`);
       if (!revision) throw new Error('--revision is required');
-      if (task.state !== TASK_STATE.READY)
+      store.evaluateTaskTrust(taskId, { revision });
+      const refreshedTask = store.getTask(taskId);
+
+      if (refreshedTask.state !== TASK_STATE.READY)
         throw new Error(`task ${taskId} must be READY before completion`);
       const manifest = store.getResultManifest(taskId);
       const latestRevision = manifest?.revision ?? store.listRuns(taskId).at(-1)?.commit_sha;
 
       if (latestRevision !== revision)
         throw new Error('completion revision does not match current READY revision');
-      const trust = evaluateEvidenceSet(store.latestVerification(taskId)?.evidence ?? [], {
-        revision,
-      });
+      const trust = store.evaluateTaskTrust(taskId, { revision });
 
       if (!trust.reusable) throw new Error('READY evidence is stale or untrusted');
 
@@ -296,10 +387,15 @@ export async function main(args) {
         throw new Error('export revision does not match result manifest');
       const base = store.getTask(taskId).contract.base_ref;
       const target = resolve(outputDir);
+      const primaryCheckout = resolve(cwd);
 
-      mkdirSync(target, { recursive: true });
+      if (target === primaryCheckout || target.startsWith(`${primaryCheckout}/`))
+        throw new Error('refusing export inside the primary checkout');
+
       if (execFileSync('git', ['status', '--porcelain'], { cwd, encoding: 'utf8' }).trim())
         throw new Error('refusing export from a dirty primary checkout');
+
+      mkdirSync(target, { recursive: true });
       const text = `${JSON.stringify(manifest, null, 2)}\n`;
       const checksum = createHash('sha256').update(text).digest('hex');
 

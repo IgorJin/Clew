@@ -16,7 +16,7 @@ function clew(args, cwd) {
   return JSON.parse(run(process.execPath, [cliFile, ...args], cwd));
 }
 
-function createTask(cwd, id, profile) {
+function createTask(cwd, id, profile, verification = false) {
   return run(
     process.execPath,
     [
@@ -33,6 +33,7 @@ function createTask(cwd, id, profile) {
       'the fixture reaches READY',
       '--profile',
       profile,
+      ...(verification ? ['--verify', 'node --version'] : []),
     ],
     cwd,
   );
@@ -70,18 +71,18 @@ test('clean-checkout acceptance fixture passes Quick, Standard, and Deep profile
 
 test('v0.2 local lifecycle exports, completes, and cleans a pinned result', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-v02-lifecycle-'));
-  const output = join(repo, 'exported');
+  const output = mkdtempSync(join(tmpdir(), 'clew-v02-export-'));
 
   try {
     run('git', ['init', '-b', 'main'], repo);
     run('git', ['config', 'user.email', 'test@example.com'], repo);
     run('git', ['config', 'user.name', 'Clew v0.2'], repo);
-    writeFileSync(join(repo, '.gitignore'), '.clew/\nexported/\n');
+    writeFileSync(join(repo, '.gitignore'), '.clew/\n');
     writeFileSync(join(repo, 'README.md'), 'v0.2 acceptance\n');
     run('git', ['add', '.gitignore', 'README.md'], repo);
     run('git', ['commit', '-m', 'v0.2 acceptance'], repo);
     run(process.execPath, [cliFile, 'init'], repo);
-    createTask(repo, 'ACC-V02', 'quick');
+    createTask(repo, 'ACC-V02', 'quick', true);
 
     assert.equal(clew(['run', 'ACC-V02', '--harness', 'fake'], repo).state, 'READY');
     const result = clew(['task', 'result', 'ACC-V02'], repo);
@@ -89,6 +90,13 @@ test('v0.2 local lifecycle exports, completes, and cleans a pinned result', () =
     assert.equal(result.state, 'READY');
     assert.ok(result.revision);
     assert.ok(result.attempts[0].runtimeNamespace.value);
+
+    const verification = clew(
+      ['verify', 'ACC-V02', '--revision', result.revision, '--actor', 'verifier'],
+      repo,
+    );
+
+    assert.equal(verification.evidence[0].result, 'passed');
 
     const exported = clew(['export', 'ACC-V02', '--dir', output], repo);
 
@@ -104,5 +112,6 @@ test('v0.2 local lifecycle exports, completes, and cleans a pinned result', () =
     assert.ok(clew(['cleanup', '--retention-days', '0'], repo).removed.length > 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
+    rmSync(output, { recursive: true, force: true });
   }
 });
