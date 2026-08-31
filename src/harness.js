@@ -39,6 +39,14 @@ export const TURN_STATUS = Object.freeze({
 
 const APPROVAL_DECISIONS = Object.freeze(Object.values(APPROVAL_DECISION));
 
+function openCodeModel(value) {
+  if (typeof value !== 'string' || !value.includes('/')) return undefined;
+  const [providerID, ...modelParts] = value.split('/');
+  const modelID = modelParts.join('/');
+
+  return providerID && modelID ? { providerID, modelID } : undefined;
+}
+
 function hasInterruptableTurn(interruptRequested, threadId, turnId, settled) {
   return interruptRequested && Boolean(threadId) && Boolean(turnId) && !settled;
 }
@@ -674,7 +682,7 @@ export class OpenCodeHarness {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
-            ...(model ? { model } : {}),
+            ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
           }),
           signal: controller.signal,
         },
@@ -734,7 +742,7 @@ export class OpenCodeHarness {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
-          ...(model ? { model } : {}),
+          ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
         }),
         signal: controller.signal,
       },
