@@ -90,34 +90,60 @@ function App() {
   const [diagnostic, setDiagnostic] = useState(false);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
-  const [live, setLive] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshTimer = useRef<number | undefined>(undefined);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
-  const refresh = useCallback(async () => {
-    const { tasks: next, state } = await loadTasks();
-    setTasks(next);
-    setConnection(state);
-    setLive(state === 'connected');
-    if (next[0] && !next.some((task) => task.id === selectedRef.current)) {
-      setSelected(next[0].id);
-      sessionStorage.setItem('clew-selected-task', next[0].id);
-    }
+  const refresh = useCallback(() => {
+    if (refreshInFlight.current) return refreshInFlight.current;
+    const operation = loadTasks().then(({ tasks: next, state }) => {
+      setConnection(state);
+      if (state === 'connected' || state === 'fixture') {
+        setTasks(next);
+        setLastUpdatedAt(new Date());
+        if (next[0] && !next.some((task) => task.id === selectedRef.current)) {
+          setSelected(next[0].id);
+          sessionStorage.setItem('clew-selected-task', next[0].id);
+        }
+      }
+    });
+
+    refreshInFlight.current = operation.finally(() => {
+      refreshInFlight.current = null;
+    });
+
+    return refreshInFlight.current;
   }, []);
   useEffect(() => {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    if (!live) return undefined;
-    return subscribeToEvents(
+    const scheduleRefresh = () => {
+      if (refreshTimer.current !== undefined) return;
+      refreshTimer.current = window.setTimeout(() => {
+        refreshTimer.current = undefined;
+        void refresh();
+      }, 100);
+    };
+    const unsubscribe = subscribeToEvents(
       lastCursor.current,
       (event) => {
         lastCursor.current = event.cursor;
-        void refresh();
+        scheduleRefresh();
       },
-      setConnection,
+      (state) => {
+        setConnection(state);
+        if (state === 'connected') scheduleRefresh();
+      },
     );
-  }, [live, refresh]);
+
+    return () => {
+      if (refreshTimer.current !== undefined) window.clearTimeout(refreshTimer.current);
+      unsubscribe();
+    };
+  }, [refresh]);
   const task = useMemo(
     () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
     [selected, tasks],
@@ -147,7 +173,13 @@ function App() {
       </div>
     );
   }
+  const canMutate = connection === 'connected' || connection === 'fixture';
   const act = async (args: string[], success: string) => {
+    if (!canMutate) {
+      setNotice('Actions are disabled while the control plane is disconnected');
+
+      return;
+    }
     if (!window.confirm(`Confirm ${args.join(' ')}?`)) return;
     try {
       const result = await execute(args);
@@ -256,7 +288,9 @@ function App() {
               <div className="hero-actions">
                 <button
                   className="button secondary"
-                  disabled={(!canStart && !canContinue) || (canContinue && !message.trim())}
+                  disabled={
+                    !canMutate || (!canStart && !canContinue) || (canContinue && !message.trim())
+                  }
                   title={
                     canContinue && !message.trim()
                       ? 'Add an operator message before continuing'
@@ -272,7 +306,7 @@ function App() {
                 </button>
                 <button
                   className="button primary"
-                  disabled={task.state !== 'READY' || !task.revision}
+                  disabled={!canMutate || task.state !== 'READY' || !task.revision}
                   title={!task.revision ? 'A verified result revision is required' : undefined}
                   onClick={() =>
                     act(['complete', task.id, '--revision', task.revision!], 'Task completed')
@@ -295,8 +329,10 @@ function App() {
               <div className="connection-banner" role="alert">
                 <WifiOff size={16} />
                 {connection === 'incompatible'
-                  ? 'Daemon contract is incompatible. Fixture data remains visible, but actions are unavailable.'
-                  : 'Daemon connection is unavailable. Showing the last safe fixture state.'}
+                  ? 'Daemon contract is incompatible. Last known data remains visible, but actions are disabled.'
+                  : `Daemon connection is unavailable. Showing last known data${
+                      lastUpdatedAt ? ` from ${lastUpdatedAt.toLocaleTimeString()}` : ''
+                    }; actions are disabled.`}
               </div>
             )}
             <section className="summary-grid">
@@ -363,6 +399,7 @@ function App() {
                         <p>Review the proposed stages before execution starts.</p>
                         <button
                           className="text-button"
+                          disabled={!canMutate}
                           onClick={() => act(['approve', task.id], 'Plan approved')}
                         >
                           Approve plan <ChevronRight size={14} />
@@ -384,13 +421,14 @@ function App() {
                     <label htmlFor="operator-message">Add a message</label>
                     <textarea
                       id="operator-message"
+                      disabled={!canMutate}
                       value={message}
                       onInput={(event) => setMessage(event.currentTarget.value)}
                       placeholder="Leave context for the next attempt…"
                     />
                     <button
                       className="button secondary full"
-                      disabled={!message.trim()}
+                      disabled={!canMutate || !message.trim()}
                       onClick={() =>
                         act(
                           ['task', 'message', task.id, '--message', message],
@@ -403,7 +441,7 @@ function App() {
                   </div>
                   <button
                     className="text-button"
-                    disabled={!task.sessionId || task.sessionHarness !== 'codex'}
+                    disabled={!canMutate || !task.sessionId || task.sessionHarness !== 'codex'}
                     title={
                       task.sessionId && task.sessionHarness === 'codex'
                         ? `Open ${task.sessionId} in ${task.sessionWorkspace ?? 'its workspace'}`

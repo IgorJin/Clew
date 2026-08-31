@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadTasks, subscribeToEvents } from './api';
+import { execute, loadTasks, subscribeToEvents } from './api';
 
 const response = (body: unknown, status = 200) =>
   new Response(body === null ? null : JSON.stringify(body), {
@@ -7,68 +7,71 @@ const response = (body: unknown, status = 200) =>
     headers: { 'content-type': 'application/json' },
   });
 
-function envelope(payload: unknown) {
-  return { version: 1, requestId: 'request-1', kind: 'response', name: 'cli.execute', payload };
-}
-
 function installApi({ invalidThread = false, plannedOnly = false } = {}) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      if (!init?.body) return response(null, 204);
-      const body = JSON.parse(String(init.body)) as { payload: { args: string[] } };
-      const args = body.payload.args;
-      if (args[0] === 'task' && args[1] === 'list') return response(envelope([{ id: 'T-1' }]));
-      if (args[0] === 'task' && args[1] === 'show')
-        return response(
-          envelope({
-            id: 'T-1',
-            state: 'READY',
-            contract: { title: 'Projection', goal: 'Show the real thread', profile: 'standard' },
-            plan: plannedOnly
-              ? {
-                  status: 'PENDING_APPROVAL',
-                  plan: {
-                    stages: [
-                      { id: 'backend', kind: 'worker' },
-                      { id: 'frontend', kind: 'worker' },
-                      { id: 'integration', kind: 'integration' },
-                    ],
-                  },
-                }
-              : null,
-            stages: plannedOnly ? [] : [{ id: 'worker', status: 'COMPLETED' }],
-            runs: [{ status: 'COMPLETED', commit_sha: 'abc123' }],
-            review: {
-              findings: [
-                { severity: 'advisory', criterion: 'AC-1', reason: 'Keep the copy concise' },
-              ],
-            },
-            completion: null,
-          }),
-        );
-      if (args[0] === 'task' && args[1] === 'thread')
-        return response(
-          envelope({
-            version: 1,
-            items: [
-              {
-                version: 1,
-                id: 'thread-1',
-                cursor: invalidThread ? 0 : 1,
-                kind: 'task_created',
-                at: '2026-08-28T09:42:00.000Z',
-                summary: 'Task created: Projection',
-                source: { kind: 'event', id: 'event-1' },
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith('/api/v1/bootstrap')) return response(null, 204);
+      if (url.endsWith('/api/v1/snapshot'))
+        return response({
+          version: 1,
+          cursor: 1,
+          generatedAt: '2026-08-28T09:42:00.000Z',
+          tasks: [
+            {
+              show: {
+                id: 'T-1',
+                state: 'READY',
+                contract: {
+                  title: 'Projection',
+                  goal: 'Show the real thread',
+                  profile: 'standard',
+                },
+                plan: plannedOnly
+                  ? {
+                      status: 'PENDING_APPROVAL',
+                      plan: {
+                        stages: [
+                          { id: 'backend', kind: 'worker' },
+                          { id: 'frontend', kind: 'worker' },
+                          { id: 'integration', kind: 'integration' },
+                        ],
+                      },
+                    }
+                  : null,
+                stages: plannedOnly ? [] : [{ id: 'worker', status: 'COMPLETED' }],
+                runs: [{ status: 'COMPLETED', commit_sha: 'abc123' }],
+                review: {
+                  findings: [
+                    { severity: 'advisory', criterion: 'AC-1', reason: 'Keep the copy concise' },
+                  ],
+                },
+                completion: null,
               },
-            ],
-            nextCursor: null,
-            hasMore: false,
-            redaction: 'public-safe',
-          }),
-        );
-      if (args[0] === 'task' && args[1] === 'history') return response(envelope({ events: [] }));
-      throw new Error(`unexpected command: ${args.join(' ')}`);
+              thread: {
+                version: 1,
+                items: [
+                  {
+                    version: 1,
+                    id: 'thread-1',
+                    cursor: invalidThread ? 0 : 1,
+                    kind: 'task_created',
+                    at: '2026-08-28T09:42:00.000Z',
+                    summary: 'Task created: Projection',
+                    source: { kind: 'event', id: 'event-1' },
+                  },
+                ],
+                nextCursor: null,
+                hasMore: false,
+                redaction: 'public-safe',
+              },
+              history: { events: [] },
+            },
+          ],
+        });
+      throw new Error(`unexpected request: ${url}`);
     }),
   );
 }
@@ -87,6 +90,10 @@ describe('control-plane client', () => {
       findings: 1,
     });
     expect(result.tasks[0].thread.items[0].summary).toBe('Task created: Projection');
+    const urls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+
+    expect(urls.filter((url) => url.endsWith('/api/v1/snapshot'))).toHaveLength(1);
+    expect(urls.some((url) => url.endsWith('/api/v1/command'))).toBe(false);
   });
 
   it('does not mistake a Vite HTML fallback for daemon bootstrap', async () => {
@@ -119,7 +126,25 @@ describe('control-plane client', () => {
     ]);
   });
 
-  it('stops the stream when a reconnect cursor regresses', () => {
+  it('sends operator commands to the shared service boundary', async () => {
+    sessionStorage.setItem('clew-session', '1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          kind: 'command',
+          name: 'service.execute',
+          payload: { args: ['run', 'T-1'] },
+        });
+
+        return response({ version: 1, kind: 'response', payload: { state: 'READY' } });
+      }),
+    );
+
+    await expect(execute(['run', 'T-1'])).resolves.toEqual({ state: 'READY' });
+  });
+
+  it('stops the stream when a reconnect cursor regresses', async () => {
     sessionStorage.setItem('clew-session', '1');
     const states: string[] = [];
     class FakeSocket {
@@ -135,6 +160,7 @@ describe('control-plane client', () => {
     vi.stubGlobal('WebSocket', FakeSocket);
 
     subscribeToEvents(5, vi.fn(), (state) => states.push(state));
+    await vi.waitFor(() => expect(FakeSocket.instance).toBeTruthy());
     FakeSocket.instance.onmessage?.({ data: JSON.stringify({ cursor: 4 }) } as MessageEvent);
 
     expect(states).toEqual(['reconnecting', 'incompatible']);

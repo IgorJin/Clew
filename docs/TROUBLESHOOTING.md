@@ -22,6 +22,10 @@ Clew intentionally fails the run. A native worker must execute at least one comm
 
 Run the same task again. Clew marks abandoned `RUNNING` records as `INTERRUPTED`, transitions through `RECOVERING`, and resumes a persisted native session when available.
 
+## The Web UI reports that the daemon is disconnected
+
+Run `clew daemon status`. Status performs an authenticated health check; `stale` means the previous process exited without cleanup, while `unreachable` means the recorded PID is still alive and ownership is deliberately preserved. `clew daemon start` safely replaces only stale daemon ownership and starts a background process on the stable default port `43176`. Inspect recent structured activity with `clew daemon logs --lines 200`, or follow it live with `clew daemon logs --follow`. `.clew/daemon.log` contains safe JSON records for lifecycle, HTTP, WebSocket, and command events; `.clew/daemon.stderr.log` contains process stderr. The UI reconnects and refreshes automatically after the daemon returns; operator actions stay disabled while only last-known data is available.
+
 ## Worktrees remain after execution
 
 Clew uses a retention policy so results stay inspectable. List and safely prune them with:

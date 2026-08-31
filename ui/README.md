@@ -10,4 +10,4 @@ npm test
 npm run build
 ```
 
-The production build is emitted to `dist/` and included in the installed Clew package. The local daemon serves `/`, `/index.html`, and `/assets/*` without exposing its bearer token to JavaScript. The UI consumes `task show`, `task thread`, and `task history`, and only renders curated summaries and identifiers; it does not render native prompts, tool output, arbitrary HTML, or raw event payloads.
+The production build is emitted to `dist/` and included in the installed Clew package. The local daemon serves `/`, `/index.html`, and `/assets/*` without exposing its bearer token to JavaScript. The UI consumes one aggregated `/api/v1/snapshot`, coalesces WebSocket event bursts, and only renders curated summaries and identifiers; it does not render native prompts, tool output, arbitrary HTML, or raw event payloads. Disconnected production views retain last-known data for inspection but disable all operator actions.

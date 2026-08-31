@@ -1,5 +1,5 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import {
   chmodSync,
   closeSync,
@@ -7,13 +7,19 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, resolve, relative } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
+import pino from 'pino';
+import WebSocket, { WebSocketServer } from 'ws';
 import { Store } from './store.js';
+import { ClewService } from './control-service.js';
+import { loadConfig } from './config.js';
+import { Observability } from './observability.js';
 import {
   validateApiEnvelope,
   validateWebSocketEvent,
@@ -23,6 +29,9 @@ import {
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const UI_ROOT = join(PACKAGE_ROOT, 'ui', 'dist');
 const DAEMON_VERSION = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')).version;
+
+export const DEFAULT_DAEMON_PORT = 43176;
+const DAEMON_FILES = ['daemon.json', 'daemon.lock', 'daemon.token', 'daemon.stderr.log'];
 const ASSET_TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -34,12 +43,86 @@ const ASSET_TYPES = {
   '.woff2': 'font/woff2',
 };
 
+function daemonPaths(cwd) {
+  const stateDirectory = join(resolve(cwd), '.clew');
+
+  return {
+    stateDirectory,
+    metadata: join(stateDirectory, 'daemon.json'),
+    lock: join(stateDirectory, 'daemon.lock'),
+    token: join(stateDirectory, 'daemon.token'),
+    log: join(stateDirectory, 'daemon.log'),
+    stderrLog: join(stateDirectory, 'daemon.stderr.log'),
+  };
+}
+
+function removeDaemonState(cwd) {
+  const { stateDirectory } = daemonPaths(cwd);
+
+  for (const file of DAEMON_FILES) rmSync(join(stateDirectory, file), { force: true });
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return false;
+
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 1_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function json(response, status, body) {
   response.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
   });
   response.end(JSON.stringify(body));
+}
+
+function commandLogFields(args) {
+  const [command, subcommand, ...rest] = args;
+  const taskId =
+    command === 'task'
+      ? subcommand === 'create'
+        ? undefined
+        : rest[0]
+      : [
+            'approve',
+            'complete',
+            'continue',
+            'events',
+            'interrupt',
+            'plan',
+            'retry',
+            'run',
+            'status',
+            'verify',
+          ].includes(command)
+        ? subcommand
+        : undefined;
+
+  return {
+    command: [command, subcommand].filter(Boolean).join('.'),
+    ...(taskId && !taskId.startsWith('--') ? { taskId } : {}),
+  };
 }
 
 function readBody(request) {
@@ -74,46 +157,6 @@ function tokenFrom(request) {
   return cookie?.slice('clew_token='.length) ?? null;
 }
 
-function runCli(args, cwd) {
-  const cliArgs =
-    args[0] === 'task' && args[1] === 'create' && !args.includes('--json')
-      ? [...args, '--json']
-      : args;
-
-  return new Promise((resolveRun, reject) => {
-    execFile(
-      process.execPath,
-      [join(PACKAGE_ROOT, 'bin/clew.js'), ...cliArgs],
-      {
-        cwd,
-        env: { ...process.env, CLEW_DAEMON_EXECUTION: '1' },
-        maxBuffer: 10 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        if (error)
-          reject(
-            Object.assign(new Error(stderr.trim() || error.message), {
-              code: error.code,
-              stdout,
-              stderr,
-            }),
-          );
-        else {
-          try {
-            resolveRun(stdout.trim() ? JSON.parse(stdout) : null);
-          } catch (parseError) {
-            reject(
-              new Error(`CLI returned invalid JSON: ${parseError.message}`, {
-                cause: parseError,
-              }),
-            );
-          }
-        }
-      },
-    );
-  });
-}
-
 export class LocalDaemon {
   constructor({ cwd = process.cwd(), port = 0 } = {}) {
     this.cwd = resolve(cwd);
@@ -125,26 +168,70 @@ export class LocalDaemon {
     this.clients = new Map();
     this.lockFd = null;
     this.server = null;
+    this.webSocketServer = null;
+    this.heartbeat = null;
     this.store = null;
+    this.control = null;
+    this.observability = null;
+    this.logger = null;
     this.running = false;
     this.commandQueue = Promise.resolve();
   }
 
-  start() {
+  async start() {
     if (this.running) throw new Error('daemon is already running');
     mkdirSync(this.stateDir, { recursive: true });
     try {
       this.lockFd = openSync(this.lockPath, 'wx', 0o600);
     } catch {
-      throw new Error(`daemon state directory is already owned: ${this.stateDir}`);
+      const status = await daemonStatus(this.cwd);
+
+      if (status.status === 'running' || status.status === 'unreachable')
+        throw new Error(`daemon state directory is already owned: ${this.stateDir}`);
+      removeDaemonState(this.cwd);
+      this.lockFd = openSync(this.lockPath, 'wx', 0o600);
     }
     const token = randomBytes(32).toString('hex');
 
     writeFileSync(this.tokenPath, `${token}\n`, { mode: 0o600 });
     chmodSync(this.tokenPath, 0o600);
+    this.logger = pino(
+      {
+        level: process.env.CLEW_LOG_LEVEL ?? 'info',
+        base: { service: 'clew-daemon', version: DAEMON_VERSION },
+      },
+      pino.destination({ dest: daemonPaths(this.cwd).log, mkdir: true, sync: true }),
+    );
     this.store = new Store(join(this.stateDir, 'clew.sqlite'));
+    const config = loadConfig(this.cwd);
+
+    this.observability = new Observability({
+      cwd: this.cwd,
+      config: config.observability,
+      store: this.store,
+    });
+    this.store.setEventObserver(this.observability);
+    this.control = new ClewService({ cwd: this.cwd, store: this.store, config });
     this.server = createServer((request, response) => this.handle(request, response));
-    this.server.on('upgrade', (request, socket) => this.handleUpgrade(request, socket, token));
+    this.webSocketServer = new WebSocketServer({
+      noServer: true,
+      perMessageDeflate: false,
+      maxPayload: 1_000_000,
+    });
+    this.server.on('upgrade', (request, socket, head) =>
+      this.handleUpgrade(request, socket, head, token),
+    );
+    this.heartbeat = setInterval(() => {
+      for (const client of this.clients.keys()) {
+        if (client.isAlive === false) {
+          client.terminate();
+          continue;
+        }
+        client.isAlive = false;
+        client.ping();
+      }
+    }, 30_000);
+    this.heartbeat.unref();
     this.server.listen(this.port, '127.0.0.1');
     this.server.once('listening', () => {
       const address = this.server.address();
@@ -156,15 +243,21 @@ export class LocalDaemon {
         startedAt: new Date().toISOString(),
         endpoint: `http://127.0.0.1:${address.port}`,
         tokenFile: this.tokenPath,
+        logFile: daemonPaths(this.cwd).log,
+        stderrLogFile: daemonPaths(this.cwd).stderrLog,
       };
 
       writeFileSync(this.metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, { mode: 0o600 });
       chmodSync(this.metadataPath, 0o600);
       this.metadata = metadata;
       this.running = true;
+      this.logger.info(
+        { event: 'daemon.started', daemonId: metadata.daemonId, endpoint: metadata.endpoint },
+        'daemon started',
+      );
     });
 
-    return new Promise((resolveStart, rejectStart) => {
+    return await new Promise((resolveStart, rejectStart) => {
       this.server.once('listening', () => resolveStart(this.metadata));
       this.server.once('error', rejectStart);
     });
@@ -172,11 +265,22 @@ export class LocalDaemon {
 
   async stop() {
     if (!this.server) return;
-    for (const client of this.clients.keys()) client.end();
+    this.logger?.info({ event: 'daemon.stopping', clients: this.clients.size }, 'daemon stopping');
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = null;
+    for (const client of this.clients.keys()) client.terminate();
+    this.clients.clear();
+    await new Promise((resolveClose) => this.webSocketServer.close(resolveClose));
     await new Promise((resolveClose) => this.server.close(resolveClose));
+    await this.observability?.shutdown();
+    this.observability = null;
     this.store?.close();
     this.store = null;
+    this.control = null;
     this.running = false;
+    this.logger?.info({ event: 'daemon.stopped' }, 'daemon stopped');
+    this.logger?.flush();
+    this.logger = null;
     if (existsSync(this.metadataPath)) unlinkSync(this.metadataPath);
     if (existsSync(this.tokenPath)) unlinkSync(this.tokenPath);
     if (this.lockFd !== null) {
@@ -185,6 +289,7 @@ export class LocalDaemon {
     }
     if (existsSync(this.lockPath)) unlinkSync(this.lockPath);
     this.server = null;
+    this.webSocketServer = null;
   }
 
   authenticate(request) {
@@ -193,9 +298,22 @@ export class LocalDaemon {
   }
 
   async handle(request, response) {
-    try {
-      const pathname = new URL(request.url, this.metadata.endpoint).pathname;
+    const startedAt = process.hrtime.bigint();
+    const pathname = new URL(request.url, this.metadata.endpoint).pathname;
 
+    response.once('finish', () => {
+      this.logger?.info(
+        {
+          event: 'http.request',
+          method: request.method,
+          path: pathname,
+          statusCode: response.statusCode,
+          durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+        },
+        'HTTP request completed',
+      );
+    });
+    try {
       if (request.method === 'GET' && (pathname === '/' || pathname === '/index.html'))
         return this.uiIndex(response);
       if (request.method === 'GET' && pathname.startsWith('/assets/'))
@@ -233,10 +351,13 @@ export class LocalDaemon {
       if (request.method === 'GET' && request.url === '/api/v1/health')
         return json(response, 200, {
           version: DAEMON_VERSION,
+          daemonId: this.metadata.daemonId,
           endpoint: this.metadata.endpoint,
           stateDirectory: this.stateDir,
           status: 'running',
         });
+      if (request.method === 'GET' && request.url === '/api/v1/snapshot')
+        return json(response, 200, this.control.snapshot());
       if (request.method === 'POST' && request.url === '/api/v1/shutdown') {
         json(response, 202, { version: 1, status: 'stopping' });
         Promise.resolve().then(() => this.stop());
@@ -256,10 +377,10 @@ export class LocalDaemon {
 
       if (
         envelope.kind !== 'command' ||
-        envelope.name !== 'cli.execute' ||
+        !['service.execute', 'cli.execute'].includes(envelope.name) ||
         !Array.isArray(envelope.payload?.args)
       )
-        throw new Error('expected cli.execute command');
+        throw new Error('expected service.execute command');
       const result = await this.enqueue(envelope.payload.args);
 
       this.broadcastEvents();
@@ -273,6 +394,16 @@ export class LocalDaemon {
       });
     } catch (error) {
       const unauthorized = error.message === 'unauthorized';
+
+      this.logger?.warn(
+        {
+          event: 'http.request.failed',
+          method: request.method,
+          path: pathname,
+          error: error.message,
+        },
+        'HTTP request failed',
+      );
 
       return json(response, unauthorized ? 401 : 400, {
         version: 1,
@@ -288,7 +419,37 @@ export class LocalDaemon {
   }
 
   enqueue(args) {
-    const next = this.commandQueue.then(() => runCli(args, this.cwd));
+    const fields = commandLogFields(args);
+    const next = this.commandQueue.then(async () => {
+      const startedAt = process.hrtime.bigint();
+
+      this.logger?.info({ event: 'command.started', ...fields }, 'command started');
+      try {
+        const result = await this.control.execute(args);
+
+        this.logger?.info(
+          {
+            event: 'command.completed',
+            ...fields,
+            durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+          },
+          'command completed',
+        );
+
+        return result;
+      } catch (error) {
+        this.logger?.warn(
+          {
+            event: 'command.failed',
+            ...fields,
+            durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,
+            error: error.message,
+          },
+          'command failed',
+        );
+        throw error;
+      }
+    });
 
     this.commandQueue = next.catch(() => undefined);
 
@@ -354,31 +515,54 @@ export class LocalDaemon {
     response.end(readFileSync(path));
   }
 
-  handleUpgrade(request, socket, token) {
-    if (
-      tokenFrom(request) !== token ||
-      request.headers.origin !== this.metadata.endpoint ||
-      request.headers.upgrade?.toLowerCase() !== 'websocket'
-    )
+  handleUpgrade(request, socket, head, token) {
+    const authenticated = tokenFrom(request) === token;
+    const sameOrigin = request.headers.origin === this.metadata.endpoint;
+    const upgrading = request.headers.upgrade?.toLowerCase() === 'websocket';
+
+    if (!authenticated || !sameOrigin || !upgrading) {
+      this.logger?.warn(
+        { event: 'websocket.rejected', authenticated, sameOrigin, upgrading },
+        'WebSocket rejected',
+      );
+
       return socket.destroy();
-    const key = request.headers['sec-websocket-key'];
+    }
+    this.webSocketServer.handleUpgrade(request, socket, head, (client) => {
+      this.webSocketServer.emit('connection', client, request);
+      this.attachWebSocket(client, request);
+    });
+  }
 
-    if (!key) return socket.destroy();
-    const accept = createHash('sha1')
-      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-      .digest('base64');
-
-    socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
-    );
+  attachWebSocket(client, request) {
     const after = Number(
       new URL(request.url, this.metadata.endpoint).searchParams.get('after') ?? 0,
     );
 
-    this.clients.set(socket, after);
-    socket.on('close', () => this.clients.delete(socket));
-    socket.on('error', () => this.clients.delete(socket));
-    this.sendEvents(socket, after);
+    client.isAlive = true;
+    this.clients.set(client, after);
+    this.logger?.info(
+      { event: 'websocket.connected', after, clients: this.clients.size },
+      'WebSocket connected',
+    );
+    client.on('pong', () => {
+      client.isAlive = true;
+    });
+    client.on('close', (code) => {
+      this.clients.delete(client);
+      this.logger?.info(
+        { event: 'websocket.closed', code, clients: this.clients.size },
+        'WebSocket closed',
+      );
+    });
+    client.on('error', (error) => {
+      this.clients.delete(client);
+      this.logger?.warn(
+        { event: 'websocket.error', code: error.code, error: error.message },
+        'WebSocket error',
+      );
+    });
+    this.sendEvents(client, after);
   }
 
   sendEvents(socket, after) {
@@ -387,6 +571,7 @@ export class LocalDaemon {
       .all(after);
 
     for (const item of rows) {
+      if (socket.readyState !== WebSocket.OPEN) break;
       const event = validateWebSocketEvent({
         version: 1,
         cursor: item.seq,
@@ -396,15 +581,15 @@ export class LocalDaemon {
         taskId: item.task_id,
         payload: JSON.parse(item.payload),
       });
-      const body = Buffer.from(JSON.stringify(event));
-      const header =
-        body.length < 126
-          ? Buffer.from([0x81, body.length])
-          : Buffer.from([0x81, 126, body.length >> 8, body.length & 255]);
 
-      socket.write(Buffer.concat([header, body]));
+      socket.send(JSON.stringify(event));
       this.clients.set(socket, item.seq);
     }
+    if (rows.length)
+      this.logger?.debug(
+        { event: 'websocket.replayed', count: rows.length, after, nextCursor: rows.at(-1).seq },
+        'WebSocket events replayed',
+      );
   }
 
   broadcastEvents() {
@@ -413,27 +598,113 @@ export class LocalDaemon {
 }
 
 export function readDaemonMetadata(cwd = process.cwd()) {
-  const path = join(resolve(cwd), '.clew', 'daemon.json');
+  const path = daemonPaths(cwd).metadata;
 
   if (!existsSync(path)) throw new Error('daemon is not running');
 
   return JSON.parse(readFileSync(path, 'utf8'));
 }
 
+export function daemonLogFile(cwd = process.cwd()) {
+  return daemonPaths(cwd).log;
+}
+
+export async function daemonStatus(cwd = process.cwd()) {
+  let metadata;
+
+  try {
+    metadata = readDaemonMetadata(cwd);
+  } catch {
+    return { status: 'stopped', healthy: false };
+  }
+
+  try {
+    const token = readFileSync(metadata.tokenFile, 'utf8').trim();
+    const response = await fetchWithTimeout(`${metadata.endpoint}/api/v1/health`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const health = await response.json();
+
+    if (!response.ok || health.daemonId !== metadata.daemonId)
+      throw new Error('daemon health identity mismatch');
+
+    return { ...metadata, status: 'running', healthy: true };
+  } catch {
+    return {
+      ...metadata,
+      status: isProcessAlive(metadata.pid) ? 'unreachable' : 'stale',
+      healthy: false,
+    };
+  }
+}
+
+export async function startDaemonProcess(
+  cwd = process.cwd(),
+  { port = DEFAULT_DAEMON_PORT, timeoutMs = 8_000 } = {},
+) {
+  const existing = await daemonStatus(cwd);
+
+  if (existing.status === 'running') return { ...existing, alreadyRunning: true };
+  if (existing.status === 'unreachable')
+    throw new Error(
+      `daemon process ${existing.pid} is alive but its health endpoint is unreachable`,
+    );
+  if (existing.status === 'stale') removeDaemonState(cwd);
+  const paths = daemonPaths(cwd);
+
+  mkdirSync(paths.stateDirectory, { recursive: true });
+  const stderrFd = openSync(paths.stderrLog, 'a', 0o600);
+  const child = spawn(
+    process.execPath,
+    [join(PACKAGE_ROOT, 'bin', 'clew.js'), 'daemon', 'serve', '--port', String(port)],
+    {
+      cwd: resolve(cwd),
+      detached: true,
+      stdio: ['ignore', stderrFd, stderrFd],
+    },
+  );
+
+  closeSync(stderrFd);
+  child.unref();
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const status = await daemonStatus(cwd);
+
+    if (status.status === 'running')
+      return { ...status, logFile: paths.log, stderrLogFile: paths.stderrLog };
+    if (child.exitCode !== null)
+      throw new Error(`daemon exited during startup; inspect ${paths.log}`);
+    await delay(50);
+  }
+
+  throw new Error(`daemon startup timed out; inspect ${paths.log}`);
+}
+
 export async function daemonRequest(cwd, args) {
   const metadata = readDaemonMetadata(cwd);
   const token = readFileSync(metadata.tokenFile, 'utf8').trim();
-  const response = await fetch(`${metadata.endpoint}/api/v1/command`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      version: 1,
-      requestId: randomUUID(),
-      kind: 'command',
-      name: 'cli.execute',
-      payload: { args },
-    }),
-  });
+  let response;
+
+  try {
+    response = await fetchWithTimeout(
+      `${metadata.endpoint}/api/v1/command`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          version: 1,
+          requestId: randomUUID(),
+          kind: 'command',
+          name: 'service.execute',
+          payload: { args },
+        }),
+      },
+      30_000,
+    );
+  } catch (error) {
+    throw new Error('daemon is unavailable; run `clew daemon start`', { cause: error });
+  }
   const body = await response.json();
 
   if (!response.ok)
@@ -443,9 +714,20 @@ export async function daemonRequest(cwd, args) {
 }
 
 export async function stopDaemon(cwd = process.cwd()) {
-  const metadata = readDaemonMetadata(cwd);
+  const status = await daemonStatus(cwd);
+
+  if (status.status !== 'running') {
+    if (status.status === 'stale') removeDaemonState(cwd);
+    if (status.status === 'unreachable')
+      throw new Error(
+        `daemon process ${status.pid} is alive but its health endpoint is unreachable`,
+      );
+
+    return { version: 1, status: status.status === 'stale' ? 'stale-cleaned' : 'stopped' };
+  }
+  const metadata = status;
   const token = readFileSync(metadata.tokenFile, 'utf8').trim();
-  const response = await fetch(`${metadata.endpoint}/api/v1/shutdown`, {
+  const response = await fetchWithTimeout(`${metadata.endpoint}/api/v1/shutdown`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}` },
   });

@@ -32,7 +32,7 @@ async function apiCommand(metadata, args, cookie = null) {
       version: 1,
       requestId: `acceptance-${Date.now()}-${Math.random()}`,
       kind: 'command',
-      name: 'cli.execute',
+      name: 'service.execute',
       payload: { args },
     }),
   });
@@ -103,6 +103,7 @@ try {
 
   for (const required of [
     'package/bin/clew.js',
+    'package/src/control-service.js',
     'package/ui/dist/index.html',
     'package/migrations/012_control_plane_contracts.sql',
     'package/migrations/014_continuation_idempotency.sql',
@@ -250,6 +251,13 @@ try {
 
   if (!thread.items.some((item) => item.kind === 'operator_message' && item.redacted))
     throw new Error('installed Task Thread did not include the redacted continuation message');
+  const snapshotResponse = await fetch(`${metadata.endpoint}/api/v1/snapshot`, {
+    headers: { cookie },
+  });
+  const snapshot = await snapshotResponse.json();
+
+  if (!snapshotResponse.ok || snapshot.tasks?.length !== 3)
+    throw new Error('installed daemon did not serve the aggregated control snapshot');
   const websocket = await websocketHandshake(metadata, metadata.endpoint);
 
   if (!websocket.includes('101 Switching Protocols') || !websocket.includes('TASK_CREATED'))

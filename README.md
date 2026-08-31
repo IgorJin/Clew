@@ -23,7 +23,7 @@ npm run check
 node bin/clew.js --help
 ```
 
-`npm run check` runs Prettier, ESLint, the automated test suite, and syntax checks. Runtime dependencies are zero; ESLint and Prettier are development-only dependencies.
+`npm run check` runs Prettier, ESLint, the automated test suite, and syntax checks. The only runtime dependency is `ws`, which provides standards-compliant WebSocket framing, protocol validation, and heartbeat support; ESLint and Prettier are development-only dependencies.
 
 ## Quick start without external credentials
 
@@ -108,7 +108,7 @@ Each completed native turn records reported token usage when the harness exposes
 
 Telemetry is optional and disabled by default. `telemetry install` installs the official OpenTelemetry trace runtime under `.clew/telemetry`; enable it with `CLEW_TELEMETRY_ENABLED=true` or project configuration, then point the official OTLP exporter at Phoenix or another collector with `OTEL_EXPORTER_OTLP_ENDPOINT`. Collector failures are reported as diagnostics and never change task state.
 
-The local daemon is explicit and loopback-only. Start it with `clew daemon start`, inspect it with `clew daemon status`, stop it with `clew daemon stop`, and use `clew api ...` to send authenticated commands through its API. The daemon stores its bearer token and ownership metadata in `.clew`, with restrictive permissions; it never starts automatically.
+The local daemon is explicit and loopback-only. `clew daemon start` launches it in the background on `127.0.0.1:43176` by default and reports the UI URL and log path. Inspect its live health with `clew daemon status`, stop it with `clew daemon stop`, and use `clew api ...` to send authenticated commands through its API. CLI and API commands share one in-process `ClewService`; the daemon does not spawn a nested CLI per request. Use `clew daemon logs --follow` to stream structured JSON lifecycle records, or `clew daemon logs --lines 200` to read recent records. `daemon.log` contains safe server, WebSocket, and command metadata; `daemon.stderr.log` retains process stderr for diagnosis. Use `clew daemon serve --port PORT` only when a foreground process is useful for debugging. Startup detects and replaces stale ownership files left by an abrupt process exit. The daemon stores its bearer token, ownership metadata, and logs under `.clew` with restrictive permissions; it never starts automatically.
 
 To open a persisted native session, use `clew session open TASK --stage worker --role worker --harness codex`. Clew resumes the exact stored session in its recorded workspace using argument-safe process launch; it does not create a Run or turn. Use `--surface none` for capability/diagnostic checks. Unsupported or stale sessions return structured `unavailable` results.
 

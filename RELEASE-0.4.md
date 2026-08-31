@@ -10,10 +10,10 @@ v0.4 integrates the local daemon/API, Task Thread projection, bounded continuati
 
 | Gate               | Command or evidence                    | Result                                                                                                |
 | ------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Source/toolchain   | `npm run check`                        | pass: formatting, lint, task cards, UI build/lint/tests, 106 Node tests (4 loopback skips in sandbox) |
+| Source/toolchain   | `npm run check`                        | pass: formatting, lint, task cards, UI build/lint/tests, 109 Node tests (4 loopback skips in sandbox) |
 | Migration          | `node --test test/release-v04.test.js` | pass: populated v0.3 fixture upgraded to schema 15 with history preserved and SQLite integrity `ok`   |
 | Daemon/API         | `node --test test/daemon.test.js`      | pass: auth, owner, parse containment, Task Thread, WS Origin, replay cursor, UI/bootstrap             |
-| UI                 | `npm run ui:check`                     | pass: Preact build, lint, 9 tests plus production desktop/mobile browser smoke                        |
+| UI                 | `npm run ui:check`                     | pass: Preact build, lint, 10 tests plus production disconnect/restart browser smoke                   |
 | Installed artifact | `npm run acceptance:installed`         | pass: clean install, Quick/Standard/Deep via API, continuation, UI, WS replay/origin, restart         |
 | Live Codex         | `npm run smoke:codex`                  | optional; skipped for this sign-off unless explicit provider credentials are available                |
 | Main/tag CI        | release operator                       | pending until the reviewed changes are committed and `v0.4.0` is tagged                               |

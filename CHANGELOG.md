@@ -3,6 +3,10 @@
 ## Unreleased
 
 - Added the v0.4 local daemon/API foundation with authenticated loopback transport, exclusive state ownership, cursor-based event replay, explicit lifecycle commands, and API command forwarding.
+- Reworked daemon lifecycle around a health-checked background process, stable default port, persistent logs, stale-lock recovery, and `SIGHUP` cleanup.
+- Replaced the Web UI's per-task CLI subprocess fan-out with one in-process snapshot endpoint and coalesced event refreshes; disconnected views now retain clearly marked last-known data while disabling every operator action.
+- Replaced the hand-written WebSocket framing with the maintained `ws` implementation, including large-payload replay, protocol validation, and ping/pong liveness checks.
+- Added a shared in-process `ClewService` used by both CLI and daemon API commands; the daemon no longer spawns a nested CLI process for each UI action.
 
 ## 0.4.0
 

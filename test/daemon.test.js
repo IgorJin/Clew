@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { daemonRequest, LocalDaemon } from '../src/daemon.js';
+import {
+  daemonLogFile,
+  daemonRequest,
+  daemonStatus,
+  LocalDaemon,
+  stopDaemon,
+} from '../src/daemon.js';
 import { readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { URL } from 'node:url';
+import WebSocket from 'ws';
 
 function websocketHandshake(endpoint, token, origin) {
   const url = new URL(endpoint);
@@ -51,7 +58,33 @@ function websocketHandshake(endpoint, token, origin) {
   });
 }
 
-test('local daemon authenticates API requests and serializes CLI commands', async (t) => {
+function websocketEvents(metadata, token, untilType) {
+  return new Promise((resolve, reject) => {
+    const events = [];
+    const socket = new WebSocket(`${metadata.endpoint.replace('http:', 'ws:')}/?after=0`, {
+      headers: { authorization: `Bearer ${token}`, origin: metadata.endpoint },
+      perMessageDeflate: false,
+    });
+    const timeout = setTimeout(() => {
+      socket.terminate();
+      reject(new Error(`websocket did not receive ${untilType}`));
+    }, 2_000);
+
+    socket.on('message', (body) => {
+      const event = JSON.parse(body.toString());
+
+      events.push(event);
+      if (event.type === untilType) {
+        clearTimeout(timeout);
+        socket.close();
+        resolve(events);
+      }
+    });
+    socket.on('error', reject);
+  });
+}
+
+test('local daemon authenticates API requests and serializes service commands', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'clew-daemon-'));
   const daemon = new LocalDaemon({ cwd });
 
@@ -67,7 +100,7 @@ test('local daemon authenticates API requests and serializes CLI commands', asyn
     const unauthorized = await fetch(`${metadata.endpoint}/api/v1/health`);
 
     assert.equal(unauthorized.status, 401);
-    assert.throws(() => new LocalDaemon({ cwd }).start(), /already owned/);
+    await assert.rejects(() => new LocalDaemon({ cwd }).start(), /already owned/);
 
     const created = await daemonRequest(cwd, [
       'task',
@@ -86,11 +119,54 @@ test('local daemon authenticates API requests and serializes CLI commands', asyn
 
     assert.equal(created.id, 'DAEMON-1');
     assert.equal((await daemonRequest(cwd, ['task', 'list']))[0].id, 'DAEMON-1');
+    assert.equal((await daemonRequest(cwd, ['status', 'DAEMON-1'])).state, 'DRAFT');
+    assert.equal((await daemonRequest(cwd, ['task', 'usage', 'DAEMON-1'])).taskId, 'DAEMON-1');
+    assert.equal((await daemonRequest(cwd, ['events', 'DAEMON-1']))[0].type, 'TASK_CREATED');
+    assert.equal((await daemonRequest(cwd, ['telemetry', 'status'])).state, 'disabled');
+    assert.equal(metadata.logFile, daemonLogFile(cwd));
+    const logEvents = readFileSync(daemonLogFile(cwd), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line).event);
+
+    assert.ok(logEvents.includes('daemon.started'));
+    assert.ok(logEvents.includes('command.started'));
+    assert.ok(logEvents.includes('command.completed'));
+    assert.ok(logEvents.includes('http.request'));
+
+    const token = readFileSync(metadata.tokenFile, 'utf8').trim();
+    const legacyCommand = await fetch(`${metadata.endpoint}/api/v1/command`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: 1,
+        requestId: 'legacy-cli-execute',
+        kind: 'command',
+        name: 'cli.execute',
+        payload: { args: ['task', 'list'] },
+      }),
+    });
+
+    assert.equal(legacyCommand.status, 200);
+    const snapshotResponse = await fetch(`${metadata.endpoint}/api/v1/snapshot`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const snapshot = await snapshotResponse.json();
+
+    assert.equal(snapshotResponse.status, 200);
+    assert.equal(snapshot.version, 1);
+    assert.equal(snapshot.tasks.length, 1);
+    assert.equal(snapshot.tasks[0].show.id, 'DAEMON-1');
+    assert.equal(snapshot.tasks[0].thread.items[0].kind, 'task_created');
+    daemon.store.appendEvent('DAEMON-1', 'LARGE_EVENT', { value: 'x'.repeat(70_000) });
+    const replay = await websocketEvents(metadata, token, 'LARGE_EVENT');
+
+    assert.equal(replay.at(-1).payload.value.length, 70_000);
 
     const events = await (
       await fetch(`${metadata.endpoint}/api/v1/events?after=0`, {
         headers: {
-          authorization: `Bearer ${await import('node:fs').then(({ readFileSync }) => readFileSync(metadata.tokenFile, 'utf8').trim())}`,
+          authorization: `Bearer ${token}`,
         },
       })
     ).json();
@@ -98,6 +174,70 @@ test('local daemon authenticates API requests and serializes CLI commands', asyn
     assert.equal(events.events[0].type, 'TASK_CREATED');
   } finally {
     await daemon.stop();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('daemon status detects and cleans stale ownership metadata', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-daemon-stale-'));
+  const stateDirectory = join(cwd, '.clew');
+  const tokenFile = join(stateDirectory, 'daemon.token');
+
+  try {
+    mkdirSync(stateDirectory, { recursive: true });
+    writeFileSync(join(stateDirectory, 'daemon.lock'), '');
+    writeFileSync(tokenFile, 'stale-token\n');
+    writeFileSync(
+      join(stateDirectory, 'daemon.json'),
+      JSON.stringify({
+        version: '0.4.0',
+        daemonId: 'stale-daemon',
+        stateDirectory,
+        pid: 999999,
+        startedAt: new Date().toISOString(),
+        endpoint: 'http://127.0.0.1:1',
+        tokenFile,
+      }),
+    );
+
+    assert.equal((await daemonStatus(cwd)).status, 'stale');
+    assert.equal((await stopDaemon(cwd)).status, 'stale-cleaned');
+    assert.equal(existsSync(join(stateDirectory, 'daemon.lock')), false);
+    assert.equal(existsSync(join(stateDirectory, 'daemon.json')), false);
+    assert.equal(existsSync(tokenFile), false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('daemon status never removes ownership for a live but unreachable process', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-daemon-unreachable-'));
+  const stateDirectory = join(cwd, '.clew');
+  const tokenFile = join(stateDirectory, 'daemon.token');
+  const lockFile = join(stateDirectory, 'daemon.lock');
+
+  try {
+    mkdirSync(stateDirectory, { recursive: true });
+    writeFileSync(lockFile, '');
+    writeFileSync(tokenFile, 'unreachable-token\n');
+    writeFileSync(
+      join(stateDirectory, 'daemon.json'),
+      JSON.stringify({
+        version: '0.4.0',
+        daemonId: 'unreachable-daemon',
+        stateDirectory,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        endpoint: 'http://127.0.0.1:1',
+        tokenFile,
+      }),
+    );
+
+    assert.equal((await daemonStatus(cwd)).status, 'unreachable');
+    await assert.rejects(() => stopDaemon(cwd), /alive but its health endpoint is unreachable/);
+    assert.equal(existsSync(lockFile), true);
+    assert.equal(existsSync(tokenFile), true);
+  } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
@@ -182,7 +322,7 @@ test('daemon serves the packaged UI and restricts browser bootstrap to its origi
         version: 1,
         requestId: 'daemon-ui-thread',
         kind: 'command',
-        name: 'cli.execute',
+        name: 'service.execute',
         payload: { args: ['task', 'thread', 'DAEMON-UI'] },
       }),
     });
@@ -203,7 +343,7 @@ test('daemon serves the packaged UI and restricts browser bootstrap to its origi
   }
 });
 
-test('daemon contains invalid CLI output instead of crashing', async (t) => {
+test('daemon rejects commands outside the service boundary without crashing', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'clew-daemon-invalid-output-'));
   const daemon = new LocalDaemon({ cwd });
 
@@ -216,7 +356,7 @@ test('daemon contains invalid CLI output instead of crashing', async (t) => {
       if (error.code === 'EPERM') return t.skip('sandbox disallows local loopback listeners');
       throw error;
     }
-    await assert.rejects(() => daemonRequest(cwd, ['--help']), /invalid JSON/);
+    await assert.rejects(() => daemonRequest(cwd, ['--help']), /unsupported service command/);
     const token = readFileSync(metadata.tokenFile, 'utf8').trim();
     const health = await fetch(`${metadata.endpoint}/api/v1/health`, {
       headers: { authorization: `Bearer ${token}` },

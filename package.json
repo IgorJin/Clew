@@ -37,7 +37,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "tasks:check": "node scripts/check-task-cards.js",
-    "check": "npm run format:check && npm run lint && npm run tasks:check && npm run ui:check && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/compatibility.js && node --check src/config.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
+    "check": "npm run format:check && npm run lint && npm run tasks:check && npm run ui:check && npm test && node --check bin/clew.js && node --check src/architect.js && node --check src/cli.js && node --check src/compatibility.js && node --check src/config.js && node --check src/control-service.js && node --check src/daemon.js && node --check src/domain.js && node --check src/harness.js && node --check src/migrations.js && node --check src/scheduler.js && node --check src/security.js && node --check src/store.js && node --check src/workspace.js",
     "ui:build": "npm run build --prefix ui",
     "ui:check": "npm run build --prefix ui && npm run lint --prefix ui && npm test --prefix ui",
     "smoke:codex": "node scripts/live-adapter-smoke.js codex",
@@ -65,5 +65,9 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.9.1",
     "prettier": "^3.9.6"
+  },
+  "dependencies": {
+    "pino": "^9.14.0",
+    "ws": "^8.21.3"
   }
 }

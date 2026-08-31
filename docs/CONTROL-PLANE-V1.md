@@ -18,6 +18,8 @@ All endpoints are loopback-only and use the `application/json` media type. Every
 
 Commands mutate durable state and return a response envelope with the same `requestId`. Queries are read-only. Errors use `api-error.v1.schema.json` and contain a stable machine-readable `code`, a safe human-readable `message`, and `retryable`; details are optional and must not contain credentials or native chat content.
 
+The command endpoint accepts `service.execute` with a CLI-compatible argument array and dispatches it to the same in-process `ClewService` used by the CLI. `cli.execute` remains an accepted v1 alias for existing clients. The daemon does not launch a nested CLI process; only the selected native harness, explicit verification commands, and Git operations cross a process boundary.
+
 The client sends `Authorization: Bearer <token>`. The token is generated for the local daemon and stored in the daemon state directory, never in project config or API fixtures. Missing, malformed, or invalid credentials return an error without disclosing the expected token or token path.
 
 ## WebSocket stream

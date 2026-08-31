@@ -90,7 +90,7 @@ async function command(args: string[]): Promise<unknown> {
       version: 1,
       requestId: crypto.randomUUID(),
       kind: 'command',
-      name: 'cli.execute',
+      name: 'service.execute',
       payload: { args },
     }),
   });
@@ -205,13 +205,17 @@ export async function bootstrap(): Promise<boolean> {
   }
 }
 
-export async function loadTask(taskId: string): Promise<Task> {
-  const [show, thread, history] = await Promise.all([
-    command(['task', 'show', taskId]),
-    command(['task', 'thread', taskId]),
-    command(['task', 'history', taskId]),
-  ]);
-  return mapTask(show, thread, history);
+async function loadSnapshot(retryBootstrap = true): Promise<JsonObject> {
+  const response = await fetch('/api/v1/snapshot', { credentials: 'include' });
+
+  if (response.status === 401 && retryBootstrap && (await bootstrap())) return loadSnapshot(false);
+  const payload = object(await response.json(), 'control snapshot');
+
+  if (!response.ok) throw new Error('Control snapshot failed');
+  if (payload.version !== 1 || !Array.isArray(payload.tasks))
+    throw new IncompatibleDaemonError('control snapshot version is unsupported');
+
+  return payload;
 }
 
 export async function loadTasks(): Promise<{ tasks: Task[]; state: ConnectionState }> {
@@ -227,11 +231,15 @@ export async function loadTasks(): Promise<{ tasks: Task[]; state: ConnectionSta
         : { tasks: [], state: 'disconnected' };
   }
   try {
-    const payload = await command(['task', 'list']);
-    if (!Array.isArray(payload)) throw new IncompatibleDaemonError('task list is invalid');
-    const tasks = await Promise.all(
-      payload.map((value) => loadTask(string(object(value, 'task list item').id, 'task id'))),
-    );
+    const payload = await loadSnapshot();
+    const tasks = (payload.tasks as unknown[]).map((value) => {
+      const snapshot = object(value, 'task snapshot');
+
+      return mapTask(snapshot.show, snapshot.thread, snapshot.history);
+    });
+
+    if (Number.isSafeInteger(Number(payload.cursor)))
+      sessionStorage.setItem('clew-event-cursor', String(payload.cursor));
     return { tasks, state: 'connected' };
   } catch (error) {
     if (import.meta.env.DEV && !(error instanceof IncompatibleDaemonError))
@@ -248,14 +256,24 @@ export function subscribeToEvents(
   onEvent: (event: { cursor: number }) => void,
   onState: (state: ConnectionState) => void,
 ) {
-  if (!sessionStorage.getItem('clew-token') && !sessionStorage.getItem('clew-session'))
-    return () => undefined;
   let socket: WebSocket | undefined;
+  let reconnectTimer: number | undefined;
   let stopped = false;
   let reconnectDelay = 500;
-  const connect = () => {
+  const scheduleReconnect = () => {
+    if (stopped) return;
+    reconnectTimer = window.setTimeout(() => void connect(), reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+  };
+  const connect = async () => {
     if (stopped) return;
     onState('reconnecting');
+    if (!(await bootstrap())) {
+      onState('disconnected');
+      scheduleReconnect();
+
+      return;
+    }
     socket = new WebSocket(
       `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/?after=${after}`,
     );
@@ -281,15 +299,15 @@ export function subscribeToEvents(
     socket.onclose = () => {
       if (!stopped) {
         onState('disconnected');
-        window.setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, 5000);
+        scheduleReconnect();
       }
     };
   };
-  connect();
+  void connect();
 
   return () => {
     stopped = true;
+    if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
     socket?.close();
   };
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
 import { describe, expect, it, vi } from 'vitest';
 import { fixtureTasks } from './fixtures';
 import type { ThreadItem } from './types';
@@ -6,7 +6,19 @@ import type { ThreadItem } from './types';
 const api = vi.hoisted(() => ({
   execute: vi.fn(async () => ({ fixture: true })),
   loadTasks: vi.fn(async () => ({ tasks: structuredClone(fixtureTasks), state: 'fixture' })),
-  subscribeToEvents: vi.fn(() => () => undefined),
+  subscribeToEvents: vi.fn(
+    (
+      after: number,
+      onEvent: (event: { cursor: number }) => void,
+      onState: (state: string) => void,
+    ) => {
+      void after;
+      void onEvent;
+      void onState;
+
+      return () => undefined;
+    },
+  ),
 }));
 
 vi.mock('./api', () => api);
@@ -66,5 +78,27 @@ describe('Preact control plane', () => {
 
     expect(screen.getByText(item.summary)).toBeTruthy();
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  it('keeps last known data but disables operator actions after disconnect', async () => {
+    let reportState: ((state: string) => void) | undefined;
+
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: structuredClone(fixtureTasks),
+      state: 'connected',
+    });
+    api.subscribeToEvents.mockImplementationOnce((_after, _onEvent, onState) => {
+      reportState = onState;
+
+      return () => undefined;
+    });
+    render(<App />);
+    const complete = await screen.findByRole('button', { name: /complete/i });
+
+    expect(complete.hasAttribute('disabled')).toBe(false);
+    reportState?.('disconnected');
+    await waitFor(() => expect(complete.hasAttribute('disabled')).toBe(true));
+    expect(screen.getByRole('alert').textContent).toMatch(/last known data/i);
+    expect(screen.getByRole('alert').textContent).toMatch(/actions are disabled/i);
   });
 });
