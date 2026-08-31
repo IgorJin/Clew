@@ -445,7 +445,7 @@ export class ClewService {
     const runArgs = args.includes('--harness')
       ? args
       : [...args, '--harness', 'opencode', '--worker-model', action.inputs?.model ?? 'luna'];
-    const result = await this.run(taskId, runArgs, signal);
+    const result = await this.run(taskId, runArgs, signal, { readOnly: true });
 
     return { action: approved, result };
   }
@@ -1004,7 +1004,7 @@ export class ClewService {
     return { ok: checks.filter((check) => check.required).every((check) => check.ok), checks };
   }
 
-  run(taskId, args, signal) {
+  run(taskId, args, signal, options = {}) {
     if (!taskId) throw new Error('task id is required');
 
     return this.scheduler(args, signal).runTask(
@@ -1013,6 +1013,9 @@ export class ClewService {
       getOptionValue(args, '--harness'),
       getOptionValue(args, '--review-harness'),
       getOptionValue(args, '--architect'),
+      null,
+      [],
+      options,
     );
   }
 

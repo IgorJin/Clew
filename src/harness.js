@@ -610,6 +610,7 @@ export class OpenCodeHarness {
     onEvent,
     signal,
     model = null,
+    readOnly = false,
     resumeSessionId = null,
     onApproval = () => APPROVAL_DECISION.DECLINE,
   }) {
@@ -664,6 +665,7 @@ export class OpenCodeHarness {
           onEvent,
           onApproval,
           model,
+          readOnly,
         });
       const response = await this.fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
@@ -671,7 +673,7 @@ export class OpenCodeHarness {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            parts: [{ type: 'text', text: this.buildPrompt(task) }],
+            parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
             ...(model ? { model } : {}),
           }),
           signal: controller.signal,
@@ -723,6 +725,7 @@ export class OpenCodeHarness {
     onEvent,
     onApproval,
     model = null,
+    readOnly = false,
   }) {
     const promptResponse = await this.fetch(
       `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
@@ -730,7 +733,7 @@ export class OpenCodeHarness {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          parts: [{ type: 'text', text: this.buildPrompt(task) }],
+          parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
           ...(model ? { model } : {}),
         }),
         signal: controller.signal,
@@ -913,8 +916,12 @@ export class OpenCodeHarness {
         output: part.state?.output,
       }));
   }
-  buildPrompt(task) {
-    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`;
+  buildPrompt(task, readOnly = false) {
+    const policy = readOnly
+      ? '\n\nREAD-ONLY POLICY: inspect and report only. Do not create, edit, delete, or commit files. Do not run commands that mutate state.'
+      : '';
+
+    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.${policy}`;
   }
   async requestJson(path, { method = 'GET', body } = {}) {
     const response = await this.fetch(`${this.baseUrl}${path}`, {

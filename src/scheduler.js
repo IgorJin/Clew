@@ -231,6 +231,7 @@ export class Scheduler {
             onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
             signal: taskSignal,
             resumeSessionId,
+            readOnly: options.readOnly === true,
             model: this.adapterConfig.models?.worker ?? null,
             runtimeNamespace:
               persistedRun.runtimeNamespace ?? createRuntimeNamespace(taskId, runId),
