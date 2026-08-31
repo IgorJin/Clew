@@ -73,3 +73,34 @@ test('ClewService is the shared command and snapshot boundary', async () => {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test('MVP exposes one durable next step and requires an explicit approval', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-service-next-step-'));
+  const store = new Store(join(cwd, '.clew', 'clew.sqlite'));
+  const service = new ClewService({ cwd, store, config: DEFAULT_CONFIG });
+
+  try {
+    await service.execute([
+      'task',
+      'create',
+      '--id',
+      'MVP-1',
+      '--title',
+      'Read-only task',
+      '--description',
+      'Read one file without changing it',
+    ]);
+    const first = await service.execute(['task', 'next-step', 'MVP-1']);
+    const second = await service.execute(['task', 'next-step', 'MVP-1']);
+
+    assert.equal(first.id, second.id);
+    assert.equal(first.status, 'PENDING');
+    assert.equal(first.approvalRequired, true);
+    assert.equal(first.inputs.model, 'luna');
+    assert.equal(store.getTask('MVP-1').state, 'DRAFT');
+    assert.equal(store.listRuns('MVP-1').length, 0);
+  } finally {
+    store.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

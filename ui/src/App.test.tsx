@@ -101,4 +101,26 @@ describe('Preact control plane', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/last known data/i);
     expect(screen.getByRole('alert').textContent).toMatch(/actions are disabled/i);
   });
+
+  it('creates a task from the UI without starting it', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /new/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
+      target: { value: 'Read-only MVP task' },
+    });
+    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
+      target: { value: 'List files without changing them' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
+
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'create',
+      '--title',
+      'Read-only MVP task',
+      '--description',
+      'List files without changing them',
+    ]);
+    expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
+  });
 });

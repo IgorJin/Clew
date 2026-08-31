@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -266,6 +266,24 @@ const MIGRATIONS = Object.freeze([
       db.exec(
         'CREATE UNIQUE INDEX IF NOT EXISTS continuation_grants_run ON continuation_grants(correction_run_id) WHERE correction_run_id IS NOT NULL',
       );
+    },
+  },
+  {
+    version: 16,
+    apply(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS workflow_actions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          descriptor TEXT NOT NULL,
+          status TEXT NOT NULL,
+          actor TEXT,
+          created_at TEXT NOT NULL,
+          approved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS workflow_actions_task ON workflow_actions(task_id, created_at);
+      `);
     },
   },
 ]);

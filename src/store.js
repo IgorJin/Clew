@@ -484,6 +484,58 @@ export class Store {
       .all(taskId)
       .map((eventRow) => ({ ...eventRow, payload: JSON.parse(eventRow.payload) }));
   }
+  createWorkflowAction({ id, taskId, kind, descriptor }) {
+    const createdAt = new Date().toISOString();
+
+    this.db
+      .prepare(
+        'INSERT INTO workflow_actions (id,task_id,kind,descriptor,status,created_at) VALUES (?,?,?,?,?,?)',
+      )
+      .run(id, taskId, kind, JSON.stringify(descriptor), 'PENDING', createdAt);
+    this.appendEvent(taskId, 'WORKFLOW_ACTION_PROPOSED', { id, kind, descriptor, at: createdAt });
+
+    return { id, taskId, kind, ...descriptor, status: 'PENDING', createdAt };
+  }
+  getWorkflowAction(id) {
+    const row = this.db.prepare('SELECT * FROM workflow_actions WHERE id=?').get(id);
+
+    return row
+      ? {
+          id: row.id,
+          taskId: row.task_id,
+          kind: row.kind,
+          ...JSON.parse(row.descriptor),
+          status: row.status,
+          actor: row.actor,
+          createdAt: row.created_at,
+          approvedAt: row.approved_at,
+        }
+      : null;
+  }
+  latestWorkflowAction(taskId, kind = null) {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM workflow_actions WHERE task_id=?${kind ? ' AND kind=?' : ''} ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(...(kind ? [taskId, kind] : [taskId]));
+
+    return row ? this.getWorkflowAction(row.id) : null;
+  }
+  approveWorkflowAction(id, actor = 'local-user') {
+    const action = this.getWorkflowAction(id);
+
+    if (!action) throw new Error(`workflow action not found: ${id}`);
+    if (action.status !== 'PENDING')
+      throw new Error(`workflow action ${id} is already ${action.status}`);
+    const approvedAt = new Date().toISOString();
+
+    this.db
+      .prepare('UPDATE workflow_actions SET status=?,actor=?,approved_at=? WHERE id=?')
+      .run('APPROVED', actor, approvedAt, id);
+    this.appendEvent(action.taskId, 'WORKFLOW_ACTION_APPROVED', { id, actor, at: approvedAt });
+
+    return { ...action, status: 'APPROVED', actor, approvedAt };
+  }
   listVerification(taskId) {
     return this.listEvents(taskId)
       .filter((event) => event.type === 'VERIFICATION_RECORDED')

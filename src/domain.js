@@ -292,6 +292,7 @@ export function validateTaskContract(contract) {
     id: contract.id,
     title: contract.title,
     goal: contract.goal,
+    ...(contract.description !== undefined ? { description: contract.description } : {}),
     profile: contract.profile,
     risk,
     base_ref: baseRef,

@@ -28,6 +28,73 @@ test('CLI help reports the package version', () => {
   assert.match(runCli(['--help'], process.cwd()), new RegExp(`^Clew v${packageJson.version}\\b`));
 });
 
+test('CLI creates the same inert MVP task from JSON and Markdown', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-create-mvp-'));
+
+  try {
+    const jsonFile = join(repo, 'task.json');
+    const markdownFile = join(repo, 'task.md');
+
+    writeFileSync(
+      jsonFile,
+      JSON.stringify({ title: 'JSON task', description: 'Read package.json' }),
+    );
+    writeFileSync(markdownFile, '# Markdown task\n\nList files only.\n');
+
+    const jsonTask = JSON.parse(runCli(['task', 'create', '--json', jsonFile], repo));
+    const markdownOutput = runCli(['task', 'create', '--md', markdownFile], repo);
+    const markdownTask = JSON.parse(
+      runCli(['task', 'show', markdownOutput.match(/CLEW-[A-Z0-9]+/)?.[0]], repo),
+    );
+
+    assert.equal(jsonTask.title, 'JSON task');
+    assert.equal(jsonTask.description, 'Read package.json');
+    assert.equal(jsonTask.profile, 'quick');
+    assert.equal(markdownTask.contract.title, 'Markdown task');
+    assert.equal(markdownTask.contract.description, 'List files only.');
+    assert.equal(markdownTask.state, 'DRAFT');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('MVP approval starts exactly one worker run', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'clew-cli-approve-step-'));
+
+  try {
+    runCommand('git', ['init', '-b', 'main'], repo);
+    runCommand('git', ['config', 'user.email', 'test@example.com'], repo);
+    runCommand('git', ['config', 'user.name', 'Clew Test'], repo);
+    writeFileSync(join(repo, '.gitignore'), '.clew/\n');
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    runCommand('git', ['add', '.gitignore', 'README.md'], repo);
+    runCommand('git', ['commit', '-m', 'fixture'], repo);
+    runCli(
+      [
+        'task',
+        'create',
+        '--id',
+        'MVP-RUN',
+        '--title',
+        'MVP worker',
+        '--description',
+        'Read the fixture without changing files',
+      ],
+      repo,
+    );
+    const action = JSON.parse(runCli(['task', 'next-step', 'MVP-RUN'], repo));
+    const approved = JSON.parse(
+      runCli(['task', 'approve-step', 'MVP-RUN', '--action', action.id, '--harness', 'fake'], repo),
+    );
+
+    assert.equal(approved.action.status, 'APPROVED');
+    assert.equal(approved.result.state, 'READY');
+    assert.equal(JSON.parse(runCli(['task', 'history', 'MVP-RUN'], repo)).runs.length, 1);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test('CLI gates Deep execution on explicit plan approval', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-approval-'));
 

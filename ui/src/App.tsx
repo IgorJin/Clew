@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
-import type { Task, TaskState, ThreadItem } from './types';
+import type { NextStep, Task, TaskState, ThreadItem } from './types';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -90,6 +90,8 @@ function App() {
   const [diagnostic, setDiagnostic] = useState(false);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
   const refreshInFlight = useRef<Promise<void> | null>(null);
@@ -148,6 +150,56 @@ function App() {
     () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
     [selected, tasks],
   );
+  const createTask = async (title: string, description: string) => {
+    if (!canMutateFor(connection)) {
+      setNotice('Actions are disabled while the control plane is disconnected');
+      return;
+    }
+    try {
+      const result = await execute([
+        'task',
+        'create',
+        '--title',
+        title,
+        '--description',
+        description,
+      ]);
+      if ((result as { fixture?: boolean } | null)?.fixture) {
+        const id = `LOCAL-${Date.now()}`;
+        setTasks((current) => [
+          {
+            id,
+            title,
+            goal: description,
+            profile: 'quick',
+            state: 'DRAFT',
+            attention: null,
+            revision: null,
+            attempts: 0,
+            stages: [],
+            reviewed: false,
+            findings: 0,
+            thread: {
+              version: 1,
+              items: [],
+              nextCursor: null,
+              hasMore: false,
+              redaction: 'public-safe',
+            },
+            events: [],
+          },
+          ...current,
+        ]);
+        setSelected(id);
+      } else {
+        await refresh();
+      }
+      setCreateOpen(false);
+      setNotice(`Task created: ${title}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Task creation failed');
+    }
+  };
   if (!task) {
     const unavailable = connection === 'disconnected' || connection === 'incompatible';
     return (
@@ -166,10 +218,16 @@ function App() {
                 ? 'Start the local daemon, then retry the connection.'
                 : 'Create a task with the Clew CLI, then refresh this view.'}
           </p>
-          <button className="button secondary" onClick={() => void refresh()}>
-            <RefreshCw size={15} /> Retry
-          </button>
+          <div className="empty-actions">
+            <button className="button primary" onClick={() => setCreateOpen(true)}>
+              <Check size={15} /> Create task
+            </button>
+            <button className="button secondary" onClick={() => void refresh()}>
+              <RefreshCw size={15} /> Retry
+            </button>
+          </div>
         </main>
+        {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
       </div>
     );
   }
@@ -190,6 +248,8 @@ function App() {
             if (args[0] === 'complete') return { ...entry, state: 'COMPLETED' };
             if (args[0] === 'approve') return { ...entry, state: 'PLAN_READY', attention: null };
             if (args[0] === 'run') return { ...entry, state: 'EXECUTING' };
+            if (args[0] === 'task' && args[1] === 'approve-step')
+              return { ...entry, state: 'EXECUTING' };
             if (args[0] === 'retry') return { ...entry, state: 'RECOVERING' };
             if (args[0] === 'continue') return { ...entry, state: 'RECOVERING', attention: null };
             if (args[0] === 'task' && args[1] === 'message') {
@@ -223,6 +283,27 @@ function App() {
   const canContinue =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
+  const explainNextStep = async () => {
+    try {
+      const result = await execute(['task', 'next-step', task.id]);
+      if ((result as { fixture?: boolean } | null)?.fixture) {
+        setNextStep({
+          taskId: task.id,
+          kind: 'start_worker',
+          currentStep: 'DRAFT',
+          resultingStep: 'EXECUTING',
+          summary: 'Start one read-only worker for this task',
+          inputs: { harness: 'opencode', model: 'luna', permissionMode: 'read-only' },
+          sideEffects: ['start one local worker process', 'create one run record'],
+          approvalRequired: true,
+          status: 'PENDING',
+        });
+      } else setNextStep(result as NextStep);
+      setNotice('Next step is ready for review');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not explain next step');
+    }
+  };
   return (
     <div className="app">
       <header className="topbar">
@@ -239,6 +320,9 @@ function App() {
         <aside className="sidebar">
           <div className="sidebar-heading">
             <span>Tasks</span>
+            <button className="text-button" onClick={() => setCreateOpen(true)}>
+              + New
+            </button>
             <span className="count">{tasks.length}</span>
           </div>
           <div className="task-list">
@@ -296,13 +380,26 @@ function App() {
                       ? 'Add an operator message before continuing'
                       : undefined
                   }
-                  onClick={() =>
-                    canContinue
-                      ? act(['continue', task.id, '--message', message], 'Continuation requested')
-                      : act(['run', task.id], 'Run requested')
-                  }
+                  onClick={() => {
+                    if (canContinue)
+                      return void act(
+                        ['continue', task.id, '--message', message],
+                        'Continuation requested',
+                      );
+                    if (nextStep?.status === 'PENDING')
+                      return void act(
+                        ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
+                        'Start approved',
+                      );
+                    return void explainNextStep();
+                  }}
                 >
-                  <RefreshCw size={15} /> {canContinue ? 'Continue' : 'Start run'}
+                  <RefreshCw size={15} />
+                  {canContinue
+                    ? 'Continue'
+                    : nextStep?.status === 'PENDING'
+                      ? 'Approve start'
+                      : 'Explain next step'}
                 </button>
                 <button
                   className="button primary"
@@ -334,6 +431,23 @@ function App() {
                       lastUpdatedAt ? ` from ${lastUpdatedAt.toLocaleTimeString()}` : ''
                     }; actions are disabled.`}
               </div>
+            )}
+            {nextStep?.status === 'PENDING' && (
+              <section className="next-step" aria-label="Next step">
+                <div>
+                  <span className="eyebrow">Next step</span>
+                  <h2>{nextStep.summary}</h2>
+                  <p>
+                    {nextStep.currentStep} → {nextStep.resultingStep}. Nothing starts until you
+                    approve this action.
+                  </p>
+                </div>
+                <div className="next-step-details">
+                  <span>Harness: {nextStep.inputs?.harness ?? '—'}</span>
+                  <span>Model: {nextStep.inputs?.model ?? '—'}</span>
+                  <span>Mode: {nextStep.inputs?.permissionMode ?? '—'}</span>
+                </div>
+              </section>
             )}
             <section className="summary-grid">
               <div className="summary-card">
@@ -476,6 +590,68 @@ function App() {
           </div>
         </main>
       </div>
+      {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
+    </div>
+  );
+}
+
+function canMutateFor(connection: ConnectionState) {
+  return connection === 'connected' || connection === 'fixture';
+}
+
+function CreateTask({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (title: string, description: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const submit = (event: Event) => {
+    event.preventDefault();
+    if (title.trim() && description.trim()) void onCreate(title.trim(), description.trim());
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="create-task" onSubmit={submit}>
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">New task</span>
+            <h2>Create a task</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+        <label htmlFor="task-title">Title</label>
+        <input
+          id="task-title"
+          value={title}
+          onInput={(event) => setTitle(event.currentTarget.value)}
+          required
+        />
+        <label htmlFor="task-description">Description</label>
+        <textarea
+          id="task-description"
+          value={description}
+          onInput={(event) => setDescription(event.currentTarget.value)}
+          required
+        />
+        <p className="small-muted">
+          The task is created as Draft. It will not start until you explicitly approve the next
+          step.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="button secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button primary">
+            Create task
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

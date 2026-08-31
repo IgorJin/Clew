@@ -61,3 +61,16 @@ export type Task = {
   };
   events: { seq: number; type: string; at: string; payload: Record<string, unknown> }[];
 };
+
+export type NextStep = {
+  id?: string;
+  taskId: string;
+  kind: string;
+  currentStep: string;
+  resultingStep?: string;
+  summary: string;
+  inputs?: Record<string, string>;
+  sideEffects?: string[];
+  approvalRequired: boolean;
+  status?: string;
+};
