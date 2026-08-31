@@ -15,6 +15,7 @@ import {
   EXECUTION_MODE,
 } from './domain.js';
 import {
+  APPROVAL_DECISION,
   FakeHarness,
   CodexHarness,
   OpenCodeHarness,
@@ -231,6 +232,7 @@ export class Scheduler {
             onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
             signal: taskSignal,
             resumeSessionId,
+            readOnly: options.readOnly === true,
             model: this.adapterConfig.models?.worker ?? null,
             runtimeNamespace:
               persistedRun.runtimeNamespace ?? createRuntimeNamespace(taskId, runId),
@@ -251,6 +253,22 @@ export class Scheduler {
           harness: harnessName,
           model: this.adapterConfig.models?.worker ?? null,
         });
+
+        const workerOutput =
+          typeof result.output === 'string'
+            ? result.output
+            : JSON.stringify(result.output ?? null, null, 2);
+
+        this.store.appendEvent(taskId, 'WORKER_OUTPUT_RECORDED', {
+          taskId,
+          runId,
+          stageId,
+          attempt,
+          sessionId: result.sessionId ?? null,
+          turnId: result.turnId ?? null,
+          output: workerOutput.slice(0, 32_000),
+        });
+
         this.assertVerificationPassed(result.verification);
         this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
         const status = this.workspaceManager.getWorktreeStatus(workspace.path);
@@ -1269,6 +1287,7 @@ export class Scheduler {
       method: request.method,
       params: request.params,
     });
+    this.store.setTaskState(taskId, TASK_STATE.WAITING_FOR_HUMAN);
 
     return new Promise((resolve, reject) => {
       let pollTimer;
@@ -1290,6 +1309,11 @@ export class Scheduler {
 
         if (!approval?.decision) return;
         cleanup();
+        if (
+          approval.decision === APPROVAL_DECISION.ACCEPT ||
+          approval.decision === APPROVAL_DECISION.ACCEPT_FOR_SESSION
+        )
+          this.store.setTaskState(taskId, TASK_STATE.EXECUTING);
         resolve(approval.decision);
       };
 
@@ -1302,8 +1326,13 @@ export class Scheduler {
 
   recordHarnessEvent(taskId, event, runId = null) {
     const eventType = event.type.startsWith('HARNESS_') ? event.type : `HARNESS_${event.type}`;
+    const run = runId ? this.store.getRun(runId) : null;
 
-    this.store.appendEvent(taskId, eventType, event);
+    this.store.appendEvent(taskId, eventType, {
+      ...event,
+      runId: runId ?? event.runId ?? null,
+      stageId: run?.stage_id ?? event.stageId ?? null,
+    });
     if (runId && event.sessionId)
       this.store.setRunIdentity(runId, event.sessionId, event.turnId ?? null);
   }

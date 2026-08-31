@@ -84,6 +84,49 @@ function websocketEvents(metadata, token, untilType) {
   });
 }
 
+test('live session inspection bypasses a running worker command', async () => {
+  const daemon = new LocalDaemon();
+  let releaseWorker;
+  const worker = new Promise((resolve) => {
+    releaseWorker = resolve;
+  });
+
+  daemon.control = {
+    execute: async (args) => {
+      if (args[0] === 'task') {
+        await worker;
+
+        return 'worker-finished';
+      }
+
+      return 'terminal-opened';
+    },
+  };
+  const running = daemon.dispatch(['task', 'approve-step', 'LIVE-1']);
+  const inspected = daemon.dispatch([
+    'session',
+    'open',
+    'LIVE-1',
+    '--surface',
+    'live',
+    '--mode',
+    'live',
+  ]);
+
+  assert.equal(await inspected, 'terminal-opened');
+  releaseWorker();
+  assert.equal(await running, 'worker-finished');
+});
+
+test('public event filtering suppresses tool and protocol events', async () => {
+  const { isPublicThreadEvent } = await import('../src/thread.js');
+
+  assert.equal(isPublicThreadEvent({ type: 'HARNESS_TOOL_COMPLETED' }), false);
+  assert.equal(isPublicThreadEvent({ type: 'HARNESS_HARNESS_EVENT' }), false);
+  assert.equal(isPublicThreadEvent({ type: 'WORKER_OUTPUT_RECORDED' }), true);
+  assert.equal(isPublicThreadEvent({ type: 'TASK_STATE_CHANGED' }), true);
+});
+
 test('local daemon authenticates API requests and serializes service commands', async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), 'clew-daemon-'));
   const daemon = new LocalDaemon({ cwd });

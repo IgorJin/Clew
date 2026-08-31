@@ -37,10 +37,22 @@ export type Task = {
   state: TaskState;
   attention?: string | null;
   revision?: string | null;
+  workerOutput?: string | null;
+  workerOutputRunId?: string | null;
   sessionId?: string | null;
   sessionHarness?: string | null;
   sessionStageId?: string | null;
   sessionWorkspace?: string | null;
+  runStatus?: string | null;
+  harnessApprovals?: {
+    id: string;
+    run_id: string;
+    method: string;
+    params: Record<string, unknown>;
+    decision?: string | null;
+    requested_at: string;
+    decided_at?: string | null;
+  }[];
   attempts: number;
   stages: { id: string; status: string; kind: string }[];
   reviewed?: boolean;
@@ -60,4 +72,17 @@ export type Task = {
     redaction: 'public-safe';
   };
   events: { seq: number; type: string; at: string; payload: Record<string, unknown> }[];
+};
+
+export type NextStep = {
+  id?: string;
+  taskId: string;
+  kind: string;
+  currentStep: string;
+  resultingStep?: string;
+  summary: string;
+  inputs?: Record<string, string>;
+  sideEffects?: string[];
+  approvalRequired: boolean;
+  status?: string;
 };

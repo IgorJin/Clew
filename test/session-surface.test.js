@@ -5,11 +5,66 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.js';
 import {
+  LiveThreadTerminalSurface,
   NoneSurface,
   PlainTerminalSurface,
   buildCodexResumeArgs,
   openSessionForRun,
 } from '../src/session-surface.js';
+
+test('live terminal opens immediately for a running worker without a Codex session id', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-live-session-'));
+  const calls = [];
+  const surface = new LiveThreadTerminalSurface({
+    nodeBin: '/usr/bin/node',
+    clewBin: '/project/bin/clew.js',
+    projectCwd: dir,
+    launcher: (bin, args, options) => {
+      calls.push({ bin, args, options });
+
+      return { pid: 73 };
+    },
+  });
+  const store = new Store(join(dir, 'state.sqlite'));
+
+  store.createTask({
+    id: 'LIVE-1',
+    title: 'Live worker',
+    goal: 'Inspect activity',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  store.createRun({
+    id: 'run-live-1',
+    taskId: 'LIVE-1',
+    stageId: 'worker',
+    attempt: 1,
+    status: 'RUNNING',
+    harness: 'codex',
+    workspace: dir,
+    profile: 'quick',
+    policy: {},
+  });
+  const result = await openSessionForRun(
+    store,
+    {
+      version: 1,
+      taskId: 'LIVE-1',
+      stageId: 'worker',
+      role: 'worker',
+      harness: 'codex',
+      mode: 'live',
+    },
+    surface,
+  );
+
+  assert.equal(result.state, 'opened');
+  assert.equal(result.sessionId, 'live:run-live-1');
+  assert.deepEqual(calls[0].args, ['/project/bin/clew.js', 'task', 'result', 'LIVE-1', '--watch']);
+  assert.equal(calls[0].options.cwd, dir);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
 
 test('Codex resume arguments use argv safely and preserve model context', () => {
   assert.deepEqual(buildCodexResumeArgs({ sessionId: 'thread-1', model: 'gpt-test' }), [

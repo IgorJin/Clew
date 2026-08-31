@@ -48,10 +48,12 @@ const SERVICE_COMMANDS = new Set([
   'worktree',
 ]);
 const TASK_COMMANDS = new Set([
+  'approve-step',
   'create',
   'history',
   'list',
   'message',
+  'next-step',
   'result',
   'show',
   'thread',
@@ -72,6 +74,22 @@ function getOptionValues(args, name) {
     if (args[index] === name && args[index + 1]) values.push(args[index + 1]);
 
   return values;
+}
+
+function readMarkdownTask(file, cwd) {
+  const source = readFileSync(resolve(cwd, file), 'utf8').replace(/^\uFEFF/, '');
+  const match = source.match(/^#\s+(.+?)\s*(?:\r?\n|$)/);
+
+  if (!match) throw new Error('Markdown task must start with a level-one heading (# Title)');
+  const description = source.slice(match[0].length).trim();
+
+  if (!description) throw new Error('Markdown task description is required after the title');
+
+  return { title: match[1].trim(), description };
+}
+
+function createTaskId() {
+  return `CLEW-${randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
 }
 
 function parseCommand(command) {
@@ -221,16 +239,25 @@ export class ClewService {
   }
 
   taskSnapshot(taskId) {
-    const task = this.store.getTask(taskId);
+    let task = this.store.getTask(taskId);
 
     if (!task) throw new Error(`task not found: ${taskId}`);
+    const harnessApprovals = this.store.listHarnessApprovals(task.id);
+
+    if (
+      task.state === TASK_STATE.EXECUTING &&
+      harnessApprovals.some((approval) => !approval.decision)
+    ) {
+      this.store.setTaskState(task.id, TASK_STATE.WAITING_FOR_HUMAN);
+      task = this.store.getTask(task.id);
+    }
 
     return {
       show: {
         ...task,
         plan: this.store.getLatestPlan(task.id),
         approvals: this.store.listApprovals(task.id),
-        harnessApprovals: this.store.listHarnessApprovals(task.id),
+        harnessApprovals,
         stages: this.store.listStages(task.id),
         runs: this.store.listRuns(task.id),
         review: this.store.latestReview(task.id),
@@ -256,6 +283,8 @@ export class ClewService {
 
   task(subcommand, args) {
     if (subcommand === 'create') return this.createTask(args);
+    if (subcommand === 'next-step') return this.nextStep(args[0]);
+    if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;
     if (subcommand === 'thread') {
@@ -299,14 +328,21 @@ export class ClewService {
   }
 
   createTask(args) {
-    const file = getOptionValue(args, '--file');
-    let contract;
+    const jsonFile = getOptionValue(args, '--json');
+    const legacyFile = getOptionValue(args, '--file');
+    const markdownFile = getOptionValue(args, '--md');
+    let input;
 
-    if (file) contract = JSON.parse(readFileSync(resolve(this.cwd, file), 'utf8'));
+    if ([jsonFile, legacyFile, markdownFile].filter(Boolean).length > 1)
+      throw new Error('use only one of --json, --file, or --md');
+    if (markdownFile) input = readMarkdownTask(markdownFile, this.cwd);
+    else if (jsonFile || legacyFile)
+      input = JSON.parse(readFileSync(resolve(this.cwd, jsonFile ?? legacyFile), 'utf8'));
     else
-      contract = {
+      input = {
         id: getOptionValue(args, '--id'),
         title: getOptionValue(args, '--title'),
+        description: getOptionValue(args, '--description'),
         goal: getOptionValue(args, '--goal'),
         profile: getOptionValue(args, '--profile', PROFILE_NAME.QUICK),
         risk: getOptionValue(args, '--risk', 'medium'),
@@ -314,10 +350,114 @@ export class ClewService {
         acceptance: getOptionValues(args, '--accept'),
         verification: getOptionValues(args, '--verify').map((command) => ({ command, args: [] })),
       };
-    contract = validateTaskContract(contract);
+
+    if (jsonFile) {
+      const allowed = new Set([
+        'id',
+        'title',
+        'description',
+        'goal',
+        'profile',
+        'risk',
+        'base_ref',
+        'acceptance',
+        'verification',
+      ]);
+      const unknown = Object.keys(input).filter((key) => !allowed.has(key));
+
+      if (unknown.length)
+        throw new Error(`task input contains unknown field: ${unknown.join(', ')}`);
+    }
+
+    const description = input.description ?? input.goal;
+
+    if (typeof input.title !== 'string' || !input.title.trim())
+      throw new Error('task.title is required');
+    if (typeof description !== 'string' || !description.trim())
+      throw new Error('task.description is required');
+    input = {
+      ...input,
+      id: getOptionValue(args, '--id', input.id) || createTaskId(),
+      description: description.trim(),
+      goal: description.trim(),
+      profile: input.profile ?? PROFILE_NAME.QUICK,
+      risk: input.risk ?? 'medium',
+      base_ref: input.base_ref ?? 'HEAD',
+      acceptance:
+        Array.isArray(input.acceptance) && input.acceptance.length
+          ? input.acceptance
+          : [description.trim()],
+    };
+    delete input.attachments;
+    const contract = validateTaskContract(input);
+
     this.store.createTask(contract);
 
     return contract;
+  }
+
+  nextStep(taskId) {
+    if (!taskId) throw new Error('task id is required');
+    const task = this.store.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const pending = this.store.latestWorkflowAction(taskId, 'start_worker');
+
+    if (pending?.status === 'PENDING') return pending;
+    if (task.state !== TASK_STATE.DRAFT)
+      return {
+        taskId,
+        currentStep: task.state,
+        kind: 'none',
+        summary: `No start action is available from ${task.state}`,
+        approvalRequired: false,
+      };
+    const descriptor = {
+      currentStep: TASK_STATE.DRAFT,
+      resultingStep: TASK_STATE.EXECUTING,
+      summary: 'Start one read-only worker for this task',
+      inputs: {
+        harness: 'codex',
+        permissionMode: 'read-only',
+        ...(this.config.models?.worker ? { model: this.config.models.worker } : {}),
+      },
+      sideEffects: ['start one local worker process', 'create one run record'],
+      approvalRequired: true,
+    };
+
+    return this.store.createWorkflowAction({
+      id: `action_${randomUUID()}`,
+      taskId,
+      kind: 'start_worker',
+      descriptor,
+    });
+  }
+
+  async approveStep(taskId, args, signal) {
+    if (!taskId) throw new Error('task id is required');
+    const actionId = getOptionValue(args, '--action');
+    const action = actionId ? this.store.getWorkflowAction(actionId) : this.nextStep(taskId);
+
+    if (!action || action.taskId !== taskId)
+      throw new Error('workflow action does not belong to task');
+    if (action.kind !== 'start_worker')
+      throw new Error(`unsupported workflow action: ${action.kind}`);
+    const task = this.store.getTask(taskId);
+
+    if (task.state !== TASK_STATE.DRAFT) throw new Error(`task ${taskId} is no longer a Draft`);
+    const approved = this.store.approveWorkflowAction(
+      action.id,
+      getOptionValue(args, '--actor', process.env.USER || 'local-user'),
+    );
+
+    this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+    const runArgs = args.includes('--harness') ? args : [...args, '--harness', 'codex'];
+
+    if (!args.includes('--worker-model') && action.inputs?.model)
+      runArgs.push('--worker-model', action.inputs.model);
+    const result = await this.run(taskId, runArgs, signal, { readOnly: true });
+
+    return { action: approved, result };
   }
 
   history(taskId, args) {
@@ -385,6 +525,9 @@ export class ClewService {
     const surface = createSessionSurface({
       kind: getOptionValue(args, '--surface', 'plain'),
       codexBin: this.config.codexBin,
+      nodeBin: process.execPath,
+      clewBin: process.argv[1] ?? 'clew',
+      projectCwd: this.cwd,
     });
 
     return openSessionForRun(this.store, request, surface);
@@ -766,16 +909,25 @@ export class ClewService {
   }
 
   status(taskId) {
-    const task = this.store.getTask(taskId);
+    let task = this.store.getTask(taskId);
 
     if (!task) throw new Error(`task not found: ${taskId}`);
+    const harnessApprovals = this.store.listHarnessApprovals(task.id);
+
+    if (
+      task.state === TASK_STATE.EXECUTING &&
+      harnessApprovals.some((approval) => !approval.decision)
+    ) {
+      this.store.setTaskState(task.id, TASK_STATE.WAITING_FOR_HUMAN);
+      task = this.store.getTask(task.id);
+    }
 
     return {
       id: task.id,
       state: task.state,
       plan: this.store.getLatestPlan(task.id),
       approvals: this.store.listApprovals(task.id),
-      harnessApprovals: this.store.listHarnessApprovals(task.id),
+      harnessApprovals,
       stages: this.store.listStages(task.id),
       runs: this.store.listRuns(task.id),
     };
@@ -874,7 +1026,7 @@ export class ClewService {
     return { ok: checks.filter((check) => check.required).every((check) => check.ok), checks };
   }
 
-  run(taskId, args, signal) {
+  run(taskId, args, signal, options = {}) {
     if (!taskId) throw new Error('task id is required');
 
     return this.scheduler(args, signal).runTask(
@@ -883,6 +1035,9 @@ export class ClewService {
       getOptionValue(args, '--harness'),
       getOptionValue(args, '--review-harness'),
       getOptionValue(args, '--architect'),
+      null,
+      [],
+      options,
     );
   }
 
@@ -899,6 +1054,10 @@ export class ClewService {
       codexBin: getOptionValue(args, '--codex-bin', this.config.codexBin),
       openCodeBin: getOptionValue(args, '--opencode-bin', this.config.openCodeBin),
       openCodeUrl: getOptionValue(args, '--opencode-url', this.config.openCodeUrl),
+      models: {
+        ...this.config.models,
+        worker: getOptionValue(args, '--worker-model', this.config.models?.worker),
+      },
       worktreeRoot: resolve(
         this.cwd,
         getOptionValue(args, '--worktree-root', this.config.worktreeRoot),

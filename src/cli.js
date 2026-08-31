@@ -108,8 +108,10 @@ async function printDaemonLogs(rest) {
 }
 function printHelp() {
   console.log(
-    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --id ID --title TITLE --goal GOAL --accept TEXT [--profile quick|standard|deep]\n  clew task create --file contract.json\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID\n  clew doctor [--harness codex|opencode]`,
+    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew doctor [--harness codex|opencode]`,
   );
+  console.log('  clew task next-step ID');
+  console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
   console.log(
     '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
   );
@@ -119,7 +121,7 @@ function printHelp() {
   console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
   console.log('  clew daemon start [--port PORT] | status | stop | logs [--lines N] [--follow]');
   console.log('  clew api task list|show ID|...');
-  console.log('  clew task thread ID [--after CURSOR] [--limit N]');
+  console.log('  clew task thread ID [--after CURSOR] [--limit N] [--follow]');
   console.log('  clew task message ID --message TEXT [--actor ACTOR]');
   console.log(
     '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|none]',
@@ -194,13 +196,30 @@ export async function main(args) {
       process.once('SIGINT', interrupt);
       process.once('SIGTERM', interrupt);
       try {
-        let result = await service.execute(args, { signal: controller.signal });
+        let result =
+          command === 'task' && subcommand === 'result' && rest.includes('--watch')
+            ? await service.execute(['status', rest[0]], { signal: controller.signal })
+            : await service.execute(args, { signal: controller.signal });
 
         if (command === 'task' && subcommand === 'create' && !rest.includes('--json'))
           console.log(`Created task ${result.id}`);
         else if (command === 'task' && subcommand === 'history' && rest.includes('--human'))
           printHumanHistory(result);
-        else if (command === 'task' && subcommand === 'result') printResult(result, rest);
+        else if (command === 'task' && subcommand === 'result' && rest.includes('--watch')) {
+          let lastState = null;
+
+          while (!TERMINAL_TASK_STATES.includes(result.state)) {
+            if (result.state !== lastState) {
+              printJson({ taskId: rest[0], state: result.state });
+              lastState = result.state;
+            }
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+            result = await service.execute(['status', rest[0]], {
+              signal: controller.signal,
+            });
+          }
+          printResult(await service.execute(['task', 'result', rest[0]]), []);
+        } else if (command === 'task' && subcommand === 'result') printResult(result, rest);
         else if (command === 'task' && subcommand === 'usage' && rest.includes('--human'))
           console.log(
             `Task: ${result.taskId}\nStatus: ${result.status}\nTurns: ${result.turns}\nPriced: ${result.pricedTurns}\nTotal: ${JSON.stringify(result.total)}`,
@@ -219,6 +238,28 @@ export async function main(args) {
               });
               printJson(result);
             }
+          }
+        } else if (command === 'task' && subcommand === 'thread' && rest.includes('--follow')) {
+          printJson(result);
+          let cursor = result.items.at(-1)?.cursor ?? 0;
+
+          while (true) {
+            await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+            const page = await service.execute([
+              'task',
+              'thread',
+              subcommand === 'thread' ? rest[0] : '',
+              '--after',
+              String(cursor),
+            ]);
+
+            if (page.items.length) {
+              printJson(page);
+              cursor = page.items.at(-1).cursor;
+            }
+            const status = await service.execute(['status', rest[0]]);
+
+            if (TERMINAL_TASK_STATES.includes(status.state)) break;
           }
         } else printJson(result);
 

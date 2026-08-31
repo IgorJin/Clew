@@ -51,6 +51,77 @@ export function buildCodexResumeArgs({ sessionId, model = null } = {}) {
   return args;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
+}
+
+function openMacTerminal({ codexBin, args, workspace }) {
+  const command = [codexBin, ...args].map(shellQuote).join(' ');
+  const script = `tell application "Terminal" to do script ${JSON.stringify(
+    `cd ${shellQuote(workspace)} && ${command}`,
+  )}`;
+  const child = spawn('osascript', ['-e', script], {
+    stdio: 'ignore',
+    detached: true,
+  });
+
+  child.unref();
+
+  return child;
+}
+
+export class LiveThreadTerminalSurface {
+  constructor({ nodeBin = process.execPath, clewBin = 'clew', projectCwd, launcher = null } = {}) {
+    this.nodeBin = nodeBin;
+    this.clewBin = clewBin;
+    this.projectCwd = projectCwd;
+    this.launcher = launcher;
+  }
+
+  capabilities() {
+    return ['open', 'inspect'];
+  }
+
+  open(request) {
+    const normalized = validateOpenSessionRequest(request);
+    const args = [this.clewBin, 'task', 'result', normalized.taskId, '--watch'];
+    const child =
+      this.launcher?.(this.nodeBin, args, {
+        cwd: this.projectCwd,
+        shell: false,
+        stdio: 'inherit',
+        detached: false,
+      }) ??
+      (process.platform === 'darwin'
+        ? openMacTerminal({ codexBin: this.nodeBin, args, workspace: this.projectCwd })
+        : null);
+
+    if (!child)
+      return unavailable(
+        normalized,
+        'live worker events are only supported with a terminal launcher',
+      );
+
+    return Promise.resolve(
+      validateOpenSessionResult({
+        version: 1,
+        taskId: normalized.taskId,
+        stageId: normalized.stageId ?? null,
+        runId: normalized.runId ?? null,
+        role: normalized.role,
+        harness: normalized.harness,
+        sessionId: normalized.sessionId,
+        turnId: normalized.turnId ?? null,
+        state: 'opened',
+        capabilities: this.capabilities(),
+        pid: child.pid ?? null,
+        command: [this.nodeBin, ...args],
+        workspace: this.projectCwd,
+      }),
+    );
+  }
+}
+
 export class NoneSurface {
   capabilities() {
     return [];
@@ -62,7 +133,7 @@ export class NoneSurface {
 }
 
 export class PlainTerminalSurface {
-  constructor({ codexBin = 'codex', launcher = spawn } = {}) {
+  constructor({ codexBin = 'codex', launcher = null } = {}) {
     this.codexBin = codexBin;
     this.launcher = launcher;
   }
@@ -103,12 +174,23 @@ export class PlainTerminalSurface {
     } catch (error) {
       return Promise.resolve(unavailable(normalized, error.message, 'SESSION_ID_INVALID'));
     }
-    const child = this.launcher(this.codexBin, args, {
-      cwd: workspace,
-      shell: false,
-      stdio: 'inherit',
-      detached: false,
-    });
+    const child =
+      this.launcher?.(this.codexBin, args, {
+        cwd: workspace,
+        shell: false,
+        stdio: 'inherit',
+        detached: false,
+      }) ??
+      (process.platform === 'darwin'
+        ? openMacTerminal({ codexBin: this.codexBin, args, workspace })
+        : this.launcher?.(this.codexBin, args, {
+            cwd: workspace,
+            shell: false,
+            stdio: 'inherit',
+            detached: false,
+          }));
+
+    if (!child) return unavailable(normalized, 'no terminal launcher is available');
 
     return Promise.resolve(
       validateOpenSessionResult({
@@ -130,9 +212,16 @@ export class PlainTerminalSurface {
   }
 }
 
-export function createSessionSurface({ kind = 'plain', codexBin } = {}) {
+export function createSessionSurface({
+  kind = 'plain',
+  codexBin,
+  nodeBin,
+  clewBin,
+  projectCwd,
+} = {}) {
   if (kind === 'none') return new NoneSurface();
   if (kind === 'plain') return new PlainTerminalSurface({ codexBin });
+  if (kind === 'live') return new LiveThreadTerminalSurface({ nodeBin, clewBin, projectCwd });
   throw new Error(`unsupported session surface: ${kind}`);
 }
 
@@ -147,11 +236,26 @@ export async function openSessionForRun(store, request, surface = new NoneSurfac
 
   if (!run)
     return unavailable(request, 'no persisted run matches the requested session', 'RUN_NOT_FOUND');
+  if (request.mode === 'live')
+    return surface.open({
+      ...request,
+      runId: run.id,
+      sessionId: run.session_id ?? `live:${run.id}`,
+      turnId: run.turn_id,
+      workspace: run.workspace,
+      model: request.model ?? task.contract.models?.[request.role] ?? null,
+    });
   if (!run.session_id)
     return unavailable(
       { ...request, runId: run.id },
       'run has no native session id',
       'SESSION_ID_MISSING',
+    );
+  if (run.status === 'RUNNING' && request.mode !== 'live')
+    return unavailable(
+      { ...request, runId: run.id, sessionId: run.session_id },
+      'native session is busy; wait for the active turn to finish before resuming it',
+      'SESSION_ACTIVE',
     );
   if (request.sessionId && request.sessionId !== run.session_id)
     return unavailable(

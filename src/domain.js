@@ -207,6 +207,7 @@ const transitions = {
     TASK_STATE.WAITING_FOR_HUMAN,
   ],
   [TASK_STATE.WAITING_FOR_HUMAN]: [
+    TASK_STATE.EXECUTING,
     TASK_STATE.QUEUED,
     TASK_STATE.PLAN_READY,
     TASK_STATE.READY,
@@ -292,6 +293,7 @@ export function validateTaskContract(contract) {
     id: contract.id,
     title: contract.title,
     goal: contract.goal,
+    ...(contract.description !== undefined ? { description: contract.description } : {}),
     profile: contract.profile,
     risk,
     base_ref: baseRef,

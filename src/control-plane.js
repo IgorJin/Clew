@@ -62,9 +62,15 @@ export function validateWebSocketEvent(event) {
 export function validateThreadSource(source) {
   assertObject(source, 'thread source');
   if (
-    !['event', 'operator_action', 'operator_message', 'run', 'review', 'verification'].includes(
-      source.kind,
-    )
+    ![
+      'event',
+      'operator_action',
+      'operator_message',
+      'run',
+      'review',
+      'verification',
+      'worker',
+    ].includes(source.kind)
   )
     throw new Error('thread.source.kind is invalid');
   assertString(source.id, 'thread.source.id');
@@ -126,7 +132,7 @@ export function validateOpenSessionRequest(request) {
   assertString(request.taskId, 'session.taskId');
   if (!SESSION_ROLES.has(request.role)) throw new Error('session.role is invalid');
   if (!HARNESSES.has(request.harness)) throw new Error('session.harness is invalid');
-  if (request.mode !== undefined && !['new', 'resume'].includes(request.mode))
+  if (request.mode !== undefined && !['new', 'resume', 'live'].includes(request.mode))
     throw new Error('session.mode is invalid');
 
   return copy(request);

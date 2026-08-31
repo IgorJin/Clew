@@ -39,6 +39,14 @@ export const TURN_STATUS = Object.freeze({
 
 const APPROVAL_DECISIONS = Object.freeze(Object.values(APPROVAL_DECISION));
 
+function openCodeModel(value) {
+  if (typeof value !== 'string' || !value.includes('/')) return undefined;
+  const [providerID, ...modelParts] = value.split('/');
+  const modelID = modelParts.join('/');
+
+  return providerID && modelID ? { providerID, modelID } : undefined;
+}
+
 function hasInterruptableTurn(interruptRequested, threadId, turnId, settled) {
   return interruptRequested && Boolean(threadId) && Boolean(turnId) && !settled;
 }
@@ -451,6 +459,7 @@ export class CodexHarness {
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_STARTED,
             sessionId: getSessionId(),
+            command: params.item?.command ?? params.command ?? null,
             raw: message,
           });
         else if (method === 'item/completed') {
@@ -477,6 +486,8 @@ export class CodexHarness {
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_COMPLETED,
             sessionId: getSessionId(),
+            command: item.command ?? null,
+            exitCode: item.exitCode ?? null,
             raw: message,
           });
         } else if (method.includes('tool/completed'))
@@ -537,7 +548,7 @@ export class CodexHarness {
         input: [
           {
             type: 'text',
-            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`,
+            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.\n\nREAD-ONLY MVP: inspect and report only. Do not create, edit, delete, or commit files. For this task, read package.json and return its contents in your final response.`,
           },
         ],
       });
@@ -610,6 +621,7 @@ export class OpenCodeHarness {
     onEvent,
     signal,
     model = null,
+    readOnly = false,
     resumeSessionId = null,
     onApproval = () => APPROVAL_DECISION.DECLINE,
   }) {
@@ -664,6 +676,7 @@ export class OpenCodeHarness {
           onEvent,
           onApproval,
           model,
+          readOnly,
         });
       const response = await this.fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
@@ -671,8 +684,8 @@ export class OpenCodeHarness {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            parts: [{ type: 'text', text: this.buildPrompt(task) }],
-            ...(model ? { model } : {}),
+            parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
+            ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
           }),
           signal: controller.signal,
         },
@@ -723,6 +736,7 @@ export class OpenCodeHarness {
     onEvent,
     onApproval,
     model = null,
+    readOnly = false,
   }) {
     const promptResponse = await this.fetch(
       `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
@@ -730,8 +744,8 @@ export class OpenCodeHarness {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          parts: [{ type: 'text', text: this.buildPrompt(task) }],
-          ...(model ? { model } : {}),
+          parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
+          ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
         }),
         signal: controller.signal,
       },
@@ -913,8 +927,12 @@ export class OpenCodeHarness {
         output: part.state?.output,
       }));
   }
-  buildPrompt(task) {
-    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`;
+  buildPrompt(task, readOnly = false) {
+    const policy = readOnly
+      ? '\n\nREAD-ONLY POLICY: inspect and report only. Do not create, edit, delete, or commit files. Do not run commands that mutate state.'
+      : '';
+
+    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.${policy}`;
   }
   async requestJson(path, { method = 'GET', body } = {}) {
     const response = await this.fetch(`${this.baseUrl}${path}`, {

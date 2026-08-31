@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureTasks } from './fixtures';
 import type { ThreadItem } from './types';
 
@@ -26,6 +26,11 @@ vi.mock('./api', () => api);
 import App, { Thread } from './App';
 
 describe('Preact control plane', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+  });
+
   it('confirms completion and sends the pinned revision', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
@@ -61,6 +66,34 @@ describe('Preact control plane', () => {
 
     expect(api.execute).toHaveBeenCalledWith(['approve', 'ACC-DEEP']);
     expect((await screen.findAllByText('Plan ready')).length).toBeGreaterThan(0);
+  });
+
+  it('exposes a native worker approval while the run is active', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const tasks = structuredClone(fixtureTasks);
+    tasks[0] = {
+      ...tasks[0],
+      state: 'WAITING_FOR_HUMAN',
+      attention: 'HUMAN_ACTION_REQUIRED',
+      runStatus: 'RUNNING',
+      harnessApprovals: [
+        {
+          id: 'approval-1',
+          run_id: 'run-1',
+          method: 'item/commandExecution/requestApproval',
+          params: { command: 'npm test' },
+          decision: null,
+          requested_at: '2026-08-31T17:50:00.000Z',
+          decided_at: null,
+        },
+      ],
+    };
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /approve worker command/i }));
+
+    expect(api.execute).toHaveBeenCalledWith(['approve-run', 'approval-1']);
   });
 
   it('renders summaries as text instead of arbitrary HTML', () => {
@@ -100,5 +133,60 @@ describe('Preact control plane', () => {
     await waitFor(() => expect(complete.hasAttribute('disabled')).toBe(true));
     expect(screen.getByRole('alert').textContent).toMatch(/last known data/i);
     expect(screen.getByRole('alert').textContent).toMatch(/actions are disabled/i);
+  });
+
+  it('creates a task from the UI without starting it', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /new/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
+      target: { value: 'Read-only MVP task' },
+    });
+    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
+      target: { value: 'List files without changing them' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
+
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'create',
+      '--title',
+      'Read-only MVP task',
+      '--description',
+      'List files without changing them',
+    ]);
+    expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
+    expect(window.location.pathname).toMatch(/^\/tasks\/LOCAL-/);
+  });
+
+  it('opens the live worker terminal before a Codex session id exists', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const runningTasks = structuredClone(fixtureTasks);
+
+    runningTasks[0].state = 'EXECUTING';
+    runningTasks[0].runStatus = 'RUNNING';
+    runningTasks[0].sessionId = null;
+    runningTasks[0].sessionHarness = 'codex';
+    runningTasks[0].sessionStageId = 'worker';
+    api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
+    render(<App />);
+    const open = await screen.findByRole('button', { name: /open live terminal/i });
+
+    expect(open.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(open);
+    expect(api.execute).toHaveBeenCalledWith([
+      'session',
+      'open',
+      'CLEW-071',
+      '--stage',
+      'worker',
+      '--role',
+      'worker',
+      '--harness',
+      'codex',
+      '--surface',
+      'live',
+      '--mode',
+      'live',
+    ]);
   });
 });
