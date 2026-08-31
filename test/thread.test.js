@@ -51,6 +51,32 @@ test('uses stable equal-timestamp ordering and cursor pagination', () => {
   );
 });
 
+test('projects workflow and final worker output into the public thread', () => {
+  const items = projectTaskThread({
+    events: [
+      event(1, 'WORKFLOW_ACTION_PROPOSED', {
+        id: 'action-1',
+        kind: 'start_worker',
+        descriptor: { summary: 'Start one read-only worker' },
+      }),
+      event(2, 'WORKFLOW_ACTION_APPROVED', { id: 'action-1' }),
+      event(3, 'HARNESS_SESSION_STARTED', { sessionId: 'thread-1' }),
+      event(4, 'HARNESS_TOOL_COMPLETED', { command: 'cat package.json', exitCode: 0 }),
+      event(5, 'WORKER_OUTPUT_RECORDED', {
+        runId: 'run-1',
+        output: '{"name":"clew"}',
+      }),
+    ],
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.kind),
+    ['next_step_proposed', 'step_approved', 'worker_output'],
+  );
+  assert.match(items.at(-1).summary, /package|clew/);
+  assert.equal(items.at(-1).source.kind, 'worker');
+});
+
 test('persists redacted operator messages and exposes a separate diagnostic view', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-thread-'));
   const store = new Store(join(dir, 'clew.sqlite'));

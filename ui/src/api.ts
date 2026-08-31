@@ -167,10 +167,28 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
           : 'HUMAN_ACTION_REQUIRED'
         : null,
     revision: typeof latestRevision === 'string' ? latestRevision : null,
+    workerOutput: typeof show.workerOutput === 'string' ? show.workerOutput : null,
+    workerOutputRunId: typeof show.workerOutputRunId === 'string' ? show.workerOutputRunId : null,
     sessionId: typeof latestRun?.session_id === 'string' ? latestRun.session_id : null,
     sessionHarness: typeof latestRun?.harness === 'string' ? latestRun.harness : null,
     sessionStageId: typeof latestRun?.stage_id === 'string' ? latestRun.stage_id : null,
     sessionWorkspace: typeof latestRun?.workspace === 'string' ? latestRun.workspace : null,
+    runStatus: typeof latestRun?.status === 'string' ? latestRun.status : null,
+    harnessApprovals: Array.isArray(show.harnessApprovals)
+      ? show.harnessApprovals.map((approvalValue) => {
+          const approval = object(approvalValue, 'harness approval');
+
+          return {
+            id: string(approval.id, 'approval id'),
+            run_id: string(approval.run_id, 'approval run id'),
+            method: string(approval.method, 'approval method'),
+            params: object(approval.params ?? {}, 'approval params'),
+            decision: typeof approval.decision === 'string' ? approval.decision : null,
+            requested_at: string(approval.requested_at, 'approval timestamp'),
+            decided_at: typeof approval.decided_at === 'string' ? approval.decided_at : null,
+          };
+        })
+      : [],
     attempts: runs.length,
     stages,
     reviewed: review !== null,

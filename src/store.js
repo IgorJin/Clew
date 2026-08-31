@@ -902,6 +902,14 @@ export class Store {
 
     return reports.at(-1) ?? null;
   }
+  latestWorkerOutput(taskId) {
+    return (
+      this.listEvents(taskId)
+        .filter((event) => event.type === 'WORKER_OUTPUT_RECORDED')
+        .map((event) => event.payload)
+        .at(-1) ?? null
+    );
+  }
   evaluateTaskTrust(taskId, context = {}) {
     const report = this.latestVerification(taskId);
     const task = this.getTask(taskId);
@@ -951,6 +959,7 @@ export class Store {
     const runs = this.listRuns(taskId);
     const latestCompletedRun = [...runs].reverse().find((run) => run.status === 'COMPLETED');
     const latestVerification = this.latestVerification(taskId);
+    const latestWorkerOutput = this.latestWorkerOutput(taskId);
     const manifest = {
       version: 1,
       taskId,
@@ -987,6 +996,8 @@ export class Store {
       workspace: latestCompletedRun?.workspace ?? latestVerification?.workspace ?? null,
       completion: this.getCompletion(taskId),
       usage: this.refreshUsageCosts(taskId),
+      workerOutput: latestWorkerOutput?.output ?? null,
+      workerOutputRunId: latestWorkerOutput?.runId ?? null,
     };
 
     return validateResultManifest(manifest);

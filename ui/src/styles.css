@@ -571,6 +571,19 @@ h3 {
   min-height: 85px;
   position: relative;
 }
+.thread-item-new {
+  animation: thread-item-in 320ms ease-out both;
+}
+@keyframes thread-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .thread-marker {
   display: grid;
   place-items: center;

@@ -42,6 +42,13 @@ const kindLabel: Record<string, string> = {
   review_recorded: 'Review',
   task_ready: 'Ready',
   plan_approval_required: 'Approval required',
+  next_step_proposed: 'Next step',
+  step_approved: 'Step approved',
+  codex_session_started: 'Codex session',
+  codex_turn_started: 'Codex turn',
+  worker_tool_started: 'Tool started',
+  worker_tool_completed: 'Tool completed',
+  worker_output: 'Worker output',
 };
 
 function Status({ state }: { state: TaskState }) {
@@ -81,10 +88,16 @@ function iconFor(kind: string) {
   return <Activity size={16} />;
 }
 
+function taskIdFromLocation() {
+  const match = window.location.pathname.match(/^\/tasks\/([^/]+)\/?$/);
+
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selected, setSelected] = useState(
-    () => sessionStorage.getItem('clew-selected-task') ?? 'CLEW-071',
+    () => taskIdFromLocation() ?? sessionStorage.getItem('clew-selected-task') ?? 'CLEW-071',
   );
   const [connection, setConnection] = useState<ConnectionState>('reconnecting');
   const [diagnostic, setDiagnostic] = useState(false);
@@ -98,6 +111,26 @@ function App() {
   const refreshTimer = useRef<number | undefined>(undefined);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  const selectTask = useCallback((taskId: string) => {
+    setSelected(taskId);
+    sessionStorage.setItem('clew-selected-task', taskId);
+    if (window.location.pathname !== `/tasks/${encodeURIComponent(taskId)}`)
+      window.history.pushState({}, '', `/tasks/${encodeURIComponent(taskId)}`);
+  }, []);
+  useEffect(() => {
+    const onPopState = () => {
+      const taskId = taskIdFromLocation();
+
+      if (taskId) {
+        setSelected(taskId);
+        sessionStorage.setItem('clew-selected-task', taskId);
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const refresh = useCallback(() => {
     if (refreshInFlight.current) return refreshInFlight.current;
     const operation = loadTasks().then(({ tasks: next, state }) => {
@@ -106,8 +139,7 @@ function App() {
         setTasks(next);
         setLastUpdatedAt(new Date());
         if (next[0] && !next.some((task) => task.id === selectedRef.current)) {
-          setSelected(next[0].id);
-          sessionStorage.setItem('clew-selected-task', next[0].id);
+          selectTask(next[0].id);
         }
       }
     });
@@ -117,7 +149,7 @@ function App() {
     });
 
     return refreshInFlight.current;
-  }, []);
+  }, [selectTask]);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -190,9 +222,12 @@ function App() {
           },
           ...current,
         ]);
-        setSelected(id);
+        selectTask(id);
       } else {
         await refresh();
+        const createdId = (result as { id?: string }).id;
+
+        if (createdId) selectTask(createdId);
       }
       setCreateOpen(false);
       setNotice(`Task created: ${title}`);
@@ -283,6 +318,7 @@ function App() {
   const canContinue =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
+  const pendingHarnessApproval = task.harnessApprovals?.find((approval) => !approval.decision);
   const explainNextStep = async () => {
     try {
       const result = await execute(['task', 'next-step', task.id]);
@@ -331,8 +367,7 @@ function App() {
                 className={`task-row ${entry.id === task.id ? 'selected' : ''}`}
                 key={entry.id}
                 onClick={() => {
-                  setSelected(entry.id);
-                  sessionStorage.setItem('clew-selected-task', entry.id);
+                  selectTask(entry.id);
                 }}
               >
                 <div className="task-row-top">
@@ -496,6 +531,15 @@ function App() {
                   </button>
                 </div>
                 {diagnostic ? <Diagnostic task={task} /> : <Thread items={task.thread.items} />}
+                {task.workerOutput && (
+                  <section className="worker-output" aria-label="Worker output">
+                    <div className="panel-head compact">
+                      <h3>Worker output</h3>
+                      <span className="mono">{task.workerOutputRunId ?? 'latest run'}</span>
+                    </div>
+                    <pre>{task.workerOutput}</pre>
+                  </section>
+                )}
               </section>
               <aside className="right-rail">
                 <Stages task={task} />
@@ -531,6 +575,47 @@ function App() {
                         </div>
                       </div>
                     )}
+                  {pendingHarnessApproval && (
+                    <div className="attention-box">
+                      <AlertTriangle size={17} />
+                      <div>
+                        <strong>Worker approval required</strong>
+                        <p>
+                          Codex is waiting for permission to execute{' '}
+                          <span className="mono">
+                            {String(
+                              pendingHarnessApproval.params.command ??
+                                pendingHarnessApproval.method,
+                            )}
+                          </span>
+                        </p>
+                        <button
+                          className="text-button"
+                          disabled={!canMutate}
+                          onClick={() =>
+                            act(
+                              ['approve-run', pendingHarnessApproval.id],
+                              'Worker approval accepted',
+                            )
+                          }
+                        >
+                          Approve worker command <ChevronRight size={14} />
+                        </button>
+                        <button
+                          className="text-button danger"
+                          disabled={!canMutate}
+                          onClick={() =>
+                            act(
+                              ['reject-run', pendingHarnessApproval.id],
+                              'Worker approval rejected',
+                            )
+                          }
+                        >
+                          Reject worker command
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="message-box">
                     <label htmlFor="operator-message">Add a message</label>
                     <textarea
@@ -555,14 +640,20 @@ function App() {
                   </div>
                   <button
                     className="text-button"
-                    disabled={!canMutate || !task.sessionId || task.sessionHarness !== 'codex'}
+                    disabled={
+                      !canMutate ||
+                      (task.runStatus !== 'RUNNING' &&
+                        (!task.sessionId || task.sessionHarness !== 'codex'))
+                    }
                     title={
-                      task.sessionId && task.sessionHarness === 'codex'
-                        ? `Open ${task.sessionId} in ${task.sessionWorkspace ?? 'its workspace'}`
-                        : 'A Codex session is not available for the latest run'
+                      task.runStatus === 'RUNNING'
+                        ? 'Open a terminal with the live worker event stream. Codex resume is available after the worker finishes.'
+                        : task.sessionId && task.sessionHarness === 'codex'
+                          ? `Open ${task.sessionId} in ${task.sessionWorkspace ?? 'its workspace'}`
+                          : 'A Codex session is not available for the latest run'
                     }
                     onClick={() =>
-                      task.sessionId &&
+                      (task.runStatus === 'RUNNING' || task.sessionId) &&
                       act(
                         [
                           'session',
@@ -574,15 +665,22 @@ function App() {
                           'worker',
                           '--harness',
                           task.sessionHarness ?? 'codex',
+                          ...(task.runStatus === 'RUNNING'
+                            ? ['--surface', 'live', '--mode', 'live']
+                            : []),
                         ],
-                        'Native session opened',
+                        task.runStatus === 'RUNNING'
+                          ? 'Live worker terminal opened'
+                          : 'Native session opened',
                       )
                     }
                   >
                     <SquareTerminal size={14} />
-                    {task.sessionId && task.sessionHarness === 'codex'
-                      ? ' Open native session'
-                      : ' Native session unavailable'}
+                    {task.runStatus === 'RUNNING'
+                      ? ' Open live terminal'
+                      : task.sessionId && task.sessionHarness === 'codex'
+                        ? ' Open native session'
+                        : ' Native session unavailable'}
                   </button>
                 </section>
               </aside>
@@ -668,10 +766,15 @@ function Logo() {
   );
 }
 export function Thread({ items }: { items: ThreadItem[] }) {
+  const newestCursor = Math.max(0, ...items.map((entry) => entry.cursor));
+
   return (
     <div className="thread">
-      {items.map((entry) => (
-        <div className="thread-item" key={entry.id}>
+      {[...items].reverse().map((entry) => (
+        <div
+          className={`thread-item${entry.cursor === newestCursor ? ' thread-item-new' : ''}`}
+          key={entry.id}
+        >
           <div className="thread-marker">{iconFor(entry.kind)}</div>
           <div className="thread-line" />{' '}
           <div className="thread-content">

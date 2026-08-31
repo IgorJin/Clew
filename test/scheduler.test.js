@@ -1206,10 +1206,12 @@ test('scheduler waits for a persisted native approval decision', async () => {
     if (!approval) await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.ok(approval);
+  assert.equal(store.getTask('T-APP').state, 'WAITING_FOR_HUMAN');
   store.decideHarnessApproval(approval.id, APPROVAL_DECISION.ACCEPT, 'fixture-user');
   const result = await run;
 
   assert.equal(result.state, 'READY');
+  assert.equal(store.getTask('T-APP').state, 'READY');
   assert.equal(store.listHarnessApprovals('T-APP')[0].decision, APPROVAL_DECISION.ACCEPT);
   assert.ok(store.listEvents('T-APP').some((event) => event.type === 'HARNESS_APPROVAL_DECIDED'));
   store.close();

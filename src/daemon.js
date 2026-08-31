@@ -20,6 +20,7 @@ import { Store } from './store.js';
 import { ClewService } from './control-service.js';
 import { loadConfig } from './config.js';
 import { Observability } from './observability.js';
+import { isPublicThreadEvent } from './thread.js';
 import {
   validateApiEnvelope,
   validateWebSocketEvent,
@@ -210,7 +211,10 @@ export class LocalDaemon {
       config: config.observability,
       store: this.store,
     });
-    this.store.setEventObserver(this.observability);
+    this.store.setEventObserver((event) => {
+      this.observability.onEvent(event);
+      this.broadcastEvents();
+    });
     this.control = new ClewService({ cwd: this.cwd, store: this.store, config });
     this.server = createServer((request, response) => this.handle(request, response));
     this.webSocketServer = new WebSocketServer({
@@ -314,7 +318,10 @@ export class LocalDaemon {
       );
     });
     try {
-      if (request.method === 'GET' && (pathname === '/' || pathname === '/index.html'))
+      if (
+        request.method === 'GET' &&
+        (pathname === '/' || pathname === '/index.html' || pathname.startsWith('/tasks/'))
+      )
         return this.uiIndex(response);
       if (request.method === 'GET' && pathname.startsWith('/assets/'))
         return this.asset(pathname, response);
@@ -381,7 +388,7 @@ export class LocalDaemon {
         !Array.isArray(envelope.payload?.args)
       )
         throw new Error('expected service.execute command');
-      const result = await this.enqueue(envelope.payload.args);
+      const result = await this.dispatch(envelope.payload.args);
 
       this.broadcastEvents();
 
@@ -418,15 +425,26 @@ export class LocalDaemon {
     }
   }
 
-  enqueue(args) {
+  dispatch(args) {
+    const isLiveInspection =
+      args[0] === 'session' &&
+      args[1] === 'open' &&
+      args.includes('--surface') &&
+      args[args.indexOf('--surface') + 1] === 'live' &&
+      args.includes('--mode') &&
+      args[args.indexOf('--mode') + 1] === 'live';
+
+    return isLiveInspection ? this.executeCommand(args) : this.enqueue(args);
+  }
+
+  executeCommand(args) {
     const fields = commandLogFields(args);
-    const next = this.commandQueue.then(async () => {
-      const startedAt = process.hrtime.bigint();
+    const startedAt = process.hrtime.bigint();
 
-      this.logger?.info({ event: 'command.started', ...fields }, 'command started');
-      try {
-        const result = await this.control.execute(args);
+    this.logger?.info({ event: 'command.started', ...fields }, 'command started');
 
+    return this.control.execute(args).then(
+      (result) => {
         this.logger?.info(
           {
             event: 'command.completed',
@@ -437,7 +455,8 @@ export class LocalDaemon {
         );
 
         return result;
-      } catch (error) {
+      },
+      (error) => {
         this.logger?.warn(
           {
             event: 'command.failed',
@@ -448,8 +467,12 @@ export class LocalDaemon {
           'command failed',
         );
         throw error;
-      }
-    });
+      },
+    );
+  }
+
+  enqueue(args) {
+    const next = this.commandQueue.then(() => this.executeCommand(args));
 
     this.commandQueue = next.catch(() => undefined);
 
@@ -571,6 +594,8 @@ export class LocalDaemon {
       .all(after);
 
     for (const item of rows) {
+      this.clients.set(socket, item.seq);
+      if (!isPublicThreadEvent({ type: item.type })) continue;
       if (socket.readyState !== WebSocket.OPEN) break;
       const event = validateWebSocketEvent({
         version: 1,
@@ -583,7 +608,6 @@ export class LocalDaemon {
       });
 
       socket.send(JSON.stringify(event));
-      this.clients.set(socket, item.seq);
     }
     if (rows.length)
       this.logger?.debug(

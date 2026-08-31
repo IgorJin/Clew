@@ -97,6 +97,47 @@ const EVENT_KINDS = new Map([
     ['session_resume_fallback', () => 'Stale native session replaced with a fresh session'],
   ],
   [
+    'WORKFLOW_ACTION_PROPOSED',
+    [
+      'next_step_proposed',
+      (p) => `Next step: ${p.descriptor?.summary ?? p.summary ?? p.kind ?? 'approval required'}`,
+    ],
+  ],
+  ['WORKFLOW_ACTION_APPROVED', ['step_approved', (p) => `Step approved${p.id ? `: ${p.id}` : ''}`]],
+  [
+    'HARNESS_SESSION_STARTED',
+    ['codex_session_started', (p) => `Codex session started: ${p.sessionId ?? 'unknown'}`],
+  ],
+  [
+    'HARNESS_SESSION_RESUMED',
+    ['codex_session_resumed', (p) => `Codex session resumed: ${p.sessionId ?? 'unknown'}`],
+  ],
+  [
+    'HARNESS_TURN_STARTED',
+    ['codex_turn_started', (p) => `Codex turn started: ${p.turnId ?? 'unknown'}`],
+  ],
+  [
+    'HARNESS_TOOL_STARTED',
+    ['worker_tool_started', (p) => `Worker started tool: ${p.command ?? p.tool ?? 'unknown'}`],
+  ],
+  [
+    'HARNESS_TOOL_COMPLETED',
+    [
+      'worker_tool_completed',
+      (p) =>
+        `Worker completed tool: ${p.command ?? p.tool ?? 'unknown'}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}`,
+    ],
+  ],
+  ['HARNESS_HARNESS_COMPLETED', ['codex_completed', () => 'Codex worker completed']],
+  [
+    'HARNESS_HARNESS_FAILED',
+    ['codex_failed', (p) => `Codex worker failed: ${p.error ?? 'unknown error'}`],
+  ],
+  [
+    'WORKER_OUTPUT_RECORDED',
+    ['worker_output', (p) => `Worker output:\n${String(p.output ?? '').slice(0, 4000)}`],
+  ],
+  [
     'OPERATOR_MESSAGE_RECORDED',
     ['operator_message_recorded', (p) => `Operator message recorded for ${p.actor ?? 'operator'}`],
   ],
@@ -104,12 +145,35 @@ const EVENT_KINDS = new Map([
     'OPERATOR_ACTION_RECORDED',
     ['operator_action', (p) => `Operator ${p.action ?? 'action'} recorded`],
   ],
+  [
+    'HARNESS_APPROVAL_REQUESTED',
+    ['harness_approval_required', (p) => `Worker approval required: ${p.method ?? 'command'}`],
+  ],
+  [
+    'HARNESS_APPROVAL_DECIDED',
+    ['harness_approval_decided', (p) => `Worker approval ${p.decision ?? 'decided'}`],
+  ],
 ]);
 
 const stageFrom = (payload) => payload.stageId ?? payload.stage_id ?? null;
 const runFrom = (payload) => payload.runId ?? payload.run_id ?? null;
+const HIDDEN_PUBLIC_EVENT_TYPES = new Set([
+  'HARNESS_SESSION_STARTED',
+  'HARNESS_SESSION_RESUMED',
+  'HARNESS_TURN_STARTED',
+  'HARNESS_TOOL_STARTED',
+  'HARNESS_TOOL_COMPLETED',
+  'HARNESS_HARNESS_COMPLETED',
+  'HARNESS_HARNESS_EVENT',
+  'HARNESS_HARNESS_OUTPUT',
+]);
+
+export function isPublicThreadEvent(event) {
+  return EVENT_KINDS.has(event.type) && !HIDDEN_PUBLIC_EVENT_TYPES.has(event.type);
+}
 
 function eventItem(event) {
+  if (!isPublicThreadEvent(event)) return null;
   const mapping = EVENT_KINDS.get(event.type);
 
   if (!mapping) return null;
@@ -124,7 +188,9 @@ function eventItem(event) {
           ? 'run'
           : event.type === 'OPERATOR_ACTION_RECORDED'
             ? 'operator_action'
-            : 'event';
+            : event.type.startsWith('HARNESS_') || event.type === 'WORKER_OUTPUT_RECORDED'
+              ? 'worker'
+              : 'event';
 
   return {
     version: 1,

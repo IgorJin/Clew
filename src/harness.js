@@ -459,6 +459,7 @@ export class CodexHarness {
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_STARTED,
             sessionId: getSessionId(),
+            command: params.item?.command ?? params.command ?? null,
             raw: message,
           });
         else if (method === 'item/completed') {
@@ -485,6 +486,8 @@ export class CodexHarness {
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_COMPLETED,
             sessionId: getSessionId(),
+            command: item.command ?? null,
+            exitCode: item.exitCode ?? null,
             raw: message,
           });
         } else if (method.includes('tool/completed'))
@@ -545,7 +548,7 @@ export class CodexHarness {
         input: [
           {
             type: 'text',
-            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.`,
+            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.\n\nREAD-ONLY MVP: inspect and report only. Do not create, edit, delete, or commit files. For this task, read package.json and return its contents in your final response.`,
           },
         ],
       });

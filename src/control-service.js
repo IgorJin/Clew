@@ -239,16 +239,25 @@ export class ClewService {
   }
 
   taskSnapshot(taskId) {
-    const task = this.store.getTask(taskId);
+    let task = this.store.getTask(taskId);
 
     if (!task) throw new Error(`task not found: ${taskId}`);
+    const harnessApprovals = this.store.listHarnessApprovals(task.id);
+
+    if (
+      task.state === TASK_STATE.EXECUTING &&
+      harnessApprovals.some((approval) => !approval.decision)
+    ) {
+      this.store.setTaskState(task.id, TASK_STATE.WAITING_FOR_HUMAN);
+      task = this.store.getTask(task.id);
+    }
 
     return {
       show: {
         ...task,
         plan: this.store.getLatestPlan(task.id),
         approvals: this.store.listApprovals(task.id),
-        harnessApprovals: this.store.listHarnessApprovals(task.id),
+        harnessApprovals,
         stages: this.store.listStages(task.id),
         runs: this.store.listRuns(task.id),
         review: this.store.latestReview(task.id),
@@ -516,6 +525,9 @@ export class ClewService {
     const surface = createSessionSurface({
       kind: getOptionValue(args, '--surface', 'plain'),
       codexBin: this.config.codexBin,
+      nodeBin: process.execPath,
+      clewBin: process.argv[1] ?? 'clew',
+      projectCwd: this.cwd,
     });
 
     return openSessionForRun(this.store, request, surface);
@@ -897,16 +909,25 @@ export class ClewService {
   }
 
   status(taskId) {
-    const task = this.store.getTask(taskId);
+    let task = this.store.getTask(taskId);
 
     if (!task) throw new Error(`task not found: ${taskId}`);
+    const harnessApprovals = this.store.listHarnessApprovals(task.id);
+
+    if (
+      task.state === TASK_STATE.EXECUTING &&
+      harnessApprovals.some((approval) => !approval.decision)
+    ) {
+      this.store.setTaskState(task.id, TASK_STATE.WAITING_FOR_HUMAN);
+      task = this.store.getTask(task.id);
+    }
 
     return {
       id: task.id,
       state: task.state,
       plan: this.store.getLatestPlan(task.id),
       approvals: this.store.listApprovals(task.id),
-      harnessApprovals: this.store.listHarnessApprovals(task.id),
+      harnessApprovals,
       stages: this.store.listStages(task.id),
       runs: this.store.listRuns(task.id),
     };
