@@ -29,7 +29,7 @@ A user can:
 5. See an explanation of the exact next action, its inputs, expected state
    transition, side effects, worker configuration, and approval requirement.
 6. Explicitly approve that action.
-7. Observe one real worker process start with the Luna model.
+7. Observe one real worker process start with the configured Codex model.
 8. Follow its identifiers, status, structured logs, output, and failure details.
 9. Review the result and explicitly complete or reject the task.
 
@@ -117,7 +117,7 @@ requirement to replace the current state model.
 | `START_PROPOSED`  | Clew explains the exact worker action it is prepared to run.       | User approves or cancels.                |
 | `START_APPROVED`  | The proposed action is authorized exactly once.                    | Clew starts the worker.                  |
 | `WORKER_STARTING` | Process creation has begun and diagnostic identifiers are visible. | Real process/session start is confirmed. |
-| `WORKER_RUNNING`  | The Luna worker is processing the read-only task.                  | Process exits or fails.                  |
+| `WORKER_RUNNING`  | The Codex worker is processing the read-only task.                 | Process exits or fails.                  |
 | `WORKER_FINISHED` | Exit status and result are stored; task is not yet complete.       | User opens result review.                |
 | `RESULT_REVIEW`   | Output, logs, and errors are available for inspection.             | User completes or rejects.               |
 | `COMPLETED`       | The human accepted the result.                                     | Terminal state.                          |
@@ -143,7 +143,7 @@ A representative descriptor is:
   "resultingStep": "WORKER_STARTING",
   "summary": "Start one read-only worker for this task",
   "inputs": {
-    "harness": "opencode",
+    "harness": "codex",
     "model": "luna",
     "permissionMode": "read-only"
   },
@@ -170,10 +170,11 @@ for a parallel API implementation.
 
 The first worker is intentionally constrained:
 
-- existing harness boundary is reused rather than replaced without evidence;
-- Luna is selected through the existing model configuration boundary;
-- exact provider and model identifier must be discovered and verified during
-  the audit, then exposed in the action descriptor and logs;
+- existing Codex CLI app-server boundary is reused rather than replaced without evidence;
+- The configured Codex model is selected through the existing model configuration
+  boundary; when unset, Codex CLI uses its own default;
+- the exact model identifier must be exposed in the action descriptor and logs
+  when explicitly configured;
 - permission mode is read-only;
 - one process or native agent session is started per approved action;
 - one attempt is allowed;
@@ -286,9 +287,9 @@ anything executing.
 Exit condition: no worker starts before approval, and one approval starts at
 most one run.
 
-### Slice 4 — Real Luna read-only worker
+### Slice 4 — Real Codex read-only worker
 
-- Verify the installed harness and exact Luna model identifier.
+- Verify the installed Codex CLI and configured/default model.
 - Start one real native worker process/session.
 - Capture lifecycle events, identifiers, output, exit status, and errors.
 - Enforce read-only permissions and one attempt.
@@ -327,7 +328,7 @@ using only the documented commands and visible diagnostics.
 - [ ] UI and CLI display information from that same action descriptor.
 - [ ] No worker starts without explicit approval.
 - [ ] An approved action is executed at most once.
-- [ ] Exactly one real Luna worker process/session handles the MVP task.
+- [ ] Exactly one real Codex CLI worker process/session handles the MVP task.
 - [ ] Worker permissions are demonstrably read-only.
 - [ ] Process/session IDs and correlated structured logs are visible.
 - [ ] Success, failure, cancellation, and rejection remain distinguishable.

@@ -408,9 +408,9 @@ export class ClewService {
       resultingStep: TASK_STATE.EXECUTING,
       summary: 'Start one read-only worker for this task',
       inputs: {
-        harness: 'opencode',
-        model: this.config.models?.worker ?? 'luna',
+        harness: 'codex',
         permissionMode: 'read-only',
+        ...(this.config.models?.worker ? { model: this.config.models.worker } : {}),
       },
       sideEffects: ['start one local worker process', 'create one run record'],
       approvalRequired: true,
@@ -442,9 +442,10 @@ export class ClewService {
     );
 
     this.store.setTaskState(taskId, TASK_STATE.QUEUED);
-    const runArgs = args.includes('--harness')
-      ? args
-      : [...args, '--harness', 'opencode', '--worker-model', action.inputs?.model ?? 'luna'];
+    const runArgs = args.includes('--harness') ? args : [...args, '--harness', 'codex'];
+
+    if (!args.includes('--worker-model') && action.inputs?.model)
+      runArgs.push('--worker-model', action.inputs.model);
     const result = await this.run(taskId, runArgs, signal, { readOnly: true });
 
     return { action: approved, result };

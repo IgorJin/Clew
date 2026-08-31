@@ -293,7 +293,7 @@ function App() {
           currentStep: 'DRAFT',
           resultingStep: 'EXECUTING',
           summary: 'Start one read-only worker for this task',
-          inputs: { harness: 'opencode', model: 'luna', permissionMode: 'read-only' },
+          inputs: { harness: 'codex', model: 'default', permissionMode: 'read-only' },
           sideEffects: ['start one local worker process', 'create one run record'],
           approvalRequired: true,
           status: 'PENDING',
