@@ -2,7 +2,7 @@
 id: CLEW-075
 title: Controller and Runner split
 status: planned
-release: v0.5
+release: v0.6
 priority: P1
 size: L
 depends_on: [CLEW-074]
@@ -24,7 +24,7 @@ A developer can keep repositories, Git, Codex/OpenCode credentials, and terminal
 
 ## Context
 
-v0.4 has an in-process Runner. v0.5 preserves the same contracts while replacing the in-process call boundary with authenticated, reconnectable transport. The first version intentionally supports exactly one Runner per Controller.
+v0.5 has an in-process Runner. v0.6 preserves the same contracts while replacing the in-process call boundary with authenticated, reconnectable transport. The first version intentionally supports exactly one Runner per Controller.
 
 ## Scope
 

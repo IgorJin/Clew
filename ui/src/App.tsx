@@ -481,7 +481,9 @@ function App() {
                 <SquareTerminal size={18} />
                 <div>
                   <strong>Terminal is waiting for you</strong>
-                  <p>The worker returned a response. Continue in the terminal or finish the worker.</p>
+                  <p>
+                    The worker returned a response. Continue in the terminal or finish the worker.
+                  </p>
                 </div>
                 {task.terminalAvailable && task.runId && (
                   <button className="text-button" onClick={() => setTerminalVisible(true)}>

@@ -930,9 +930,7 @@ export class CodexHarness {
     // Correlation IDs make the terminal attachable before Codex has created its
     // native thread. They are not valid Codex thread IDs and must never be used
     // for `codex resume` after an interrupted startup.
-    const nativeResumeSessionId = resumeSessionId?.startsWith('codex-')
-      ? null
-      : resumeSessionId;
+    const nativeResumeSessionId = resumeSessionId?.startsWith('codex-') ? null : resumeSessionId;
 
     rmSync(socketPath, { force: true });
     const serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {

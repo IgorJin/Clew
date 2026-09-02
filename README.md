@@ -2,7 +2,7 @@
 
 Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
 
-This repository contains the `v0.2.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
+This repository contains the `v0.5.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
 
 ## Requirements
 
@@ -127,6 +127,7 @@ Role-specific models can be selected with `models.worker`, `models.architect`, `
 - [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
 - [`RELEASE-0.2.md`](./RELEASE-0.2.md) — v0.2 scope and release gates;
 - [`RELEASE-0.3.md`](./RELEASE-0.3.md) — planned observability and execution-economics release;
+- [`RELEASE-0.5.md`](./RELEASE-0.5.md) — interactive terminal and worker lifecycle release;
 - [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
 
 ## Intentional limits

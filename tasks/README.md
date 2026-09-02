@@ -61,11 +61,11 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-072](./CLEW-072.md) | v0.4    | ready     | 068           | v0.4-control-plane |
 | [CLEW-073](./CLEW-073.md) | v0.4    | in_review | 068           | v0.4-control-plane |
 | [CLEW-074](./CLEW-074.md) | v0.4    | planned   | 069–073       | —                  |
-| [CLEW-075](./CLEW-075.md) | v0.5    | planned   | 074           | —                  |
-| [CLEW-076](./CLEW-076.md) | v0.5    | planned   | 075           | —                  |
-| [CLEW-077](./CLEW-077.md) | v0.4    | planned   | 078, 079      | —                  |
-| [CLEW-078](./CLEW-078.md) | v0.4    | in_review | 068, 069, 072 | —                  |
-| [CLEW-079](./CLEW-079.md) | v0.4    | in_review | 078           | —                  |
+| [CLEW-075](./CLEW-075.md) | v0.6    | planned   | 074           | —                  |
+| [CLEW-076](./CLEW-076.md) | v0.6    | planned   | 075           | —                  |
+| [CLEW-077](./CLEW-077.md) | v0.5    | done      | 078, 079      | —                  |
+| [CLEW-078](./CLEW-078.md) | v0.5    | done      | 068, 069, 072 | —                  |
+| [CLEW-079](./CLEW-079.md) | v0.5    | done      | 078           | —                  |
 
 ## Execution waves
 

@@ -1,8 +1,8 @@
 ---
 id: CLEW-077
 title: Interactive worker response and operator-waiting lifecycle
-status: planned
-release: v0.4
+status: done
+release: v0.5
 priority: P0
 size: L
 depends_on: [CLEW-078, CLEW-079]
@@ -73,16 +73,16 @@ The accepted design therefore keeps the TUI as the sole writer and observes pers
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                                  | Logical scenarios                                                 | Result  |
-| --------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- | ------- |
-| AC-1      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | initial turn; in-progress turn; completed turn                    | pending |
-| AC-2      | `test/thread.test.js`, `test/store.test.js`                         | first response; duplicate poll; multiple turns; causal identities | pending |
-| AC-3      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | completed turn with live PTY and running Run                      | pending |
-| AC-4      | `test/harness-conformance.test.js`, `ui/src/App.test.tsx`           | operator follow-up; running reset; second response                | pending |
-| AC-5      | `test/scheduler.test.js`, `test/terminal-manager.test.js`           | waiting then explicit finish; verification success/failure        | pending |
-| AC-6      | `test/harness-conformance.test.js`, `test/scheduler.test.js`        | missing thread; reader exit; timeout; malformed response          | pending |
-| AC-7      | `test/daemon.test.js`, `test/store.test.js`, `ui/src/App.test.tsx`  | browser reconnect; daemon restart; duplicate suppression          | pending |
-| AC-8      | `test/thread.test.js`, `ui/src/App.test.tsx`                        | ANSI, HTML, long output, secret-like values, reasoning items      | pending |
+| Criterion | Automated evidence                                                  | Logical scenarios                                                 | Result |
+| --------- | ------------------------------------------------------------------- | ----------------------------------------------------------------- | ------ |
+| AC-1      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | initial turn; in-progress turn; completed turn                    | pass   |
+| AC-2      | `test/thread.test.js`, `test/store.test.js`                         | first response; duplicate poll; multiple turns; causal identities | pass   |
+| AC-3      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | completed turn with live PTY and running Run                      | pass   |
+| AC-4      | `test/harness-conformance.test.js`, `ui/src/App.test.tsx`           | operator follow-up; running reset; second response                | pass   |
+| AC-5      | `test/scheduler.test.js`, `test/terminal-manager.test.js`           | waiting then explicit finish; verification success/failure        | pass   |
+| AC-6      | `test/harness-conformance.test.js`, `test/scheduler.test.js`        | absent thread; reader exit; timeout; malformed response           | pass   |
+| AC-7      | `test/daemon.test.js`, `test/store.test.js`, `ui/src/App.test.tsx`  | browser reconnect; daemon restart; duplicate suppression          | pass   |
+| AC-8      | `test/thread.test.js`, `ui/src/App.test.tsx`                        | ANSI, HTML, long output, secret-like values, reasoning items      | pass   |
 
 ## Verification
 
@@ -95,9 +95,9 @@ The accepted design therefore keeps the TUI as the sole writer and observes pers
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: v0.5 release verification
+- Findings: No blocking findings after the full backend/UI suite, installed-package acceptance, and terminal lifecycle review.
 
 ## Dependencies and parallelization
 
@@ -113,8 +113,8 @@ The accepted design therefore keeps the TUI as the sole writer and observes pers
 
 ## Blockers
 
-Waiting for the remaining two-turn/reconnect/restart evidence and independent review of `CLEW-078` and `CLEW-079`.
+None.
 
 ## Completion record
 
-One-turn live smoke passed on 2026-09-02: delayed discovery recovered the native Codex UUID, one completed response appeared as `HARNESS_TURN_WAITING`, the terminal stayed operator-owned, the worktree remained clean, and explicit `Finish worker` completed verification. The smoke uncovered three lifecycle defects; discovery retry, synthetic resume filtering, and provisional external-writer status deduplication were fixed with regression tests. Two-turn and restart/reconnect evidence remain before completion.
+One-turn live smoke passed on 2026-09-02: delayed discovery recovered the native Codex UUID, one completed response appeared as `HARNESS_TURN_WAITING`, the terminal stayed operator-owned, the worktree remained clean, and explicit `Finish worker` completed verification. The smoke uncovered three lifecycle defects; discovery retry, synthetic resume filtering, and provisional external-writer status deduplication were fixed with regression tests. Multi-turn, restart, reconnect, duplicate-suppression, and explicit-finish scenarios pass in the deterministic backend/UI release suite. Installed-package acceptance passed for `0.5.0`.

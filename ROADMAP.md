@@ -262,7 +262,25 @@ Done when every v0.4 release gate is reproducible from a clean installed package
 6. Review exhaustion reliably returns control to a human.
 7. `READY` remains execution handoff; only an operator creates `COMPLETED`.
 
-## v0.5 — Self-hosted Controller and paired Runner
+## v0.5 — Interactive Codex terminal
+
+**Outcome:** daemon-run Codex workers remain directly interactive while Clew observes completed turns, projects safe responses into Task Thread, and waits for an explicit operator finish before verification.
+
+Included work:
+
+- [`CLEW-078`](./tasks/CLEW-078.md): read-only native turn monitoring;
+- [`CLEW-079`](./tasks/CLEW-079.md): durable worker responses and live operator-attention UI;
+- [`CLEW-077`](./tasks/CLEW-077.md): integrated terminal lifecycle acceptance and release sign-off.
+
+### v0.5 release gate
+
+1. The Codex TUI remains the sole writer for the native worker thread.
+2. Completed turns appear once in Task Thread without terminal escape sequences or hidden reasoning.
+3. Follow-up turns clear and restore operator-waiting state correctly.
+4. `Finish worker` remains the only handoff to verification.
+5. Restart, reconnect, duplicate suppression, package installation, and the production UI build pass.
+
+## v0.6 — Self-hosted Controller and paired Runner
 
 **Outcome:** a user can run the Clew Controller and Web UI in Docker while code, Git, credentials, native harnesses, and terminal access remain on one paired execution machine.
 
@@ -310,7 +328,7 @@ Done when:
 - Runner disconnect/reconnect is recoverable and auditable;
 - no privileged host mount is required by the Controller container.
 
-### v0.5 release gate
+### v0.6 release gate
 
 1. Local-first mode remains supported and simpler than self-hosting.
 2. Docker deployment is reproducible from published artifacts.
@@ -319,7 +337,7 @@ Done when:
 5. A Controller compromise does not automatically expose host credentials or arbitrary filesystem access.
 6. One-Runner scope is explicit; multi-runner scheduling remains deferred.
 
-## Research queue after v0.5
+## Research queue after v0.6
 
 These topics require discovery before release commitment:
 

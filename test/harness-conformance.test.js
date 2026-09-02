@@ -425,9 +425,7 @@ test('interactive Codex harness never resumes a synthetic pre-discovery session 
         if (request.id !== undefined)
           setTimeout(
             () =>
-              child.stdout.write(
-                `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result })}\n`,
-              ),
+              child.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: request.id, result })}\n`),
             0,
           );
       });

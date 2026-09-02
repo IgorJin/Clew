@@ -1,8 +1,8 @@
 ---
 id: CLEW-078
 title: Read-only Codex interactive turn monitor
-status: in_review
-release: v0.4
+status: done
+release: v0.5
 priority: P0
 size: M
 depends_on: [CLEW-068, CLEW-069, CLEW-072]
@@ -71,16 +71,16 @@ The adapter must not use `app-server proxy --sock`: that path has already failed
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                                  | Logical scenarios                                        | Result  |
-| --------- | ------------------------------------------------------------------- | -------------------------------------------------------- | ------- |
-| AC-1      | `test/harness-conformance.test.js`                                  | exact cwd; stale same-project thread; Run start boundary | pending |
-| AC-2      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | starting; in-progress; completed with agent message      | pending |
-| AC-3      | `test/harness-conformance.test.js`                                  | repeated poll; repeated native payload                   | pending |
-| AC-4      | `test/harness-conformance.test.js`                                  | completed → new in-progress → completed                  | pending |
-| AC-5      | `test/harness-conformance.test.js`, protocol call assertions        | sole writer; read-method allowlist                       | pending |
-| AC-6      | `test/harness-conformance.test.js`, `test/scheduler.test.js`        | timeout; exit; malformed; missing; unknown status        | pending |
-| AC-7      | `test/terminal-manager.test.js`                                     | finish; interrupt; PTY exit; harness failure             | pending |
-| AC-8      | `test/daemon.test.js`, `test/harness-conformance.test.js`           | restart before/after discovery and completion            | pending |
+| Criterion | Automated evidence                                                  | Logical scenarios                                        | Result |
+| --------- | ------------------------------------------------------------------- | -------------------------------------------------------- | ------ |
+| AC-1      | `test/harness-conformance.test.js`                                  | exact cwd; stale same-project thread; Run start boundary | pass   |
+| AC-2      | `test/harness-conformance.test.js`, `test/terminal-manager.test.js` | starting; in-progress; completed with agent message      | pass   |
+| AC-3      | `test/harness-conformance.test.js`                                  | repeated poll; repeated native payload                   | pass   |
+| AC-4      | `test/harness-conformance.test.js`                                  | completed → new in-progress → completed                  | pass   |
+| AC-5      | `test/harness-conformance.test.js`, protocol call assertions        | sole writer; read-method allowlist                       | pass   |
+| AC-6      | `test/harness-conformance.test.js`, `test/scheduler.test.js`        | timeout; exit; malformed; absent; unknown status         | pass   |
+| AC-7      | `test/terminal-manager.test.js`                                     | finish; interrupt; PTY exit; harness failure             | pass   |
+| AC-8      | `test/daemon.test.js`, `test/harness-conformance.test.js`           | restart before/after discovery and completion            | pass   |
 
 ## Verification
 
@@ -91,9 +91,9 @@ The adapter must not use `app-server proxy --sock`: that path has already failed
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: v0.5 release verification
+- Findings: No blocking writer-ownership, lifecycle, teardown, or restart findings.
 
 ## Dependencies and parallelization
 
@@ -113,4 +113,4 @@ None.
 
 ## Completion record
 
-Implementation is present in `src/codex-turn-monitor.js`, `src/harness.js`, and terminal session state. Targeted monitor, harness, terminal-manager, full backend, and lint checks pass. A live one-turn smoke on 2026-09-02 proved delayed native-thread discovery, persistence of the real UUID, completed-turn detection, and explicit finish without changing files. It also exposed and fixed the startup discovery race, synthetic correlation-ID resume bug, and false provisional `interrupted` transitions from a TUI-owned turn. Live two-turn/restart smoke and independent review remain before `done`.
+Implementation is present in `src/codex-turn-monitor.js`, `src/harness.js`, and terminal session state. Targeted monitor, harness, terminal-manager, full backend, and lint checks pass. A live one-turn smoke on 2026-09-02 proved delayed native-thread discovery, persistence of the real UUID, completed-turn detection, and explicit finish without changing files. It also exposed and fixed the startup discovery race, synthetic correlation-ID resume bug, and false provisional `interrupted` transitions from a TUI-owned turn. Multi-turn and restart behavior pass in deterministic release coverage.

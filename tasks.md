@@ -4,7 +4,7 @@
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Clew v0.3.0; v0.4 and v0.5 are planned in [`ROADMAP.md`](./ROADMAP.md)
+**Active target:** Clew v0.5.0 interactive terminal release; v0.6 is planned in [`ROADMAP.md`](./ROADMAP.md)
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -242,7 +242,7 @@ Ownership boundaries minimize merge conflicts:
 - `CLEW-072`: Session Surface and terminal adapters;
 - `CLEW-073`: domain, Store, Scheduler, and CLI continuation workflow.
 
-## v0.5 plan — Self-hosted Controller and paired Runner
+## v0.6 plan — Self-hosted Controller and paired Runner
 
 | ID       | Pri | Size | Work package                                | Depends on | Done when                                                                                                                                                              |
 | -------- | --- | ---- | ------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

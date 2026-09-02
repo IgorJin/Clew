@@ -8,7 +8,10 @@ import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const sandbox = mkdtempSync(join(tmpdir(), 'clew-installed-'));
-const npmEnvironment = { ...process.env, NPM_CONFIG_CACHE: join(sandbox, 'npm-cache') };
+const npmEnvironment = {
+  ...process.env,
+  NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE ?? join(sandbox, 'npm-cache'),
+};
 
 function run(command, args, cwd, options = {}) {
   return execFileSync(command, args, {
@@ -110,6 +113,7 @@ try {
     'package/migrations/015_continuation_lifecycle.sql',
     'package/migrations/010_telemetry_context.sql',
     'package/migrations/011_usage_costs.sql',
+    'package/RELEASE-0.5.md',
   ]) {
     if (!listing.includes(required)) throw new Error(`tarball is missing ${required}`);
   }
@@ -128,7 +132,7 @@ try {
     readFileSync(join(sandbox, 'node_modules', 'clew', 'package.json'), 'utf8'),
   );
 
-  if (installedPackageJson.version !== '0.4.0')
+  if (installedPackageJson.version !== '0.5.0')
     throw new Error(`installed package version is ${installedPackageJson.version}`);
   const installedAssets = readdirSync(
     join(sandbox, 'node_modules', 'clew', 'ui', 'dist', 'assets'),

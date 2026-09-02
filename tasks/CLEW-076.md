@@ -2,7 +2,7 @@
 id: CLEW-076
 title: Docker packaging and self-hosted acceptance
 status: planned
-release: v0.5
+release: v0.6
 priority: P1
 size: L
 depends_on: [CLEW-075]

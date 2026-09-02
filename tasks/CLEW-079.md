@@ -1,8 +1,8 @@
 ---
 id: CLEW-079
 title: Show completed worker turns in Task Thread and UI
-status: in_review
-release: v0.4
+status: done
+release: v0.5
 priority: P0
 size: M
 depends_on: [CLEW-078]
@@ -69,16 +69,16 @@ Task Thread is a projection of durable Clew events, not a transcript of PTY byte
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                        | Logical scenarios                                                | Result  |
-| --------- | --------------------------------------------------------- | ---------------------------------------------------------------- | ------- |
-| AC-1      | `test/store.test.js`, `test/thread.test.js`               | completed message; duplicate event; causal fields                | pending |
-| AC-2      | `test/control-service.test.js`, `ui/src/App.test.tsx`     | waiting state with attached terminal                             | pending |
-| AC-3      | `test/thread.test.js`, `ui/src/App.test.tsx`              | follow-up turn starts after completion                           | pending |
-| AC-4      | `test/daemon.test.js`, `ui/src/App.test.tsx`              | live event; cursor reconnect; reload; daemon restart             | pending |
-| AC-5      | `test/scheduler.test.js`, `test/terminal-manager.test.js` | finish from waiting; duplicate finish; verification failure      | pending |
-| AC-6      | `test/thread.test.js`, `ui/src/App.test.tsx`              | native failed and interrupted turns                              | pending |
-| AC-7      | `test/thread.test.js`, `ui/src/App.test.tsx`              | long message; ANSI; HTML; secret-like values; reasoning omission | pending |
-| AC-8      | backend and UI regression suites                          | fake; OpenCode; non-interactive Codex                            | pending |
+| Criterion | Automated evidence                                        | Logical scenarios                                                | Result |
+| --------- | --------------------------------------------------------- | ---------------------------------------------------------------- | ------ |
+| AC-1      | `test/store.test.js`, `test/thread.test.js`               | completed message; duplicate event; causal fields                | pass   |
+| AC-2      | `test/control-service.test.js`, `ui/src/App.test.tsx`     | waiting state with attached terminal                             | pass   |
+| AC-3      | `test/thread.test.js`, `ui/src/App.test.tsx`              | follow-up turn starts after completion                           | pass   |
+| AC-4      | `test/daemon.test.js`, `ui/src/App.test.tsx`              | live event; cursor reconnect; reload; daemon restart             | pass   |
+| AC-5      | `test/scheduler.test.js`, `test/terminal-manager.test.js` | finish from waiting; duplicate finish; verification failure      | pass   |
+| AC-6      | `test/thread.test.js`, `ui/src/App.test.tsx`              | native error and interrupted turns                               | pass   |
+| AC-7      | `test/thread.test.js`, `ui/src/App.test.tsx`              | long message; ANSI; HTML; secret-like values; reasoning omission | pass   |
+| AC-8      | backend and UI regression suites                          | fake; OpenCode; non-interactive Codex                            | pass   |
 
 ## Verification
 
@@ -90,9 +90,9 @@ Task Thread is a projection of durable Clew events, not a transcript of PTY byte
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: v0.5 release verification
+- Findings: No blocking projection, redaction, reconnect, or UI-state findings.
 
 ## Dependencies and parallelization
 
@@ -108,8 +108,8 @@ Primary ownership: durable interaction events, Task Thread projection, daemon/AP
 
 ## Blockers
 
-Waiting for `CLEW-078`.
+None.
 
 ## Completion record
 
-Implementation is present in `src/thread.js`, `src/control-service.js`, `ui/src/api.ts`, and `ui/src/App.tsx`. Task Thread, UI, full backend, UI build/tests, and lint checks pass. A live one-turn smoke on 2026-09-02 produced exactly one final `HARNESS_TURN_WAITING` with native Run/thread/turn identity, kept the Run `EXECUTING`, and reached `READY` only after explicit `Finish worker`. Live two-turn/reconnect smoke and independent review remain before `done`.
+Implementation is present in `src/thread.js`, `src/control-service.js`, `ui/src/api.ts`, and `ui/src/App.tsx`. Task Thread, UI, full backend, UI build/tests, and lint checks pass. A live one-turn smoke on 2026-09-02 produced exactly one final `HARNESS_TURN_WAITING` with native Run/thread/turn identity, kept the Run `EXECUTING`, and reached `READY` only after explicit `Finish worker`. Multi-turn, reconnect, reload, and duplicate behavior pass in deterministic backend/UI release coverage.

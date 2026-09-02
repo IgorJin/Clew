@@ -2,11 +2,18 @@
 
 ## Unreleased
 
-- Added the v0.4 local daemon/API foundation with authenticated loopback transport, exclusive state ownership, cursor-based event replay, explicit lifecycle commands, and API command forwarding.
-- Reworked daemon lifecycle around a health-checked background process, stable default port, persistent logs, stale-lock recovery, and `SIGHUP` cleanup.
-- Replaced the Web UI's per-task CLI subprocess fan-out with one in-process snapshot endpoint and coalesced event refreshes; disconnected views now retain clearly marked last-known data while disabling every operator action.
-- Replaced the hand-written WebSocket framing with the maintained `ws` implementation, including large-payload replay, protocol validation, and ping/pong liveness checks.
-- Added a shared in-process `ClewService` used by both CLI and daemon API commands; the daemon no longer spawns a nested CLI process for each UI action.
+No changes yet.
+
+## 0.5.0
+
+The headline feature of this release is an interactive terminal for native Codex workers.
+
+- Added an embedded terminal that keeps the Codex TUI operator-owned from the first worker turn.
+- Added read-only native turn monitoring: Clew detects running and completed turns without creating a competing writer.
+- Completed worker responses now appear once in Task Thread with bounded, redacted content and native causal identity.
+- Added the live `waiting_for_operator` state, follow-up interaction, terminal focus, and explicit `Finish worker` handoff to verification.
+- Preserved the local daemon/API, reconnectable event stream, Task Thread projection, continuation flow, and packaged Preact UI introduced in the control-plane work.
+- Added terminal lifecycle, restart, reconnect, duplicate-suppression, redaction, and UI regression coverage.
 
 ## 0.4.0
 

@@ -336,7 +336,9 @@ button {
 }
 .task-row-waiting.selected {
   border-color: #8a7437;
-  box-shadow: inset 3px 0 var(--amber), 0 0 0 1px #665326;
+  box-shadow:
+    inset 3px 0 var(--amber),
+    0 0 0 1px #665326;
 }
 .task-interaction-status {
   display: inline-flex;
