@@ -410,7 +410,7 @@ Current limitations:
 - single local process and SQLite;
 - no daemon or browser UI;
 - no remote Runner;
-- no live terminal attachment contract;
+- live terminal attachment is local Codex-only and requires a compatible App Server/CLI pair;
 - no cross-repository transaction;
 - no team identity or RBAC;
 - no formal QA/evidence-policy product surface;

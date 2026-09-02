@@ -21,11 +21,13 @@ test('resolves user, project, and environment config precedence', () => {
     const config = loadConfig(dir, {
       CLEW_USER_CONFIG: userConfig,
       CLEW_CODEX_BIN: 'env-codex',
+      CLEW_CODEX_OPEN_DESKTOP: 'true',
     });
 
     assert.equal(config.codexBin, 'env-codex');
     assert.equal(config.openCodeUrl, 'http://user:4096');
     assert.equal(config.worktreeRoot, join(dir, '.state', 'worktrees'));
+    assert.equal(config.openCodexDesktop, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

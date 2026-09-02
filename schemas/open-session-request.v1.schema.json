@@ -11,7 +11,7 @@
     "sessionId": { "type": ["string", "null"] },
     "role": { "enum": ["architect", "worker", "reviewer", "qa"] },
     "harness": { "enum": ["codex", "opencode", "fake"] },
-    "mode": { "enum": ["new", "resume"] }
+    "mode": { "enum": ["new", "resume", "live"] }
   },
   "additionalProperties": true
 }

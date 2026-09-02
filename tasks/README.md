@@ -49,20 +49,23 @@ Human-authorized transitions are valid product behavior when the card calls for 
 
 ## Current index
 
-| Task                      | Release | Status    | Depends on | Parallel group     |
-| ------------------------- | ------- | --------- | ---------- | ------------------ |
-| [CLEW-042](./CLEW-042.md) | v0.3    | done      | —          | —                  |
-| [CLEW-043](./CLEW-043.md) | v0.3    | done      | CLEW-042   | —                  |
-| [CLEW-067](./CLEW-067.md) | v0.3    | ready     | 042, 043   | —                  |
-| [CLEW-068](./CLEW-068.md) | v0.4    | done      | 067        | —                  |
-| [CLEW-069](./CLEW-069.md) | v0.4    | done      | 068        | v0.4-control-plane |
-| [CLEW-070](./CLEW-070.md) | v0.4    | done      | 068        | v0.4-control-plane |
-| [CLEW-071](./CLEW-071.md) | v0.4    | ready     | 068        | v0.4-control-plane |
-| [CLEW-072](./CLEW-072.md) | v0.4    | ready     | 068        | v0.4-control-plane |
-| [CLEW-073](./CLEW-073.md) | v0.4    | in_review | 068        | v0.4-control-plane |
-| [CLEW-074](./CLEW-074.md) | v0.4    | planned   | 069–073    | —                  |
-| [CLEW-075](./CLEW-075.md) | v0.5    | planned   | 074        | —                  |
-| [CLEW-076](./CLEW-076.md) | v0.5    | planned   | 075        | —                  |
+| Task                      | Release | Status    | Depends on    | Parallel group     |
+| ------------------------- | ------- | --------- | ------------- | ------------------ |
+| [CLEW-042](./CLEW-042.md) | v0.3    | done      | —             | —                  |
+| [CLEW-043](./CLEW-043.md) | v0.3    | done      | CLEW-042      | —                  |
+| [CLEW-067](./CLEW-067.md) | v0.3    | ready     | 042, 043      | —                  |
+| [CLEW-068](./CLEW-068.md) | v0.4    | done      | 067           | —                  |
+| [CLEW-069](./CLEW-069.md) | v0.4    | done      | 068           | v0.4-control-plane |
+| [CLEW-070](./CLEW-070.md) | v0.4    | done      | 068           | v0.4-control-plane |
+| [CLEW-071](./CLEW-071.md) | v0.4    | ready     | 068           | v0.4-control-plane |
+| [CLEW-072](./CLEW-072.md) | v0.4    | ready     | 068           | v0.4-control-plane |
+| [CLEW-073](./CLEW-073.md) | v0.4    | in_review | 068           | v0.4-control-plane |
+| [CLEW-074](./CLEW-074.md) | v0.4    | planned   | 069–073       | —                  |
+| [CLEW-075](./CLEW-075.md) | v0.5    | planned   | 074           | —                  |
+| [CLEW-076](./CLEW-076.md) | v0.5    | planned   | 075           | —                  |
+| [CLEW-077](./CLEW-077.md) | v0.4    | planned   | 078, 079      | —                  |
+| [CLEW-078](./CLEW-078.md) | v0.4    | in_review | 068, 069, 072 | —                  |
+| [CLEW-079](./CLEW-079.md) | v0.4    | in_review | 078           | —                  |
 
 ## Execution waves
 
@@ -73,6 +76,7 @@ Wave 2: CLEW-069 + 070 + 071 + 072 + 073
 Wave 3: CLEW-074
 Wave 4: CLEW-075
 Wave 5: CLEW-076
+Interactive response slice: CLEW-078 → CLEW-079 → CLEW-077 acceptance
 ```
 
 The Wave 2 tasks deliberately own separate primary areas to reduce merge conflicts. Their shared contracts and fixtures must land in `CLEW-068` first.

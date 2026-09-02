@@ -11,18 +11,20 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "lucide-preact": "^0.511.0",
     "preact": "^10.26.9"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@preact/preset-vite": "^2.10.1",
     "@testing-library/preact": "^3.2.4",
-    "@eslint/js": "^9.39.1",
     "eslint": "^9.39.1",
     "jsdom": "^26.1.0",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.46.4",
     "vite": "^6.3.5",
-    "vitest": "^3.2.4",
-    "typescript-eslint": "^8.46.4"
+    "vitest": "^3.2.4"
   }
 }

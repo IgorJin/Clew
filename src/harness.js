@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 import { extractUsage } from './usage.js';
+import { CodexTurnMonitor } from './codex-turn-monitor.js';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -21,6 +22,10 @@ export const HARNESS_EVENT_TYPE = Object.freeze({
   HARNESS_FAILED: 'HARNESS_FAILED',
   HARNESS_EVENT: 'HARNESS_EVENT',
   HARNESS_OUTPUT: 'HARNESS_OUTPUT',
+  TURN_RUNNING: 'TURN_RUNNING',
+  TURN_WAITING: 'TURN_WAITING',
+  TURN_FAILED: 'TURN_FAILED',
+  TURN_INTERRUPTED: 'TURN_INTERRUPTED',
 });
 
 export const APPROVAL_DECISION = Object.freeze({
@@ -85,6 +90,194 @@ function parseAgentMessageOutput(message) {
   } catch {
     return message;
   }
+}
+
+function unixSocketPath(endpoint) {
+  if (typeof endpoint !== 'string' || !endpoint.startsWith('unix:///'))
+    throw new Error('live Codex endpoint must be an absolute unix:// URL');
+
+  return endpoint.slice('unix://'.length);
+}
+
+function waitForUnixSocket(path, child, timeoutMs, signal) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const finish = (error = null) => {
+      clearInterval(timer);
+      child.removeListener('error', onError);
+      child.removeListener('exit', onExit);
+      signal?.removeEventListener('abort', onAbort);
+      error ? reject(error) : resolve();
+    };
+    const inspect = () => {
+      if (existsSync(path)) return finish();
+      if (Date.now() - startedAt >= timeoutMs)
+        finish(new Error(`Codex app-server did not create its live socket: ${path}`));
+    };
+    const onError = (error) => finish(error);
+    const onExit = (code) =>
+      finish(new Error(`Codex app-server exited before its live socket was ready (${code})`));
+    const onAbort = () => finish(new HarnessInterruptedError('Codex'));
+    const timer = setInterval(inspect, 20);
+
+    child.once('error', onError);
+    child.once('exit', onExit);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    inspect();
+  });
+}
+
+function interactivePrompt(task) {
+  return `Task: ${task.title}\n\nAcceptance:\n${task.acceptance
+    .map((criterion) => `- ${criterion.id}: ${criterion.criterion}`)
+    .join(
+      '\n',
+    )}\n\nWork interactively in this terminal. If the requirements are ambiguous, ask the operator before changing files. Ask for approval when required, then run relevant verification commands before finishing.`;
+}
+
+function agentMessageText(item) {
+  if (typeof item?.text === 'string') return item.text;
+  if (!Array.isArray(item?.content)) return null;
+
+  return item.content
+    .map((part) => part?.text ?? part?.content ?? '')
+    .filter(Boolean)
+    .join('\n');
+}
+
+function interactiveResult(thread, cwd) {
+  const turn = thread.turns?.at(-1) ?? null;
+  const items = turn?.items ?? [];
+  const finalMessage = [...items].reverse().map(agentMessageText).find(Boolean);
+  const verification = items
+    .filter((item) => item.type === 'commandExecution')
+    .map((item) => ({
+      type: 'command',
+      command: item.command ?? 'Codex command',
+      result: item.exitCode === 0 ? 'passed' : 'failed',
+      exitCode: item.exitCode ?? null,
+      output: item.aggregatedOutput ?? '',
+    }));
+
+  if (!verification.some((item) => item.result === 'passed')) {
+    try {
+      const output = execFileSync('git', ['status', '--short'], { cwd, encoding: 'utf8' });
+
+      verification.push({
+        type: 'command',
+        command: 'git status --short',
+        result: 'passed',
+        exitCode: 0,
+        output,
+      });
+    } catch (error) {
+      verification.push({
+        type: 'command',
+        command: 'git status --short',
+        result: 'failed',
+        exitCode: error.status ?? 1,
+        output: `${error.stdout ?? ''}${error.stderr ?? ''}`,
+      });
+    }
+  }
+
+  return {
+    sessionId: thread.id,
+    turnId: turn?.id ?? null,
+    verification,
+    output: finalMessage ?? 'Interactive Codex worker completed by the operator.',
+    usage: turn?.usage ?? null,
+  };
+}
+
+function readInteractiveThread({ command, cwd, name, spawnImpl, timeoutMs = 10_000 }) {
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(command, ['app-server'], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    let buffer = '';
+    let nextId = 1;
+    let settled = false;
+    const pending = new Map();
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      error ? reject(error) : resolve(value);
+    };
+    const request = (method, params) => {
+      const id = nextId++;
+
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+
+      return new Promise((resolveRequest, rejectRequest) =>
+        pending.set(id, { resolve: resolveRequest, reject: rejectRequest }),
+      );
+    };
+    const timer = setTimeout(
+      () => finish(new Error('timed out while reading the interactive Codex thread')),
+      timeoutMs,
+    );
+
+    child.stdin.on('error', (error) => finish(error));
+    child.on('error', (error) => finish(error));
+    child.on('exit', (code) => {
+      if (!settled) finish(new Error(`Codex thread reader exited with code ${code}`));
+    });
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let newline;
+
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim();
+
+        buffer = buffer.slice(newline + 1);
+        if (!line) continue;
+        let message;
+
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (message.id === undefined) continue;
+        const entry = pending.get(message.id);
+
+        if (!entry) continue;
+        pending.delete(message.id);
+        if (message.error) entry.reject(new Error(message.error.message ?? 'Codex request failed'));
+        else entry.resolve(message.result ?? {});
+      }
+    });
+
+    void (async () => {
+      try {
+        await request('initialize', {
+          clientInfo: { name: 'clew-reader', title: 'Clew thread reader', version: '0.1.0' },
+        });
+        child.stdin.write(
+          `${JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} })}\n`,
+        );
+        const listed = await request('thread/list', {
+          cwd,
+          limit: 10,
+          sortKey: 'updated_at',
+          sortDirection: 'desc',
+        });
+        const thread = listed.data?.[0];
+
+        if (!thread?.id) throw new Error('interactive Codex thread was not found');
+        await request('thread/name/set', { threadId: thread.id, name });
+        const read = await request('thread/read', { threadId: thread.id, includeTurns: true });
+
+        finish(null, read.thread ?? thread);
+      } catch (error) {
+        finish(error);
+      }
+    })();
+  });
 }
 
 export class HarnessInterruptedError extends Error {
@@ -252,17 +445,27 @@ export class CodexHarness {
     args = ['app-server'],
     timeoutMs = 30 * 60_000,
     interruptTimeoutMs = 5_000,
+    startupTimeoutMs = 5_000,
     model = null,
+    openDesktop = false,
+    terminalManager = null,
+    spawnImpl = spawn,
   } = {}) {
     this.command = command;
     this.args = args;
     this.timeoutMs = timeoutMs;
     this.interruptTimeoutMs = interruptTimeoutMs;
+    this.startupTimeoutMs = startupTimeoutMs;
     this.model = model;
+    this.openDesktop = openDesktop;
+    this.terminalManager = terminalManager;
+    this.spawn = spawnImpl;
   }
 
   async run({
     task,
+    stageId = 'worker',
+    runId = null,
     cwd,
     onEvent,
     model = this.model,
@@ -271,9 +474,50 @@ export class CodexHarness {
     signal,
     onApproval = () => APPROVAL_DECISION.DECLINE,
     resumeSessionId = null,
+    liveEndpoint = null,
   }) {
+    if (this.terminalManager?.waitForFinish && runId && liveEndpoint)
+      return this.runInteractive({
+        task,
+        stageId,
+        runId,
+        cwd,
+        onEvent,
+        model,
+        outputSchema,
+        readOnly,
+        signal,
+        resumeSessionId,
+        liveEndpoint,
+      });
     if (signal?.aborted) throw new HarnessInterruptedError('Codex');
-    const child = spawn(this.command, this.args, { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+    let serverChild = null;
+    let liveSocketPath = null;
+    let child;
+    let terminalStarted = false;
+
+    if (liveEndpoint) {
+      liveSocketPath = unixSocketPath(liveEndpoint);
+      rmSync(liveSocketPath, { force: true });
+      serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
+        cwd,
+        stdio: ['ignore', 'ignore', 'inherit'],
+      });
+      try {
+        await waitForUnixSocket(liveSocketPath, serverChild, this.startupTimeoutMs, signal);
+      } catch (error) {
+        serverChild.kill();
+        throw error;
+      }
+      child = this.spawn(this.command, ['app-server', 'proxy', '--sock', liveSocketPath], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
+    } else
+      child = this.spawn(this.command, this.args, {
+        cwd,
+        stdio: ['pipe', 'pipe', 'inherit'],
+      });
     const correlationId = `codex-${randomUUID()}`;
     let nextRequestId = 1;
     const pendingRequests = new Map();
@@ -288,6 +532,9 @@ export class CodexHarness {
     let finalAgentMessage = null;
     let requestInterrupt = () => {};
     const getSessionId = () => threadId || correlationId;
+    const terminalWrite = (value) => {
+      if (terminalStarted && runId) this.terminalManager?.write(runId, value);
+    };
     const settleRequest = (resolve, reject, error, result, terminalEvent) => {
       if (settled) return;
       settled = true;
@@ -296,7 +543,28 @@ export class CodexHarness {
       signal?.removeEventListener('abort', requestInterrupt);
       if (terminalEvent)
         onEvent({ type: terminalEvent, sessionId: getSessionId(), turnId, error: error?.message });
-      child.kill();
+      if (terminalStarted && runId && liveEndpoint) {
+        void this.terminalManager
+          ?.handoff(runId, {
+            taskId: task.id,
+            sessionId: threadId,
+            command: this.command,
+            args: ['resume', '--remote', liveEndpoint, threadId],
+            cwd,
+            endpoint: liveEndpoint,
+            socketPath: liveSocketPath,
+          })
+          .catch((handoffError) => {
+            this.terminalManager?.write(
+              runId,
+              `\r\n\x1b[31m[Clew] Interactive handoff failed: ${handoffError.message}\x1b[0m\r\n`,
+            );
+          });
+      } else {
+        child.kill();
+        serverChild?.kill();
+        if (liveSocketPath) rmSync(liveSocketPath, { force: true });
+      }
       error ? reject(error) : resolve(result);
     };
     const result = await new Promise((resolve, reject) => {
@@ -318,7 +586,7 @@ export class CodexHarness {
       const sendRpcRequest = (method, params) => {
         const id = nextRequestId++;
 
-        child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
 
         return id;
       };
@@ -455,18 +723,23 @@ export class CodexHarness {
             sessionId: getSessionId(),
             raw: message,
           });
-        else if (method.includes('item/started') || method.includes('tool/started'))
+        else if (method.includes('item/started') || method.includes('tool/started')) {
+          const command = params.item?.command ?? params.command ?? null;
+
+          if (command) terminalWrite(`\x1b[90m$ ${command}\x1b[0m\r\n`);
           onEvent({
             type: HARNESS_EVENT_TYPE.TOOL_STARTED,
             sessionId: getSessionId(),
-            command: params.item?.command ?? params.command ?? null,
+            command,
             raw: message,
           });
-        else if (method === 'item/completed') {
+        } else if (method === 'item/completed') {
           const item = params.item ?? {};
 
-          if (item.type === 'agentMessage') finalAgentMessage = item.text;
-          else if (item.type === 'commandExecution') {
+          if (item.type === 'agentMessage') {
+            finalAgentMessage = item.text;
+            terminalWrite(`${item.text ?? ''}\r\n`);
+          } else if (item.type === 'commandExecution') {
             const evidence = {
               type: 'command',
               command: item.command,
@@ -476,6 +749,8 @@ export class CodexHarness {
             };
 
             verification.push(evidence);
+            if (item.aggregatedOutput) terminalWrite(`${item.aggregatedOutput}\r\n`);
+            terminalWrite(`\x1b[90m[command exited ${item.exitCode ?? 'unknown'}]\x1b[0m\r\n`);
             onEvent({
               type: HARNESS_EVENT_TYPE.VERIFICATION_DETECTED,
               sessionId: getSessionId(),
@@ -581,6 +856,24 @@ export class CodexHarness {
               : HARNESS_EVENT_TYPE.SESSION_STARTED,
             sessionId: threadId,
           });
+          if (!resumeSessionId) {
+            const nameRequestId = sendRpcRequest('thread/name/set', {
+              threadId,
+              name: `[Clew] ${task.id} · ${stageId} — ${task.title}`,
+            });
+
+            pendingRequests.set(nameRequestId, () => {});
+            if (this.openDesktop) {
+              const desktop = this.spawn(this.command, ['app', cwd], {
+                cwd,
+                detached: true,
+                stdio: 'ignore',
+              });
+
+              desktop.on?.('error', () => {});
+              desktop.unref?.();
+            }
+          }
           const turnRequestId = sendRpcRequest('turn/start', buildTurnStartParams(threadId));
 
           pendingRequests.set(turnRequestId, (turnResult) => {
@@ -593,6 +886,23 @@ export class CodexHarness {
                 null,
                 HARNESS_EVENT_TYPE.HARNESS_FAILED,
               );
+            if (this.terminalManager && runId && liveEndpoint) {
+              try {
+                this.terminalManager.begin({
+                  id: runId,
+                  taskId: task.id,
+                  sessionId: threadId,
+                  cwd,
+                  endpoint: liveEndpoint,
+                  serverChild,
+                  proxyChild: child,
+                  socketPath: liveSocketPath,
+                });
+                terminalStarted = true;
+              } catch {
+                // The terminal is an optional view over the worker; launch failure must not fail it.
+              }
+            }
             onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId: threadId, turnId });
             sendInterrupt();
           });
@@ -601,6 +911,152 @@ export class CodexHarness {
     });
 
     return result;
+  }
+
+  async runInteractive({
+    task,
+    stageId,
+    runId,
+    cwd,
+    onEvent,
+    model,
+    readOnly,
+    signal,
+    resumeSessionId,
+    liveEndpoint,
+  }) {
+    if (signal?.aborted) throw new HarnessInterruptedError('Codex');
+    const socketPath = unixSocketPath(liveEndpoint);
+    // Correlation IDs make the terminal attachable before Codex has created its
+    // native thread. They are not valid Codex thread IDs and must never be used
+    // for `codex resume` after an interrupted startup.
+    const nativeResumeSessionId = resumeSessionId?.startsWith('codex-')
+      ? null
+      : resumeSessionId;
+
+    rmSync(socketPath, { force: true });
+    const serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
+      cwd,
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+
+    let monitor = null;
+
+    try {
+      await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal);
+      const prompt = interactivePrompt(task);
+      const commonArgs = [
+        '--remote',
+        liveEndpoint,
+        '--no-alt-screen',
+        '-C',
+        cwd,
+        '-s',
+        readOnly ? 'read-only' : 'workspace-write',
+        '-a',
+        'on-request',
+        ...(model ? ['-m', model] : []),
+      ];
+      const terminalArgs = nativeResumeSessionId
+        ? ['resume', ...commonArgs, nativeResumeSessionId, prompt]
+        : [...commonArgs, prompt];
+      const correlationId = `codex-${randomUUID()}`;
+
+      monitor = new CodexTurnMonitor({
+        command: this.command,
+        cwd,
+        threadId: nativeResumeSessionId,
+        spawnImpl: this.spawn,
+        onUpdate: (update) => {
+          this.terminalManager.updateInteraction(runId, update);
+          if (update.status === 'running')
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_RUNNING,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+            });
+          else if (update.status === 'waiting_for_operator')
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_WAITING,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+              output: update.output,
+              itemId: update.itemId,
+            });
+          else if (update.status === 'failed')
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_FAILED,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+            });
+          else if (update.status === 'interrupted')
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_INTERRUPTED,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+            });
+        },
+      });
+
+      this.terminalManager.start({
+        id: runId,
+        taskId: task.id,
+        sessionId: nativeResumeSessionId ?? correlationId,
+        command: this.command,
+        args: terminalArgs,
+        cwd,
+        endpoint: liveEndpoint,
+        socketPath,
+        serverChild,
+        proxyChild: null,
+      });
+      onEvent({
+        type: nativeResumeSessionId
+          ? HARNESS_EVENT_TYPE.SESSION_RESUMED
+          : HARNESS_EVENT_TYPE.SESSION_STARTED,
+        sessionId: nativeResumeSessionId ?? correlationId,
+      });
+      onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId: correlationId, turnId: null });
+      if (this.openDesktop) {
+        const desktop = this.spawn(this.command, ['app', cwd], {
+          cwd,
+          detached: true,
+          stdio: 'ignore',
+        });
+
+        desktop.on?.('error', () => {});
+        desktop.unref?.();
+      }
+      monitor.start();
+      await this.terminalManager.waitForFinish(runId, signal);
+      monitor.stop();
+      serverChild.kill();
+      const thread = await readInteractiveThread({
+        command: this.command,
+        cwd,
+        name: `[Clew] ${task.id} · ${stageId} — ${task.title}`,
+        spawnImpl: this.spawn,
+        timeoutMs: Math.max(this.startupTimeoutMs * 2, 30_000),
+      });
+      const result = interactiveResult(thread, cwd);
+
+      this.terminalManager.setSessionIdentity(runId, result.sessionId);
+      onEvent({
+        type: HARNESS_EVENT_TYPE.HARNESS_COMPLETED,
+        sessionId: result.sessionId,
+        turnId: result.turnId,
+      });
+      this.terminalManager.release(runId);
+
+      return result;
+    } catch (error) {
+      monitor?.stop?.();
+      this.terminalManager.close(runId);
+      serverChild.kill();
+      rmSync(socketPath, { force: true });
+      if (signal?.aborted) throw new HarnessInterruptedError('Codex');
+      throw error;
+    }
   }
 }
 

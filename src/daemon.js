@@ -20,6 +20,8 @@ import { Store } from './store.js';
 import { ClewService } from './control-service.js';
 import { loadConfig } from './config.js';
 import { Observability } from './observability.js';
+import { TerminalSessionManager } from './terminal-manager.js';
+import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 import { isPublicThreadEvent } from './thread.js';
 import {
   validateApiEnvelope,
@@ -173,8 +175,10 @@ export class LocalDaemon {
     this.heartbeat = null;
     this.store = null;
     this.control = null;
+    this.config = null;
     this.observability = null;
     this.logger = null;
+    this.terminalManager = null;
     this.running = false;
     this.commandQueue = Promise.resolve();
   }
@@ -206,6 +210,8 @@ export class LocalDaemon {
     this.store = new Store(join(this.stateDir, 'clew.sqlite'));
     const config = loadConfig(this.cwd);
 
+    this.config = config;
+
     this.observability = new Observability({
       cwd: this.cwd,
       config: config.observability,
@@ -215,7 +221,13 @@ export class LocalDaemon {
       this.observability.onEvent(event);
       this.broadcastEvents();
     });
-    this.control = new ClewService({ cwd: this.cwd, store: this.store, config });
+    this.terminalManager = new TerminalSessionManager();
+    this.control = new ClewService({
+      cwd: this.cwd,
+      store: this.store,
+      config,
+      terminalManager: this.terminalManager,
+    });
     this.server = createServer((request, response) => this.handle(request, response));
     this.webSocketServer = new WebSocketServer({
       noServer: true,
@@ -274,6 +286,8 @@ export class LocalDaemon {
     this.heartbeat = null;
     for (const client of this.clients.keys()) client.terminate();
     this.clients.clear();
+    this.terminalManager?.closeAll();
+    this.terminalManager = null;
     await new Promise((resolveClose) => this.webSocketServer.close(resolveClose));
     await new Promise((resolveClose) => this.server.close(resolveClose));
     await this.observability?.shutdown();
@@ -281,6 +295,7 @@ export class LocalDaemon {
     this.store?.close();
     this.store = null;
     this.control = null;
+    this.config = null;
     this.running = false;
     this.logger?.info({ event: 'daemon.stopped' }, 'daemon stopped');
     this.logger?.flush();
@@ -433,8 +448,9 @@ export class LocalDaemon {
       args[args.indexOf('--surface') + 1] === 'live' &&
       args.includes('--mode') &&
       args[args.indexOf('--mode') + 1] === 'live';
+    const bypassQueue = isLiveInspection || args[0] === 'finish-worker';
 
-    return isLiveInspection ? this.executeCommand(args) : this.enqueue(args);
+    return bypassQueue ? this.executeCommand(args) : this.enqueue(args);
   }
 
   executeCommand(args) {
@@ -553,8 +569,55 @@ export class LocalDaemon {
     }
     this.webSocketServer.handleUpgrade(request, socket, head, (client) => {
       this.webSocketServer.emit('connection', client, request);
-      this.attachWebSocket(client, request);
+      const url = new URL(request.url, this.metadata.endpoint);
+
+      if (url.pathname === '/terminal')
+        void this.attachTerminal(client, url.searchParams.get('runId'));
+      else this.attachWebSocket(client, request);
     });
+  }
+
+  async attachTerminal(client, runId) {
+    try {
+      const run = this.store?.getRun(runId);
+
+      if (!run || run.harness !== 'codex' || !run.session_id || !run.workspace)
+        throw new Error('persisted Codex terminal is unavailable for this run');
+      if (!existsSync(run.workspace)) throw new Error('worker workspace is unavailable');
+      if (!this.terminalManager.has(runId)) {
+        const endpoint = createCodexLiveEndpoint(
+          run.runtimeNamespace ?? createRuntimeNamespace(run.task_id, run.id),
+        );
+
+        await this.terminalManager.startPersisted({
+          id: run.id,
+          taskId: run.task_id,
+          sessionId: run.session_id,
+          command: this.config?.codexBin ?? 'codex',
+          args: ['resume', '--remote', endpoint, run.session_id],
+          cwd: run.workspace,
+          endpoint,
+          socketPath: endpoint.slice('unix://'.length),
+        });
+      }
+      this.terminalManager.attach(client, runId);
+      this.logger?.info({ event: 'terminal.attached', runId }, 'Terminal attached');
+    } catch (error) {
+      if (client.readyState === WebSocket.OPEN)
+        client.send(
+          JSON.stringify({
+            ch: 'terminal',
+            type: 'error',
+            id: runId,
+            error: error.message,
+          }),
+        );
+      client.close(1011, 'terminal startup failed');
+      this.logger?.warn(
+        { event: 'terminal.start.failed', runId, error: error.message },
+        'Terminal startup failed',
+      );
+    }
   }
 
   attachWebSocket(client, request) {
@@ -705,7 +768,7 @@ export async function startDaemonProcess(
   throw new Error(`daemon startup timed out; inspect ${paths.log}`);
 }
 
-export async function daemonRequest(cwd, args) {
+export async function daemonRequest(cwd, args, { timeoutMs = 30_000 } = {}) {
   const metadata = readDaemonMetadata(cwd);
   const token = readFileSync(metadata.tokenFile, 'utf8').trim();
   let response;
@@ -724,7 +787,7 @@ export async function daemonRequest(cwd, args) {
           payload: { args },
         }),
       },
-      30_000,
+      timeoutMs,
     );
   } catch (error) {
     throw new Error('daemon is unavailable; run `clew daemon start`', { cause: error });

@@ -173,7 +173,18 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     sessionHarness: typeof latestRun?.harness === 'string' ? latestRun.harness : null,
     sessionStageId: typeof latestRun?.stage_id === 'string' ? latestRun.stage_id : null,
     sessionWorkspace: typeof latestRun?.workspace === 'string' ? latestRun.workspace : null,
+    runId: typeof latestRun?.id === 'string' ? latestRun.id : null,
     runStatus: typeof latestRun?.status === 'string' ? latestRun.status : null,
+    terminalAvailable: latestRun?.terminalAvailable === true,
+    terminalActive: latestRun?.terminalActive === true,
+    interactionStatus:
+      typeof latestRun?.interactionStatus === 'string' ? latestRun.interactionStatus : null,
+    interactionTurnId:
+      typeof latestRun?.interactionTurnId === 'string' ? latestRun.interactionTurnId : null,
+    lastAgentMessage:
+      typeof latestRun?.lastAgentMessage === 'string' ? latestRun.lastAgentMessage : null,
+    interactionUpdatedAt:
+      typeof latestRun?.interactionUpdatedAt === 'string' ? latestRun.interactionUpdatedAt : null,
     harnessApprovals: Array.isArray(show.harnessApprovals)
       ? show.harnessApprovals.map((approvalValue) => {
           const approval = object(approvalValue, 'harness approval');

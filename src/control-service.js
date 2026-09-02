@@ -35,6 +35,7 @@ const SERVICE_COMMANDS = new Set([
   'doctor',
   'events',
   'export',
+  'finish-worker',
   'interrupt',
   'plan',
   'pricing',
@@ -194,10 +195,11 @@ async function probeOpenCodeEndpoint(value) {
 }
 
 export class ClewService {
-  constructor({ cwd = process.cwd(), store, config }) {
+  constructor({ cwd = process.cwd(), store, config, terminalManager = null }) {
     this.cwd = resolve(cwd);
     this.store = store;
     this.config = config;
+    this.terminalManager = terminalManager;
   }
 
   supports(args) {
@@ -224,6 +226,7 @@ export class ClewService {
     if (command === 'interrupt') return this.interrupt(subcommand, rest);
     if (command === 'retry') return this.retry(subcommand, rest, signal);
     if (command === 'complete') return this.complete(subcommand, rest);
+    if (command === 'finish-worker') return this.finishWorker(subcommand, rest);
     if (command === 'run') return this.run(subcommand, rest, signal);
     if (command === 'pricing') return this.syncPricing(subcommand, rest);
     if (command === 'verify') return this.verify(subcommand, rest);
@@ -252,6 +255,8 @@ export class ClewService {
       task = this.store.getTask(task.id);
     }
 
+    const runs = this.store.listRuns(task.id);
+
     return {
       show: {
         ...task,
@@ -259,7 +264,26 @@ export class ClewService {
         approvals: this.store.listApprovals(task.id),
         harnessApprovals,
         stages: this.store.listStages(task.id),
-        runs: this.store.listRuns(task.id),
+        runs: runs.map((run) => {
+          const terminal = this.terminalManager?.describe(run.id);
+
+          return {
+            ...run,
+            terminalActive: Boolean(terminal),
+            terminalAvailable:
+              Boolean(terminal) ||
+              Boolean(
+                run.status !== RUN_STATUS.RUNNING &&
+                run.harness === 'codex' &&
+                run.session_id &&
+                run.workspace,
+              ),
+            interactionStatus: terminal?.interactionStatus ?? null,
+            interactionTurnId: terminal?.interactionTurnId ?? null,
+            lastAgentMessage: terminal?.lastAgentMessage ?? null,
+            interactionUpdatedAt: terminal?.interactionUpdatedAt ?? null,
+          };
+        }),
         review: this.store.latestReview(task.id),
         completion: this.store.getCompletion(task.id),
       },
@@ -525,9 +549,6 @@ export class ClewService {
     const surface = createSessionSurface({
       kind: getOptionValue(args, '--surface', 'plain'),
       codexBin: this.config.codexBin,
-      nodeBin: process.execPath,
-      clewBin: process.argv[1] ?? 'clew',
-      projectCwd: this.cwd,
     });
 
     return openSessionForRun(this.store, request, surface);
@@ -1041,11 +1062,28 @@ export class ClewService {
     );
   }
 
+  finishWorker(taskId, args) {
+    if (!taskId) throw new Error('task id is required');
+    if (!this.terminalManager) throw new Error('interactive worker is owned by the daemon');
+    const runId = getOptionValue(args, '--run') ?? this.store.listRuns(taskId).at(-1)?.id;
+    const run = runId ? this.store.getRun(runId) : null;
+
+    if (!run || run.task_id !== taskId) throw new Error('active worker run was not found');
+    if (run.status !== RUN_STATUS.RUNNING) throw new Error('worker run is no longer active');
+    if (!this.terminalManager.finish(run.id))
+      throw new Error('interactive worker terminal is unavailable');
+
+    return { taskId, runId: run.id, status: 'FINISHING' };
+  }
+
   scheduler(args, signal) {
     const runtimeConfig = this.resolveCommandConfig(args);
     const manager = new GitWorktreeManager(runtimeConfig.worktreeRoot, this.cwd);
 
-    return new Scheduler(this.store, manager, { signal, adapterConfig: runtimeConfig });
+    return new Scheduler(this.store, manager, {
+      signal,
+      adapterConfig: { ...runtimeConfig, terminalManager: this.terminalManager },
+    });
   }
 
   resolveCommandConfig(args) {

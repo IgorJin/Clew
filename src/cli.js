@@ -110,8 +110,7 @@ function printHelp() {
   console.log(
     `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew doctor [--harness codex|opencode]`,
   );
-  console.log('  clew task next-step ID');
-  console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
+  console.log('  clew finish-worker TASK [--run RUN-ID]');
   console.log(
     '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
   );
@@ -124,7 +123,7 @@ function printHelp() {
   console.log('  clew task thread ID [--after CURSOR] [--limit N] [--follow]');
   console.log('  clew task message ID --message TEXT [--actor ACTOR]');
   console.log(
-    '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|none]',
+    '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|live|none]',
   );
   console.log('  clew session capabilities [--harness HARNESS]');
   console.log('  clew continue TASK --message TEXT [--actor ACTOR]');
@@ -176,6 +175,12 @@ export async function main(args) {
   }
   if (command === 'telemetry' && subcommand === 'install') {
     return printJson(telemetryInstall({ cwd }));
+  }
+  if (command === 'run' || command === 'finish-worker') {
+    const daemon = await daemonStatus(cwd);
+
+    if (daemon.status === 'running')
+      return printJson(await daemonRequest(cwd, args, { timeoutMs: 24 * 60 * 60_000 }));
   }
   const store = createStore();
   const observability = new Observability({

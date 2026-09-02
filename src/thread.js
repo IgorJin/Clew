@@ -128,6 +128,23 @@ const EVENT_KINDS = new Map([
         `Worker completed tool: ${p.command ?? p.tool ?? 'unknown'}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}`,
     ],
   ],
+  [
+    'HARNESS_TURN_WAITING',
+    [
+      'worker_waiting',
+      (p) =>
+        `Worker response ready${p.output ? `: ${String(p.output).slice(0, 4000)}` : '; terminal is waiting for operator'}`,
+    ],
+  ],
+  ['HARNESS_TURN_RUNNING', ['worker_running', () => 'Worker started a new turn']],
+  [
+    'HARNESS_TURN_FAILED',
+    ['worker_turn_failed', () => 'Worker turn failed; operator attention required'],
+  ],
+  [
+    'HARNESS_TURN_INTERRUPTED',
+    ['worker_turn_interrupted', () => 'Worker turn interrupted; operator attention required'],
+  ],
   ['HARNESS_HARNESS_COMPLETED', ['codex_completed', () => 'Codex worker completed']],
   [
     'HARNESS_HARNESS_FAILED',

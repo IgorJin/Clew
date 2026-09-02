@@ -11,14 +11,13 @@ import {
   buildCodexResumeArgs,
   openSessionForRun,
 } from '../src/session-surface.js';
+import { createCodexLiveEndpoint, createRuntimeNamespace } from '../src/runtime.js';
 
-test('live terminal opens immediately for a running worker without a Codex session id', async () => {
+test('live terminal attaches Codex TUI to the active worker app-server', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-live-session-'));
   const calls = [];
   const surface = new LiveThreadTerminalSurface({
-    nodeBin: '/usr/bin/node',
-    clewBin: '/project/bin/clew.js',
-    projectCwd: dir,
+    codexBin: '/usr/local/bin/codex',
     launcher: (bin, args, options) => {
       calls.push({ bin, args, options });
 
@@ -34,6 +33,8 @@ test('live terminal opens immediately for a running worker without a Codex sessi
     profile: 'quick',
     acceptance: [{ id: 'AC-1', criterion: 'works' }],
   });
+  const runtimeNamespace = createRuntimeNamespace('LIVE-1', 'run-live-1');
+
   store.createRun({
     id: 'run-live-1',
     taskId: 'LIVE-1',
@@ -44,7 +45,9 @@ test('live terminal opens immediately for a running worker without a Codex sessi
     workspace: dir,
     profile: 'quick',
     policy: {},
+    runtimeNamespace,
   });
+  store.setRunIdentity('run-live-1', 'thread-live-1', 'turn-live-1');
   const result = await openSessionForRun(
     store,
     {
@@ -59,9 +62,54 @@ test('live terminal opens immediately for a running worker without a Codex sessi
   );
 
   assert.equal(result.state, 'opened');
-  assert.equal(result.sessionId, 'live:run-live-1');
-  assert.deepEqual(calls[0].args, ['/project/bin/clew.js', 'task', 'result', 'LIVE-1', '--watch']);
+  assert.equal(result.sessionId, 'thread-live-1');
+  assert.deepEqual(calls[0].args, [
+    'resume',
+    '--remote',
+    createCodexLiveEndpoint(runtimeNamespace),
+    'thread-live-1',
+  ]);
   assert.equal(calls[0].options.cwd, dir);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('live terminal reports that Codex is still starting before thread identity exists', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-live-starting-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+
+  store.createTask({
+    id: 'LIVE-STARTING',
+    title: 'Starting worker',
+    goal: 'Wait for identity',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+  });
+  store.createRun({
+    id: 'run-starting',
+    taskId: 'LIVE-STARTING',
+    stageId: 'worker',
+    attempt: 1,
+    status: 'RUNNING',
+    harness: 'codex',
+    workspace: dir,
+    runtimeNamespace: createRuntimeNamespace('LIVE-STARTING', 'run-starting'),
+  });
+  const result = await openSessionForRun(
+    store,
+    {
+      version: 1,
+      taskId: 'LIVE-STARTING',
+      stageId: 'worker',
+      role: 'worker',
+      harness: 'codex',
+      mode: 'live',
+    },
+    new LiveThreadTerminalSurface(),
+  );
+
+  assert.equal(result.state, 'unavailable');
+  assert.equal(result.code, 'SESSION_ID_MISSING');
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });

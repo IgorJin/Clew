@@ -88,6 +88,9 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
 
   return {
     ...merged,
+    openCodexDesktop: ['1', 'true', 'yes', 'on'].includes(
+      String(env.CLEW_CODEX_OPEN_DESKTOP ?? '').toLowerCase(),
+    ),
     worktreeRoot: resolve(projectRoot, merged.worktreeRoot),
     projectConfigPath,
     userConfigPath,

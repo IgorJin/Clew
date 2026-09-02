@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { ReadableStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
@@ -144,6 +146,326 @@ test('Codex harness conforms and persists native thread and turn identity', asyn
 
   assert.equal(result.sessionId, 'thr_fixture');
   assert.equal(result.turnId, 'turn_fixture');
+});
+
+test('Codex harness exposes a live app-server endpoint and opens the active thread in a terminal', async () => {
+  const endpoint = `unix://${join(tmpdir(), `clew-harness-${Date.now()}.sock`)}`;
+  const socketPath = endpoint.slice('unix://'.length);
+  const calls = [];
+  const terminalBegins = [];
+  const terminalHandoffs = [];
+  const terminalWrites = [];
+  const requests = [];
+  let proxyChild;
+  const spawnImpl = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+
+    child.pid = 41 + calls.length;
+    child.kill = () => {};
+    child.unref = () => {};
+    if (args.includes('--listen')) {
+      writeFileSync(socketPath, 'fixture');
+
+      return child;
+    }
+    if (args[0] === 'app') return child;
+    proxyChild = child;
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    let input = '';
+    const send = (message) =>
+      Promise.resolve().then(() => child.stdout.write(`${JSON.stringify(message)}\n`));
+
+    child.stdin.on('data', (chunk) => {
+      input += chunk.toString();
+      let newline;
+
+      while ((newline = input.indexOf('\n')) >= 0) {
+        const line = input.slice(0, newline).trim();
+
+        input = input.slice(newline + 1);
+        if (!line) continue;
+        const message = JSON.parse(line);
+
+        requests.push(message);
+        if (message.method === 'initialize') send({ id: message.id, result: {} });
+        else if (message.method === 'thread/start')
+          send({ id: message.id, result: { thread: { id: 'thread-live' } } });
+        else if (message.method === 'thread/name/set') send({ id: message.id, result: {} });
+        else if (message.method === 'turn/start') {
+          send({ id: message.id, result: { turn: { id: 'turn-live' } } });
+          send({
+            method: 'item/completed',
+            params: {
+              item: {
+                type: 'commandExecution',
+                command: 'npm test',
+                exitCode: 0,
+                aggregatedOutput: 'passed',
+              },
+            },
+          });
+          send({
+            method: 'turn/completed',
+            params: { threadId: 'thread-live', turn: { id: 'turn-live', status: 'completed' } },
+          });
+        }
+      }
+    });
+
+    return child;
+  };
+  const harness = new CodexHarness({
+    command: 'codex-fixture',
+    openDesktop: true,
+    terminalManager: {
+      begin: (options) => terminalBegins.push(options),
+      handoff: (id, options) => {
+        terminalHandoffs.push({ id, ...options });
+
+        return Promise.resolve(true);
+      },
+      write: (id, value) => terminalWrites.push({ id, value }),
+    },
+    spawnImpl,
+    timeoutMs: 2_000,
+  });
+  const result = await harness.run({
+    task: fixtureTask,
+    stageId: 'worker',
+    runId: 'run-live',
+    cwd: process.cwd(),
+    liveEndpoint: endpoint,
+    onEvent: () => {},
+  });
+
+  assert.equal(result.sessionId, 'thread-live');
+  assert.deepEqual(calls[0].args, ['app-server', '--listen', endpoint]);
+  assert.deepEqual(calls[1].args, ['app-server', 'proxy', '--sock', socketPath]);
+  assert.deepEqual(calls[2].args, ['app', process.cwd()]);
+  assert.equal(terminalBegins.length, 1);
+  assert.equal(terminalBegins[0].id, 'run-live');
+  assert.equal(terminalBegins[0].sessionId, 'thread-live');
+  assert.equal(terminalBegins[0].proxyChild, proxyChild);
+  assert.equal(terminalHandoffs.length, 1);
+  assert.equal(terminalHandoffs[0].id, 'run-live');
+  assert.equal(terminalHandoffs[0].command, 'codex-fixture');
+  assert.deepEqual(terminalHandoffs[0].args, ['resume', '--remote', endpoint, 'thread-live']);
+  assert.equal(terminalHandoffs[0].cwd, process.cwd());
+  assert.equal(
+    terminalWrites.some(({ value }) => value.includes('passed')),
+    true,
+  );
+  assert.deepEqual(requests.find((request) => request.method === 'thread/name/set')?.params, {
+    threadId: 'thread-live',
+    name: `[Clew] ${fixtureTask.id} · worker — ${fixtureTask.title}`,
+  });
+});
+
+test('daemon Codex harness makes the TUI the sole worker and reads its result after finish', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'clew-harness-interactive-'));
+  const socketPath = join(directory, 'codex.sock');
+  const endpoint = `unix://${socketPath}`;
+  const calls = [];
+  const requests = [];
+  const terminalStarts = [];
+  const identities = [];
+  const events = [];
+  const spawnImpl = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+
+    child.exitCode = null;
+    child.kill = () => {
+      child.exitCode = 0;
+    };
+    if (args.includes('--listen')) {
+      writeFileSync(socketPath, 'fixture');
+
+      return child;
+    }
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    let input = '';
+    const send = (message) =>
+      Promise.resolve().then(() => child.stdout.write(`${JSON.stringify(message)}\n`));
+
+    child.stdin.on('data', (chunk) => {
+      input += chunk.toString();
+      let newline;
+
+      while ((newline = input.indexOf('\n')) >= 0) {
+        const line = input.slice(0, newline).trim();
+
+        input = input.slice(newline + 1);
+        if (!line) continue;
+        const message = JSON.parse(line);
+
+        requests.push(message);
+        if (message.method === 'initialize') send({ id: message.id, result: {} });
+        else if (message.method === 'thread/list')
+          send({ id: message.id, result: { data: [{ id: 'thread-interactive' }] } });
+        else if (message.method === 'thread/name/set') send({ id: message.id, result: {} });
+        else if (message.method === 'thread/read')
+          send({
+            id: message.id,
+            result: {
+              thread: {
+                id: 'thread-interactive',
+                turns: [
+                  {
+                    id: 'turn-interactive',
+                    items: [
+                      { type: 'commandExecution', command: 'npm test', exitCode: 0 },
+                      { type: 'agentMessage', text: 'Implemented interactively.' },
+                    ],
+                  },
+                ],
+              },
+            },
+          });
+      }
+    });
+
+    return child;
+  };
+  const terminalManager = {
+    start: (options) => terminalStarts.push(options),
+    waitForFinish: async () => ({ exitCode: 0 }),
+    setSessionIdentity: (id, sessionId) => identities.push({ id, sessionId }),
+    release: () => true,
+    close: () => true,
+  };
+  const harness = new CodexHarness({
+    command: 'codex-fixture',
+    terminalManager,
+    spawnImpl,
+    startupTimeoutMs: 100,
+  });
+
+  try {
+    const result = await harness.run({
+      task: fixtureTask,
+      stageId: 'worker',
+      runId: 'run-interactive',
+      cwd: directory,
+      liveEndpoint: endpoint,
+      onEvent: (event) => events.push(event),
+    });
+
+    assert.equal(terminalStarts.length, 1);
+    assert.equal(terminalStarts[0].command, 'codex-fixture');
+    assert.ok(terminalStarts[0].args.includes('--remote'));
+    assert.ok(terminalStarts[0].args.includes(endpoint));
+    assert.match(terminalStarts[0].args.at(-1), /Work interactively in this terminal/);
+    assert.deepEqual(calls[1].args, ['app-server']);
+    assert.equal(
+      requests.some(({ method }) => method === 'thread/start'),
+      false,
+    );
+    assert.equal(
+      requests.some(({ method }) => method === 'turn/start'),
+      false,
+    );
+    assert.equal(
+      requests.filter(({ id }) => id !== undefined).every(({ jsonrpc }) => jsonrpc === '2.0'),
+      true,
+    );
+    assert.deepEqual(
+      requests.filter(({ method }) => method?.startsWith('thread/')).map(({ method }) => method),
+      ['thread/list', 'thread/name/set', 'thread/read'],
+    );
+    assert.deepEqual(identities, [{ id: 'run-interactive', sessionId: 'thread-interactive' }]);
+    assert.equal(result.sessionId, 'thread-interactive');
+    assert.equal(result.turnId, 'turn-interactive');
+    assert.equal(result.output, 'Implemented interactively.');
+    assert.equal(events.at(-1).type, HARNESS_EVENT_TYPE.HARNESS_COMPLETED);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('interactive Codex harness never resumes a synthetic pre-discovery session id', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'clew-harness-synthetic-resume-'));
+  const socketPath = join(directory, 'codex.sock');
+  const endpoint = `unix://${socketPath}`;
+  const terminalStarts = [];
+  const spawnImpl = (_command, args) => {
+    const child = new EventEmitter();
+
+    child.exitCode = null;
+    child.kill = () => {
+      child.exitCode = 0;
+    };
+    if (args.includes('--listen')) writeFileSync(socketPath, 'fixture');
+    else {
+      child.stdin = new PassThrough();
+      child.stdout = new PassThrough();
+      child.stdin.on('data', (chunk) => {
+        const request = JSON.parse(String(chunk).trim());
+        const result =
+          request.method === 'thread/list'
+            ? { data: [{ id: 'native-thread', cwd: directory }] }
+            : request.method === 'thread/read'
+              ? {
+                  thread: {
+                    id: 'native-thread',
+                    turns: [
+                      {
+                        id: 'native-turn',
+                        status: 'completed',
+                        items: [{ type: 'agentMessage', text: 'done' }],
+                      },
+                    ],
+                  },
+                }
+              : {};
+
+        if (request.id !== undefined)
+          setTimeout(
+            () =>
+              child.stdout.write(
+                `${JSON.stringify({ jsonrpc: '2.0', id: request.id, result })}\n`,
+              ),
+            0,
+          );
+      });
+    }
+
+    return child;
+  };
+  const terminalManager = {
+    start: (options) => terminalStarts.push(options),
+    waitForFinish: async () => ({ exitCode: 0 }),
+    updateInteraction: () => true,
+    setSessionIdentity: () => true,
+    release: () => true,
+    close: () => true,
+  };
+  const harness = new CodexHarness({
+    command: 'codex-fixture',
+    terminalManager,
+    spawnImpl,
+    startupTimeoutMs: 100,
+  });
+
+  try {
+    await harness.run({
+      task: fixtureTask,
+      stageId: 'worker',
+      runId: 'run-synthetic-resume',
+      cwd: directory,
+      liveEndpoint: endpoint,
+      resumeSessionId: 'codex-82d367a2-0d09-4931-922a-10cef71a028f',
+      onEvent: () => {},
+    });
+
+    assert.equal(terminalStarts[0].args[0], '--remote');
+    assert.equal(terminalStarts[0].args.includes('resume'), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('Codex harness parses structured output from the completed agent message item', async () => {

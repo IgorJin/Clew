@@ -43,7 +43,14 @@ export type Task = {
   sessionHarness?: string | null;
   sessionStageId?: string | null;
   sessionWorkspace?: string | null;
+  runId?: string | null;
   runStatus?: string | null;
+  terminalAvailable?: boolean;
+  terminalActive?: boolean;
+  interactionStatus?: string | null;
+  interactionTurnId?: string | null;
+  lastAgentMessage?: string | null;
+  interactionUpdatedAt?: string | null;
   harnessApprovals?: {
     id: string;
     run_id: string;

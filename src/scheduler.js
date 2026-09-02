@@ -25,7 +25,7 @@ import {
 import { FakeReviewer, CodexReviewer } from './review.js';
 import { FakeArchitect, CodexArchitect } from './architect.js';
 import { verificationEnvironment } from './trust.js';
-import { createRuntimeNamespace } from './runtime.js';
+import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 
 export class Scheduler {
   constructor(
@@ -228,6 +228,7 @@ export class Scheduler {
           {
             task: workerTask,
             stageId,
+            runId,
             cwd: workspace.path,
             onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
             signal: taskSignal,
@@ -236,6 +237,12 @@ export class Scheduler {
             model: this.adapterConfig.models?.worker ?? null,
             runtimeNamespace:
               persistedRun.runtimeNamespace ?? createRuntimeNamespace(taskId, runId),
+            liveEndpoint:
+              harnessName === HARNESS_NAME.CODEX && this.adapterConfig.terminalManager
+                ? createCodexLiveEndpoint(
+                    persistedRun.runtimeNamespace ?? createRuntimeNamespace(taskId, runId),
+                  )
+                : null,
             onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, taskSignal),
           },
           taskId,
@@ -1146,12 +1153,15 @@ export class Scheduler {
       const result = await harness.run({
         task: { ...task, title: stage.goal },
         stageId: stage.id,
+        runId,
         cwd: stageWorkspace.path,
         onEvent: (event) => this.recordHarnessEvent(taskId, event, runId),
         signal,
         resumeSessionId,
         model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
         runtimeNamespace: run.runtimeNamespace,
+        liveEndpoint:
+          harnessName === HARNESS_NAME.CODEX ? createCodexLiveEndpoint(run.runtimeNamespace) : null,
         onApproval: (request) => this.awaitHarnessApproval(taskId, runId, request, signal),
       });
 
@@ -1243,7 +1253,11 @@ export class Scheduler {
     if (this.harnessFactory) return this.harnessFactory(harnessName);
     if (harnessName === HARNESS_NAME.FAKE) return new FakeHarness();
     if (harnessName === HARNESS_NAME.CODEX)
-      return new CodexHarness({ command: this.adapterConfig.codexBin });
+      return new CodexHarness({
+        command: this.adapterConfig.codexBin,
+        openDesktop: this.adapterConfig.openCodexDesktop,
+        terminalManager: this.adapterConfig.terminalManager,
+      });
     if (harnessName === HARNESS_NAME.OPENCODE)
       return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
 

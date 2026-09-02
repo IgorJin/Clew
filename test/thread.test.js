@@ -77,6 +77,31 @@ test('projects workflow and final worker output into the public thread', () => {
   assert.equal(items.at(-1).source.kind, 'worker');
 });
 
+test('projects an interactive completed turn as an operator-waiting response', () => {
+  const items = projectTaskThread({
+    events: [
+      event(1, 'HARNESS_TURN_RUNNING', {
+        runId: 'run-1',
+        sessionId: 'thread-1',
+        turnId: 'turn-1',
+      }),
+      event(2, 'HARNESS_TURN_WAITING', {
+        runId: 'run-1',
+        sessionId: 'thread-1',
+        turnId: 'turn-1',
+        output: 'Завершаюсь. Жду оператора.',
+      }),
+    ],
+  });
+
+  assert.deepEqual(
+    items.map((item) => item.kind),
+    ['worker_running', 'worker_waiting'],
+  );
+  assert.match(items[1].summary, /Жду оператора/);
+  assert.equal(items[1].runId, 'run-1');
+});
+
 test('persists redacted operator messages and exposes a separate diagnostic view', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-thread-'));
   const store = new Store(join(dir, 'clew.sqlite'));

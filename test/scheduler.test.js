@@ -50,6 +50,43 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('quick Codex tasks receive the run identity and live endpoint required by the TUI worker', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-live-terminal-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  let harnessOptions;
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-LIVE-TERMINAL',
+    title: 'Interactive worker',
+    goal: 'Run in the managed TUI',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'terminal is available while running' }],
+  });
+  const scheduler = new Scheduler(store, workspaceManager, {
+    adapterConfig: { terminalManager: {} },
+    harnessFactory: () => ({
+      run: async (options) => {
+        harnessOptions = options;
+
+        return new FakeHarness().run(options);
+      },
+    }),
+  });
+
+  await scheduler.runTask('T-LIVE-TERMINAL', 'quick', 'codex');
+  const run = store.listRuns('T-LIVE-TERMINAL')[0];
+
+  assert.equal(harnessOptions.runId, run.id);
+  assert.match(harnessOptions.liveEndpoint, /^unix:\/\/\//);
+  assert.match(harnessOptions.liveEndpoint, /clew-/);
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('does not mark a harness completion READY without passing verification evidence', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-missing-verification-'));
   const store = new Store(join(dir, 'state.sqlite'));

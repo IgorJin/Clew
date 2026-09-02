@@ -6,7 +6,6 @@ import {
   Check,
   ChevronRight,
   CircleHelp,
-  Code2,
   GitBranch,
   Inbox,
   RefreshCw,
@@ -17,7 +16,8 @@ import {
   X,
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
-import type { NextStep, Task, TaskState, ThreadItem } from './types';
+import type { Task, TaskState, ThreadItem } from './types';
+import { TerminalPane } from './TerminalPane';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -48,6 +48,9 @@ const kindLabel: Record<string, string> = {
   codex_turn_started: 'Codex turn',
   worker_tool_started: 'Tool started',
   worker_tool_completed: 'Tool completed',
+  worker_waiting: 'Worker response',
+  worker_turn_failed: 'Worker turn failed',
+  worker_turn_interrupted: 'Worker turn interrupted',
   worker_output: 'Worker output',
 };
 
@@ -104,8 +107,10 @@ function App() {
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [runRequested, setRunRequested] = useState(false);
+  const autoOpenedTerminal = useRef<string | null>(null);
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
@@ -182,6 +187,26 @@ function App() {
     () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
     [selected, tasks],
   );
+  useEffect(() => {
+    if (task?.terminalActive && task.runId && autoOpenedTerminal.current !== task.runId) {
+      autoOpenedTerminal.current = task.runId;
+      setTerminalVisible(true);
+    }
+  }, [task?.runId, task?.terminalActive]);
+  useEffect(() => {
+    const waitingForTerminal =
+      runRequested || (task?.state === 'EXECUTING' && task.runStatus === 'RUNNING');
+
+    if (!waitingForTerminal) return undefined;
+    if (task?.terminalActive) {
+      setRunRequested(false);
+
+      return undefined;
+    }
+    const timer = window.setInterval(() => void refresh(), 500);
+
+    return () => window.clearInterval(timer);
+  }, [refresh, runRequested, task?.state, task?.runStatus, task?.terminalActive]);
   const createTask = async (title: string, description: string) => {
     if (!canMutateFor(connection)) {
       setNotice('Actions are disabled while the control plane is disconnected');
@@ -273,18 +298,18 @@ function App() {
 
       return;
     }
-    if (!window.confirm(`Confirm ${args.join(' ')}?`)) return;
+    if (args[0] === 'run') setRunRequested(true);
     try {
       const result = await execute(args);
       if ((result as { fixture?: boolean } | null)?.fixture) {
+        if (args[0] === 'run') setRunRequested(false);
         setTasks((current) =>
           current.map((entry) => {
             if (entry.id !== task.id) return entry;
             if (args[0] === 'complete') return { ...entry, state: 'COMPLETED' };
             if (args[0] === 'approve') return { ...entry, state: 'PLAN_READY', attention: null };
             if (args[0] === 'run') return { ...entry, state: 'EXECUTING' };
-            if (args[0] === 'task' && args[1] === 'approve-step')
-              return { ...entry, state: 'EXECUTING' };
+            if (args[0] === 'finish-worker') return { ...entry, state: 'VERIFYING' };
             if (args[0] === 'retry') return { ...entry, state: 'RECOVERING' };
             if (args[0] === 'continue') return { ...entry, state: 'RECOVERING', attention: null };
             if (args[0] === 'task' && args[1] === 'message') {
@@ -311,6 +336,7 @@ function App() {
       if (args[0] === 'continue' || (args[0] === 'task' && args[1] === 'message')) setMessage('');
       setNotice(success);
     } catch (error) {
+      if (args[0] === 'run') setRunRequested(false);
       setNotice(error instanceof Error ? error.message : 'Action failed');
     }
   };
@@ -318,28 +344,8 @@ function App() {
   const canContinue =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
-  const pendingHarnessApproval = task.harnessApprovals?.find((approval) => !approval.decision);
-  const explainNextStep = async () => {
-    try {
-      const result = await execute(['task', 'next-step', task.id]);
-      if ((result as { fixture?: boolean } | null)?.fixture) {
-        setNextStep({
-          taskId: task.id,
-          kind: 'start_worker',
-          currentStep: 'DRAFT',
-          resultingStep: 'EXECUTING',
-          summary: 'Start one read-only worker for this task',
-          inputs: { harness: 'codex', model: 'default', permissionMode: 'read-only' },
-          sideEffects: ['start one local worker process', 'create one run record'],
-          approvalRequired: true,
-          status: 'PENDING',
-        });
-      } else setNextStep(result as NextStep);
-      setNotice('Next step is ready for review');
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not explain next step');
-    }
-  };
+  const interactiveWorker =
+    task.runStatus === 'RUNNING' && task.terminalActive === true && Boolean(task.runId);
   return (
     <div className="app">
       <header className="topbar">
@@ -364,7 +370,7 @@ function App() {
           <div className="task-list">
             {tasks.map((entry) => (
               <button
-                className={`task-row ${entry.id === task.id ? 'selected' : ''}`}
+                className={`task-row ${entry.id === task.id ? 'selected' : ''}${entry.interactionStatus === 'waiting_for_operator' ? ' task-row-waiting' : ''}`}
                 key={entry.id}
                 onClick={() => {
                   selectTask(entry.id);
@@ -375,6 +381,11 @@ function App() {
                   <Status state={entry.state} />
                 </div>
                 <strong>{entry.title}</strong>
+                {entry.interactionStatus === 'waiting_for_operator' && (
+                  <span className="task-interaction-status">
+                    <SquareTerminal size={12} /> Waiting for operator
+                  </span>
+                )}
                 {entry.attention && (
                   <span className="attention">
                     <AlertTriangle size={13} />
@@ -408,7 +419,9 @@ function App() {
                 <button
                   className="button secondary"
                   disabled={
-                    !canMutate || (!canStart && !canContinue) || (canContinue && !message.trim())
+                    !canMutate ||
+                    (!interactiveWorker && !canStart && !canContinue) ||
+                    (!interactiveWorker && canContinue && !message.trim())
                   }
                   title={
                     canContinue && !message.trim()
@@ -416,25 +429,21 @@ function App() {
                       : undefined
                   }
                   onClick={() => {
+                    if (interactiveWorker)
+                      return void act(
+                        ['finish-worker', task.id, '--run', task.runId!],
+                        'Worker is finishing',
+                      );
                     if (canContinue)
                       return void act(
                         ['continue', task.id, '--message', message],
                         'Continuation requested',
                       );
-                    if (nextStep?.status === 'PENDING')
-                      return void act(
-                        ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
-                        'Start approved',
-                      );
-                    return void explainNextStep();
+                    return void act(['run', task.id], 'Task started');
                   }}
                 >
-                  <RefreshCw size={15} />
-                  {canContinue
-                    ? 'Continue'
-                    : nextStep?.status === 'PENDING'
-                      ? 'Approve start'
-                      : 'Explain next step'}
+                  {interactiveWorker ? <Check size={15} /> : <RefreshCw size={15} />}
+                  {interactiveWorker ? 'Finish worker' : canContinue ? 'Continue' : 'Run task'}
                 </button>
                 <button
                   className="button primary"
@@ -467,22 +476,19 @@ function App() {
                     }; actions are disabled.`}
               </div>
             )}
-            {nextStep?.status === 'PENDING' && (
-              <section className="next-step" aria-label="Next step">
+            {task.interactionStatus === 'waiting_for_operator' && (
+              <div className="terminal-waiting-banner" role="status">
+                <SquareTerminal size={18} />
                 <div>
-                  <span className="eyebrow">Next step</span>
-                  <h2>{nextStep.summary}</h2>
-                  <p>
-                    {nextStep.currentStep} → {nextStep.resultingStep}. Nothing starts until you
-                    approve this action.
-                  </p>
+                  <strong>Terminal is waiting for you</strong>
+                  <p>The worker returned a response. Continue in the terminal or finish the worker.</p>
                 </div>
-                <div className="next-step-details">
-                  <span>Harness: {nextStep.inputs?.harness ?? '—'}</span>
-                  <span>Model: {nextStep.inputs?.model ?? '—'}</span>
-                  <span>Mode: {nextStep.inputs?.permissionMode ?? '—'}</span>
-                </div>
-              </section>
+                {task.terminalAvailable && task.runId && (
+                  <button className="text-button" onClick={() => setTerminalVisible(true)}>
+                    Open terminal <ChevronRight size={14} />
+                  </button>
+                )}
+              </div>
             )}
             <section className="summary-grid">
               <div className="summary-card">
@@ -516,6 +522,13 @@ function App() {
                 <span className="card-sub">Automatic corrections</span>
               </div>
             </section>
+            {terminalVisible && task.terminalAvailable && task.runId && (
+              <TerminalPane
+                runId={task.runId}
+                sessionId={task.sessionId ?? null}
+                onClose={() => setTerminalVisible(false)}
+              />
+            )}
             <div className="main-grid">
               <section className="panel thread-panel">
                 <div className="panel-head">
@@ -544,11 +557,7 @@ function App() {
               <aside className="right-rail">
                 <Stages task={task} />
                 <Findings task={task} />
-                <section className="panel action-panel">
-                  <div className="panel-head compact">
-                    <h3>Operator actions</h3>
-                    <Code2 size={16} />
-                  </div>
+                <section className="panel task-message-panel">
                   {task.attention === 'PLAN_APPROVAL_REQUIRED' && (
                     <div className="attention-box">
                       <AlertTriangle size={17} />
@@ -575,47 +584,6 @@ function App() {
                         </div>
                       </div>
                     )}
-                  {pendingHarnessApproval && (
-                    <div className="attention-box">
-                      <AlertTriangle size={17} />
-                      <div>
-                        <strong>Worker approval required</strong>
-                        <p>
-                          Codex is waiting for permission to execute{' '}
-                          <span className="mono">
-                            {String(
-                              pendingHarnessApproval.params.command ??
-                                pendingHarnessApproval.method,
-                            )}
-                          </span>
-                        </p>
-                        <button
-                          className="text-button"
-                          disabled={!canMutate}
-                          onClick={() =>
-                            act(
-                              ['approve-run', pendingHarnessApproval.id],
-                              'Worker approval accepted',
-                            )
-                          }
-                        >
-                          Approve worker command <ChevronRight size={14} />
-                        </button>
-                        <button
-                          className="text-button danger"
-                          disabled={!canMutate}
-                          onClick={() =>
-                            act(
-                              ['reject-run', pendingHarnessApproval.id],
-                              'Worker approval rejected',
-                            )
-                          }
-                        >
-                          Reject worker command
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <div className="message-box">
                     <label htmlFor="operator-message">Add a message</label>
                     <textarea
@@ -640,47 +608,16 @@ function App() {
                   </div>
                   <button
                     className="text-button"
-                    disabled={
-                      !canMutate ||
-                      (task.runStatus !== 'RUNNING' &&
-                        (!task.sessionId || task.sessionHarness !== 'codex'))
-                    }
+                    disabled={!canMutate || !task.terminalAvailable || !task.runId}
                     title={
-                      task.runStatus === 'RUNNING'
-                        ? 'Open a terminal with the live worker event stream. Codex resume is available after the worker finishes.'
-                        : task.sessionId && task.sessionHarness === 'codex'
-                          ? `Open ${task.sessionId} in ${task.sessionWorkspace ?? 'its workspace'}`
-                          : 'A Codex session is not available for the latest run'
+                      task.terminalAvailable
+                        ? 'Show the embedded terminal attached to the active Codex thread.'
+                        : 'The managed Codex terminal is not available for this run'
                     }
-                    onClick={() =>
-                      (task.runStatus === 'RUNNING' || task.sessionId) &&
-                      act(
-                        [
-                          'session',
-                          'open',
-                          task.id,
-                          '--stage',
-                          task.sessionStageId ?? 'worker',
-                          '--role',
-                          'worker',
-                          '--harness',
-                          task.sessionHarness ?? 'codex',
-                          ...(task.runStatus === 'RUNNING'
-                            ? ['--surface', 'live', '--mode', 'live']
-                            : []),
-                        ],
-                        task.runStatus === 'RUNNING'
-                          ? 'Live worker terminal opened'
-                          : 'Native session opened',
-                      )
-                    }
+                    onClick={() => setTerminalVisible(true)}
                   >
                     <SquareTerminal size={14} />
-                    {task.runStatus === 'RUNNING'
-                      ? ' Open live terminal'
-                      : task.sessionId && task.sessionHarness === 'codex'
-                        ? ' Open native session'
-                        : ' Native session unavailable'}
+                    {task.terminalAvailable ? ' Show live terminal' : ' Terminal unavailable'}
                   </button>
                 </section>
               </aside>
@@ -738,8 +675,8 @@ function CreateTask({
           required
         />
         <p className="small-muted">
-          The task is created as Draft. It will not start until you explicitly approve the next
-          step.
+          The task is created as Draft. Use Run task when you are ready to start its interactive
+          worker.
         </p>
         <div className="modal-actions">
           <button type="button" className="button secondary" onClick={onClose}>

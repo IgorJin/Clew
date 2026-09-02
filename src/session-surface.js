@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { validateOpenSessionRequest, validateOpenSessionResult } from './control-plane.js';
+import { createCodexLiveEndpoint } from './runtime.js';
 
 export const SESSION_SURFACE_CAPABILITIES = Object.freeze([
   'open',
@@ -55,12 +56,12 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\\"'\\\"'")}'`;
 }
 
-function openMacTerminal({ codexBin, args, workspace }) {
+export function openMacTerminal({ codexBin, args, workspace, spawnImpl = spawn }) {
   const command = [codexBin, ...args].map(shellQuote).join(' ');
   const script = `tell application "Terminal" to do script ${JSON.stringify(
     `cd ${shellQuote(workspace)} && ${command}`,
   )}`;
-  const child = spawn('osascript', ['-e', script], {
+  const child = spawnImpl('osascript', ['-e', script], {
     stdio: 'ignore',
     detached: true,
   });
@@ -71,10 +72,8 @@ function openMacTerminal({ codexBin, args, workspace }) {
 }
 
 export class LiveThreadTerminalSurface {
-  constructor({ nodeBin = process.execPath, clewBin = 'clew', projectCwd, launcher = null } = {}) {
-    this.nodeBin = nodeBin;
-    this.clewBin = clewBin;
-    this.projectCwd = projectCwd;
+  constructor({ codexBin = 'codex', launcher = null } = {}) {
+    this.codexBin = codexBin;
     this.launcher = launcher;
   }
 
@@ -84,23 +83,44 @@ export class LiveThreadTerminalSurface {
 
   open(request) {
     const normalized = validateOpenSessionRequest(request);
-    const args = [this.clewBin, 'task', 'result', normalized.taskId, '--watch'];
+
+    if (normalized.harness !== 'codex')
+      return Promise.resolve(
+        unavailable(
+          normalized,
+          'live terminal attach is only supported for Codex workers',
+          'UNSUPPORTED_HARNESS',
+        ),
+      );
+    if (!normalized.sessionId)
+      return Promise.resolve(
+        unavailable(normalized, 'Codex is still starting the worker thread', 'SESSION_ID_MISSING'),
+      );
+    if (!normalized.liveEndpoint)
+      return Promise.resolve(
+        unavailable(normalized, 'live Codex endpoint is unavailable', 'LIVE_ENDPOINT_MISSING'),
+      );
+    let workspace;
+
+    try {
+      workspace = assertWorkspace(normalized.workspace);
+    } catch (error) {
+      return Promise.resolve(unavailable(normalized, error.message, 'WORKSPACE_INVALID'));
+    }
+    const args = ['resume', '--remote', normalized.liveEndpoint, normalized.sessionId];
     const child =
-      this.launcher?.(this.nodeBin, args, {
-        cwd: this.projectCwd,
+      this.launcher?.(this.codexBin, args, {
+        cwd: workspace,
         shell: false,
         stdio: 'inherit',
         detached: false,
       }) ??
       (process.platform === 'darwin'
-        ? openMacTerminal({ codexBin: this.nodeBin, args, workspace: this.projectCwd })
+        ? openMacTerminal({ codexBin: this.codexBin, args, workspace })
         : null);
 
     if (!child)
-      return unavailable(
-        normalized,
-        'live worker events are only supported with a terminal launcher',
-      );
+      return unavailable(normalized, 'live Codex TUI is only supported with a terminal launcher');
 
     return Promise.resolve(
       validateOpenSessionResult({
@@ -115,8 +135,9 @@ export class LiveThreadTerminalSurface {
         state: 'opened',
         capabilities: this.capabilities(),
         pid: child.pid ?? null,
-        command: [this.nodeBin, ...args],
-        workspace: this.projectCwd,
+        command: [this.codexBin, ...args],
+        workspace,
+        endpoint: normalized.liveEndpoint,
       }),
     );
   }
@@ -212,16 +233,10 @@ export class PlainTerminalSurface {
   }
 }
 
-export function createSessionSurface({
-  kind = 'plain',
-  codexBin,
-  nodeBin,
-  clewBin,
-  projectCwd,
-} = {}) {
+export function createSessionSurface({ kind = 'plain', codexBin } = {}) {
   if (kind === 'none') return new NoneSurface();
   if (kind === 'plain') return new PlainTerminalSurface({ codexBin });
-  if (kind === 'live') return new LiveThreadTerminalSurface({ nodeBin, clewBin, projectCwd });
+  if (kind === 'live') return new LiveThreadTerminalSurface({ codexBin });
   throw new Error(`unsupported session surface: ${kind}`);
 }
 
@@ -240,9 +255,10 @@ export async function openSessionForRun(store, request, surface = new NoneSurfac
     return surface.open({
       ...request,
       runId: run.id,
-      sessionId: run.session_id ?? `live:${run.id}`,
+      sessionId: run.session_id,
       turnId: run.turn_id,
       workspace: run.workspace,
+      liveEndpoint: run.runtimeNamespace ? createCodexLiveEndpoint(run.runtimeNamespace) : null,
       model: request.model ?? task.contract.models?.[request.role] ?? null,
     });
   if (!run.session_id)
