@@ -19,6 +19,8 @@ test('ClewService is the shared command and snapshot boundary', async () => {
     assert.equal(service.supports(['task', 'create']), true);
     for (const args of [
       ['task', 'result'],
+      ['task', 'changes'],
+      ['task', 'inspect-changes'],
       ['task', 'usage'],
       ['status'],
       ['events'],

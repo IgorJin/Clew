@@ -4,8 +4,11 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleHelp,
+  Copy,
+  FileDiff,
   GitBranch,
   Inbox,
   Laptop,
@@ -18,8 +21,9 @@ import {
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
 import { rolesForProfile } from './api';
-import type { AgentRole, NextStep, Task, TaskState, ThreadItem } from './types';
+import type { AgentRole, AgentSession, NextStep, Run, Task, TaskState, ThreadItem } from './types';
 import { TerminalPane } from './TerminalPane';
+import packageMetadata from '../package.json';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -265,42 +269,310 @@ function Findings({ task }: { task: Task }) {
   );
 }
 
+type ChangeInspection = {
+  version: 1;
+  runId: string;
+  state: 'available' | 'unavailable';
+  reason?: string;
+  summary: { files: number; additions: number; deletions: number };
+  files: string[];
+  statuses: { path: string; oldPath?: string; status: string }[];
+  patch: string;
+  binary: boolean;
+  dirty: boolean;
+  revisions: { base: string | null; head: string | null; committed?: string | null };
+};
+
+type ChangeLoad = {
+  loading: boolean;
+  result?: ChangeInspection;
+  error?: string;
+};
+
+type AgentCard = {
+  key: string;
+  role: AgentRole;
+  label: string;
+  run?: Run;
+  agentSession?: AgentSession;
+};
+
+function changeUnavailableLabel(reason?: string) {
+  if (reason === 'runner-local-unavailable')
+    return 'Changes are available only on the Runner host.';
+  if (reason === 'missing-worktree') return 'This run worktree is no longer available.';
+  if (reason === 'base-revision-unavailable') return 'The run baseline is unavailable.';
+  if (reason === 'git-inspection-failed') return 'Git could not inspect this run.';
+  return 'Changes are unavailable for this run.';
+}
+
+function ChangeActions({
+  run,
+  changes,
+  disabled,
+  onOpenEditor,
+  onViewDiff,
+  onCopyPath,
+  onRefresh,
+}: {
+  run: Run | undefined;
+  changes: ChangeLoad | undefined;
+  disabled: boolean;
+  onOpenEditor: () => void;
+  onViewDiff: () => void;
+  onCopyPath: () => void;
+  onRefresh: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const available = changes?.result?.state === 'available';
+  const label = changes?.loading
+    ? 'Changes…'
+    : available
+      ? `Changes +${changes.result!.summary.additions} −${changes.result!.summary.deletions}`
+      : !run || changes?.result?.state === 'unavailable' || changes?.error
+        ? 'Changes unavailable'
+        : 'Changes';
+  const unavailable = !run || changes?.result?.state === 'unavailable';
+
+  return (
+    <div className="changes-control">
+      <button
+        className="button secondary small changes-main"
+        disabled={disabled || unavailable}
+        title={!run ? 'No persisted run for this agent' : undefined}
+        onClick={() => {
+          setMenuOpen(false);
+          onOpenEditor();
+        }}
+      >
+        <FileDiff size={12} /> {label}
+      </button>
+      <button
+        className="button secondary small changes-menu-toggle"
+        disabled={disabled || !run}
+        aria-label={`Change actions for ${run?.stageId ?? 'agent'}`}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <ChevronDown size={12} />
+      </button>
+      {menuOpen && run && (
+        <div className="changes-menu" role="menu">
+          <button
+            role="menuitem"
+            disabled={unavailable}
+            onClick={() => {
+              setMenuOpen(false);
+              onOpenEditor();
+            }}
+          >
+            <Laptop size={12} /> Open in editor
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              onViewDiff();
+            }}
+          >
+            <FileDiff size={12} /> View diff
+          </button>
+          <button
+            role="menuitem"
+            disabled={unavailable}
+            onClick={() => {
+              setMenuOpen(false);
+              onCopyPath();
+            }}
+          >
+            <Copy size={12} /> Copy worktree path
+          </button>
+          <button role="menuitem" onClick={onRefresh}>
+            <RefreshCw size={12} /> Refresh summary
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffViewer({
+  run,
+  changes,
+  onRefresh,
+  onClose,
+}: {
+  run: Run;
+  changes: ChangeLoad | undefined;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  const result = changes?.result;
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop diff-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="diff-viewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Changes for ${run.stageId}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="diff-viewer-head">
+          <div>
+            <span className="eyebrow">
+              {run.stageId} · attempt {run.attempt}
+            </span>
+            <h2>
+              {result?.state === 'available'
+                ? `Changes +${result.summary.additions} −${result.summary.deletions}`
+                : 'Changes'}
+            </h2>
+          </div>
+          <div className="diff-viewer-actions">
+            <button className="icon-button" aria-label="Refresh diff" onClick={onRefresh}>
+              <RefreshCw size={15} />
+            </button>
+            <button className="icon-button" aria-label="Close diff" onClick={onClose}>
+              <X size={15} />
+            </button>
+          </div>
+        </header>
+        {changes?.loading && !result ? (
+          <div className="diff-state">Loading changes…</div>
+        ) : changes?.error ? (
+          <div className="diff-state error">{changes.error}</div>
+        ) : result?.state === 'unavailable' ? (
+          <div className="diff-state unavailable">{changeUnavailableLabel(result.reason)}</div>
+        ) : result?.state === 'available' && result.files.length === 0 ? (
+          <div className="diff-state">No changes relative to the run baseline.</div>
+        ) : result?.state === 'available' ? (
+          <div className="diff-layout">
+            <aside className="diff-files" aria-label="Changed files">
+              {result.statuses.map((file) => (
+                <div className="diff-file" key={`${file.status}:${file.path}`}>
+                  <span>{file.status.trim() || 'M'}</span>
+                  <code title={file.path}>{file.path}</code>
+                </div>
+              ))}
+            </aside>
+            <div className="diff-content">
+              {result.binary && <div className="binary-notice">Includes binary changes</div>}
+              <pre>{result.patch}</pre>
+            </div>
+          </div>
+        ) : (
+          <div className="diff-state">Select refresh to inspect this run.</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function AgentGrid({
   task,
   canMutate,
   act,
+  expandedAgent,
+  onToggleExpand,
+  changesByRun,
+  onOpenEditor,
+  onViewDiff,
+  onCopyPath,
+  onRefreshChanges,
 }: {
   task: Task;
   canMutate: boolean;
   act: (args: string[], success: string) => void;
+  expandedAgent: string | null;
+  onToggleExpand: (agent: string) => void;
+  changesByRun: Record<string, ChangeLoad>;
+  onOpenEditor: (run: Run) => void;
+  onViewDiff: (run: Run) => void;
+  onCopyPath: (run: Run) => void;
+  onRefreshChanges: (run: Run) => void;
 }) {
-  const roles = task.roles;
-  const getLatestForRole = (role: AgentRole) =>
-    task.runs.find((r) => r.stageId === role || (role === 'worker' && r.stageId === 'worker'));
-  const getAgentSessionForRole = (role: AgentRole) =>
-    task.agentSessions.find((s) => s.role === role);
+  const cards = task.roles.flatMap<AgentCard>((role) => {
+    if (role !== 'worker')
+      return [
+        {
+          key: role,
+          role,
+          label: role,
+          run: undefined,
+          agentSession: task.agentSessions.find((session) => session.role === role),
+        },
+      ];
+    const plannedWorkerStages = task.stages
+      .filter((stage) => ['worker', 'integration'].includes(stage.kind))
+      .map((stage) => stage.id);
+    const runStages = task.runs
+      .map((run) => run.stageId)
+      .filter((stageId) => !['architect', 'reviewer', 'qa'].includes(stageId));
+    const stageIds = [...new Set([...plannedWorkerStages, ...runStages])];
+
+    return (stageIds.length ? stageIds : ['worker']).map((stageId) => ({
+      key: stageId === 'worker' ? 'worker' : `worker:${stageId}`,
+      role,
+      label: stageId === 'worker' ? 'worker' : `worker · ${stageId}`,
+      run: [...task.runs].reverse().find((candidate) => candidate.stageId === stageId),
+      agentSession: undefined,
+    }));
+  });
 
   return (
     <div className="agent-grid">
-      {roles.map((role) => {
-        const run = getLatestForRole(role);
-        const agentSession = getAgentSessionForRole(role);
+      {cards.map(({ key, role, label, run, agentSession }) => {
         const isWorkerRole = role === 'worker';
+        const currentRunIsNotInSnapshot = Boolean(
+          task.runId && !task.runs.some((candidate) => candidate.id === task.runId),
+        );
+        const isCurrentRun = Boolean(
+          run &&
+          (run.id === task.runId ||
+            ((!task.runId || currentRunIsNotInSnapshot) &&
+              run.stageId === (task.sessionStageId ?? 'worker'))),
+        );
         const isRunning = isWorkerRole
-          ? run?.status === 'RUNNING' || task.runStatus === 'RUNNING'
+          ? run?.status === 'RUNNING' || (isCurrentRun && task.runStatus === 'RUNNING')
           : false;
         const isCompleted = isWorkerRole
-          ? run?.status === 'COMPLETED' || task.runStatus === 'COMPLETED'
+          ? run?.status === 'COMPLETED' || (isCurrentRun && task.runStatus === 'COMPLETED')
           : false;
-        const hasSession = isWorkerRole ? !!(run?.sessionId || isRunning) : !!agentSession;
+        const hasSession = isWorkerRole
+          ? !!(run?.sessionId || (isCurrentRun && task.sessionId) || isRunning)
+          : !!agentSession;
+        const terminalId = isWorkerRole
+          ? isCurrentRun
+            ? (task.runId ?? run?.id)
+            : run?.id
+          : agentSession?.id;
+        const terminalAvailable = isWorkerRole
+          ? Boolean(
+              terminalId &&
+              (run?.terminalAvailable || (isCurrentRun && task.terminalAvailable)) &&
+              (run?.terminalAccess ?? (isCurrentRun ? task.terminalAccess : 'unavailable')) !==
+                'runner_local',
+            )
+          : Boolean(agentSession);
+        const expanded = expandedAgent === key && terminalAvailable && Boolean(terminalId);
         const statusClass = isRunning ? 'running' : isCompleted ? 'completed' : 'idle';
 
         return (
-          <div className="agent-card" key={role}>
+          <div className={`agent-card${expanded ? ' expanded' : ''}`} key={key}>
             <div className="agent-header">
               <span className="agent-role">
                 <span className="agent-role-icon">{agentIcon(role)}</span>
-                {role}
+                {label}
               </span>
               <span className={`agent-status ${statusClass}`}>
                 {isRunning ? 'running' : isCompleted ? 'done' : hasSession ? 'available' : 'idle'}
@@ -328,8 +600,21 @@ function AgentGrid({
             <div className="agent-actions">
               <button
                 className="button secondary small"
+                disabled={!canMutate || !terminalAvailable}
+                aria-expanded={expanded}
+                aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} terminal`}
+                onClick={() => onToggleExpand(key)}
+              >
+                <SquareTerminal size={12} />
+                {expanded ? 'Collapse' : 'Expand'}
+              </button>
+              <button
+                className="button secondary small"
                 disabled={!canMutate || !hasSession}
-                title={hasSession ? `Open ${role} terminal` : `No session available for ${role}`}
+                aria-label={`Open ${label} externally`}
+                title={
+                  hasSession ? `Open ${label} in Terminal` : `No session available for ${label}`
+                }
                 onClick={() => {
                   if (isWorkerRole) {
                     act(
@@ -364,13 +649,33 @@ function AgentGrid({
                 }}
               >
                 <Terminal size={12} />
-                {hasSession
-                  ? isRunning
-                    ? 'Open live terminal'
-                    : `Open ${role} session`
-                  : 'Native session unavailable'}
+                Open externally
               </button>
+              <ChangeActions
+                run={run}
+                changes={run ? changesByRun[run.id] : undefined}
+                disabled={!canMutate}
+                onOpenEditor={() => run && onOpenEditor(run)}
+                onViewDiff={() => run && onViewDiff(run)}
+                onCopyPath={() => run && onCopyPath(run)}
+                onRefresh={() => run && onRefreshChanges(run)}
+              />
             </div>
+            {expanded && terminalId && (
+              <TerminalPane
+                terminalId={terminalId}
+                runId={isWorkerRole ? terminalId : null}
+                agentSessionId={isWorkerRole ? null : agentSession?.id}
+                taskId={task.id}
+                role={role}
+                sessionId={
+                  isWorkerRole
+                    ? (run?.sessionId ?? (isCurrentRun ? task.sessionId : null) ?? null)
+                    : agentSession!.sessionId
+                }
+                onClose={() => onToggleExpand(key)}
+              />
+            )}
           </div>
         );
       })}
@@ -562,9 +867,12 @@ export default function App() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [descExpanded, setDescExpanded] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [changesByRun, setChangesByRun] = useState<Record<string, ChangeLoad>>({});
+  const [diffRunId, setDiffRunId] = useState<string | null>(null);
   const [runRequested, setRunRequested] = useState(false);
   const autoOpenedTerminal = useRef<string | null>(null);
+  const changeRequestSequence = useRef<Record<string, number>>({});
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
@@ -642,12 +950,86 @@ export default function App() {
     [selected, tasks],
   );
 
+  const refreshRunChanges = useCallback(async (runId: string) => {
+    const sequence = (changeRequestSequence.current[runId] ?? 0) + 1;
+
+    changeRequestSequence.current[runId] = sequence;
+    setChangesByRun((current) => ({
+      ...current,
+      [runId]: { ...current[runId], loading: true, error: undefined },
+    }));
+    try {
+      const value = await execute(['task', 'changes', runId]);
+      const result = value as ChangeInspection & { fixture?: boolean };
+
+      if (changeRequestSequence.current[runId] !== sequence) return;
+      if (result?.fixture)
+        setChangesByRun((current) => ({
+          ...current,
+          [runId]: {
+            loading: false,
+            result: {
+              version: 1,
+              runId,
+              state: 'unavailable',
+              reason: 'fixture-unavailable',
+              summary: { files: 0, additions: 0, deletions: 0 },
+              files: [],
+              statuses: [],
+              patch: '',
+              binary: false,
+              dirty: false,
+              revisions: { base: null, head: null },
+            },
+          },
+        }));
+      else if (result?.runId === runId && ['available', 'unavailable'].includes(result.state))
+        setChangesByRun((current) => ({
+          ...current,
+          [runId]: { loading: false, result },
+        }));
+      else throw new Error('Change inspection response is incompatible');
+    } catch (error) {
+      if (changeRequestSequence.current[runId] !== sequence) return;
+      setChangesByRun((current) => ({
+        ...current,
+        [runId]: {
+          loading: false,
+          error: error instanceof Error ? error.message : 'Could not inspect changes',
+        },
+      }));
+    }
+  }, []);
+
+  const runStateSignature = task?.runs.map((run) => `${run.id}:${run.status}`).join('|') ?? '';
+
+  useEffect(() => {
+    if (!task) return;
+    for (const run of task.runs) void refreshRunChanges(run.id);
+  }, [refreshRunChanges, runStateSignature, task?.id]);
+
+  useEffect(() => {
+    if (!task) return undefined;
+    const activeRunIds = task.runs.filter((run) => run.status === 'RUNNING').map((run) => run.id);
+
+    if (!activeRunIds.length) return undefined;
+    const timer = window.setInterval(() => {
+      for (const runId of activeRunIds) void refreshRunChanges(runId);
+    }, 2_000);
+
+    return () => window.clearInterval(timer);
+  }, [refreshRunChanges, runStateSignature, task?.id]);
+
   useEffect(() => {
     if (task?.terminalActive && task.runId && autoOpenedTerminal.current !== task.runId) {
       autoOpenedTerminal.current = task.runId;
-      setTerminalVisible(true);
+      const currentRun = task.runs.find((run) => run.id === task.runId);
+
+      setExpandedAgent(
+        currentRun && currentRun.stageId !== 'worker' ? `worker:${currentRun.stageId}` : 'worker',
+      );
     }
-  }, [task?.runId, task?.terminalActive]);
+  }, [task?.runId, task?.runs, task?.terminalActive]);
 
   useEffect(() => {
     const waitingForTerminal =
@@ -855,12 +1237,46 @@ export default function App() {
 
   const openChanges = async () => {
     try {
-      await execute(['task', 'open-changes', task.id]);
-      setNotice('Opened in editor');
+      const result = (await execute(['task', 'open-changes', task.id])) as {
+        fixture?: boolean;
+        state?: string;
+        reason?: string;
+      };
+
+      setNotice(
+        result?.state === 'unavailable'
+          ? changeUnavailableLabel(result.reason)
+          : 'Opened in editor',
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not open changes');
     }
   };
+
+  const runViewerAction = async (run: Run, viewer?: 'cursor' | 'vscode' | 'worktree-path') => {
+    try {
+      const result = (await execute([
+        'task',
+        'open-changes',
+        task.id,
+        '--run',
+        run.id,
+        ...(viewer ? ['--viewer', viewer] : []),
+      ])) as { fixture?: boolean; state?: string; reason?: string };
+
+      if (result?.state === 'unavailable') setNotice(changeUnavailableLabel(result.reason));
+      else setNotice(viewer === 'worktree-path' ? 'Worktree path copied' : 'Opened in editor');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not open changes');
+    }
+  };
+
+  const viewRunDiff = (run: Run) => {
+    setDiffRunId(run.id);
+    void refreshRunChanges(run.id);
+  };
+
+  const diffRun = task.runs.find((run) => run.id === diffRunId);
 
   return (
     <div className="app">
@@ -930,7 +1346,7 @@ export default function App() {
             ))}
           </div>
           <div className="sidebar-footer">
-            <span className="version">v0.4</span>
+            <span className="version">v{packageMetadata.version}</span>
           </div>
         </aside>
         <main className="content">
@@ -1119,7 +1535,16 @@ export default function App() {
                   </p>
                 </div>
                 {task.terminalAvailable && task.runId && task.terminalAccess !== 'runner_local' && (
-                  <button className="text-button" onClick={() => setTerminalVisible(true)}>
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      const run = task.runs.find((candidate) => candidate.id === task.runId);
+
+                      setExpandedAgent(
+                        run && run.stageId !== 'worker' ? `worker:${run.stageId}` : 'worker',
+                      );
+                    }}
+                  >
                     Open terminal <ChevronRight size={14} />
                   </button>
                 )}
@@ -1144,15 +1569,20 @@ export default function App() {
               </section>
             )}
 
-            <AgentGrid task={task} canMutate={canMutate} act={act} />
-
-            {terminalVisible && task.terminalAvailable && task.runId && (
-              <TerminalPane
-                runId={task.runId}
-                sessionId={task.sessionId ?? null}
-                onClose={() => setTerminalVisible(false)}
-              />
-            )}
+            <AgentGrid
+              task={task}
+              canMutate={canMutate}
+              act={act}
+              expandedAgent={expandedAgent}
+              onToggleExpand={(agent) =>
+                setExpandedAgent((current) => (current === agent ? null : agent))
+              }
+              changesByRun={changesByRun}
+              onOpenEditor={(run) => void runViewerAction(run)}
+              onViewDiff={viewRunDiff}
+              onCopyPath={(run) => void runViewerAction(run, 'worktree-path')}
+              onRefreshChanges={(run) => void refreshRunChanges(run.id)}
+            />
 
             <div className="main-grid">
               <section className="panel thread-panel">
@@ -1188,6 +1618,14 @@ export default function App() {
           </div>
         </main>
       </div>
+      {diffRun && (
+        <DiffViewer
+          run={diffRun}
+          changes={changesByRun[diffRun.id]}
+          onRefresh={() => void refreshRunChanges(diffRun.id)}
+          onClose={() => setDiffRunId(null)}
+        />
+      )}
       {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
     </div>
   );

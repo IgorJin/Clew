@@ -8,3 +8,19 @@ export function parseVersion(output) {
 export function isSupportedVersion(output, expectedVersion) {
   return parseVersion(output) === expectedVersion;
 }
+
+export function isVersionAtLeast(output, minimumVersion) {
+  const actual = parseVersion(output);
+  const minimum = parseVersion(minimumVersion);
+
+  if (!actual || !minimum) return false;
+  const actualParts = actual.split('.').map(Number);
+  const minimumParts = minimum.split('.').map(Number);
+
+  for (let index = 0; index < 3; index += 1) {
+    if (actualParts[index] > minimumParts[index]) return true;
+    if (actualParts[index] < minimumParts[index]) return false;
+  }
+
+  return true;
+}

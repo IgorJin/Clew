@@ -64,6 +64,33 @@ test('prunes only clean inactive owned worktrees', () => {
   }
 });
 
+test('ignores stale registered worktrees outside the owned root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clew-worktree-stale-'));
+  const worktrees = join(root, 'worktrees');
+
+  try {
+    runGitCommand(['init', '-b', 'main'], root);
+    runGitCommand(['config', 'user.email', 'test@example.com'], root);
+    runGitCommand(['config', 'user.name', 'Clew Test'], root);
+    writeFileSync(join(root, 'README.md'), 'fixture\n');
+    runGitCommand(['add', 'README.md'], root);
+    runGitCommand(['commit', '-m', 'fixture'], root);
+    const manager = new GitWorktreeManager(worktrees, root);
+    const owned = manager.createWorktree('T-STALE', 'worker');
+    const external = join(root, 'external-worktree');
+
+    runGitCommand(['worktree', 'add', '-b', 'external-stale', external], root);
+    rmSync(external, { recursive: true, force: true });
+
+    assert.deepEqual(
+      manager.listWorktrees().map((entry) => entry.path),
+      [owned.path],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('commits worker outputs and integrates them into a target worktree', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-integration-'));
   const worktrees = join(root, 'worktrees');

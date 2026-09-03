@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ChangeViewerRegistry,
   WorktreePathViewer,
   createChangeViewerRegistry,
+  resolveViewerLaunch,
 } from '../src/change-viewer.js';
 
 test('change viewer registry prefers explicit viewer and returns unified result', () => {
@@ -61,6 +62,20 @@ test('default viewer order starts with Cursor', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test(
+  'macOS editor resolution falls back to installed application bundles',
+  { skip: process.platform !== 'darwin' || !existsSync('/Applications/Cursor.app') },
+  () => {
+    const result = resolveViewerLaunch({
+      command: 'clew-command-that-does-not-exist',
+      application: 'Cursor',
+      platform: 'darwin',
+    });
+
+    assert.deepEqual(result, { command: 'open', argsPrefix: ['-a', 'Cursor'] });
+  },
+);
 
 test('falls back from Cursor to VS Code without copying the worktree path', () => {
   const calls = [];

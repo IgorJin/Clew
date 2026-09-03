@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { URL } from 'node:url';
 import {
+  isVersionAtLeast,
   isSupportedVersion,
   SUPPORTED_CODEX_CLI_VERSION,
   SUPPORTED_OPENCODE_CLI_VERSION,
@@ -53,8 +54,10 @@ const SERVICE_COMMANDS = new Set([
 ]);
 const TASK_COMMANDS = new Set([
   'approve-step',
+  'changes',
   'create',
   'history',
+  'inspect-changes',
   'list',
   'message',
   'next-step',
@@ -147,16 +150,20 @@ function probeCommand(command, args) {
   }
 }
 
-function withVersionCompatibility(check, expectedVersion) {
+function withVersionCompatibility(check, expectedVersion, { minimum = false } = {}) {
   if (!check.ok) return { ...check, compatible: false, expectedVersion };
-  const compatible = isSupportedVersion(check.detail, expectedVersion);
+  const compatible = minimum
+    ? isVersionAtLeast(check.detail, expectedVersion)
+    : isSupportedVersion(check.detail, expectedVersion);
 
   return {
     ...check,
     ok: compatible,
     compatible,
     expectedVersion,
-    detail: compatible ? check.detail : `${check.detail} (expected ${expectedVersion})`,
+    detail: compatible
+      ? check.detail
+      : `${check.detail} (${minimum ? 'minimum' : 'expected'} ${expectedVersion})`,
   };
 }
 
@@ -1099,7 +1106,7 @@ export class ClewService {
       },
       {
         name: 'codex-cli',
-        ...withVersionCompatibility(codexVersion, SUPPORTED_CODEX_CLI_VERSION),
+        ...withVersionCompatibility(codexVersion, SUPPORTED_CODEX_CLI_VERSION, { minimum: true }),
         required: requiredHarness === 'codex',
         command: runtimeConfig.codexBin,
       },

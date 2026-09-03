@@ -263,6 +263,28 @@ All six cards are complete. Release evidence includes 174/174 unsandboxed backen
 | CLEW-076 | P1  | L    | Docker packaging and deployment operations | 075, 080      | Docker Controller/UI plus installed local Runner survive pairing, reconnect, upgrade, backup/restore, and clean deployment acceptance without privileged host mounts. |
 | CLEW-081 | P0  | L    | v0.7 self-hosted acceptance and release    | 075, 076, 080 | Migration, pairing, Docker, security, installed-artifact, backup/restore, CI, and publication gates pass for `v0.7.0`.                                                |
 
+## v0.8 plan — Agent Change Visibility
+
+| ID       | Pri | Size | Work package                         | Depends on   | Done when                                                                                                                                                                            |
+| -------- | --- | ---- | ------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| CLEW-087 | P0  | M    | Persist immutable run Git provenance | —            | Every run records its base SHA and branch, including migration recovery and Quick/Standard/Deep, retry, restart, and paired-run cases.                                               |
+| CLEW-088 | P0  | L    | Git change inspection service        | 087          | A read-only run-scoped API reports summary, files, revisions, dirty state, and unified patch for all Git change classes and unavailable cases.                                       |
+| CLEW-089 | P1  | M    | Extensible change-viewer adapters    | 087          | `task open-changes --run` opens the persisted worktree through configured editor, Cursor, VS Code fallback, or path-copy adapter without merge/push.                                 |
+| CLEW-090 | P0  | L    | Per-agent Changes in the Web UI      | 088, 089     | Superseded by CLEW-092 after task-level workflow review rejected per-agent change controls.                                                                                          |
+| CLEW-092 | P0  | L    | Task activity and change-review UX   | 088, 089     | Changes live in the task header, editor launch works, a selected OSS diff viewer replaces plain text, step details are contextual, notices are unified, and tasks sort newest first. |
+| CLEW-091 | P0  | M    | v0.8 acceptance and release          | 087–089, 092 | Migration, Git matrix, viewer fallback, retry/restart, worktree/runner-local limits, no-auto-merge, docs, and installed-package acceptance pass for v0.8.                            |
+
+Execution waves:
+
+```text
+Wave 0: CLEW-087
+Wave 1: CLEW-088 + CLEW-089
+Wave 2: CLEW-092 (supersedes CLEW-090)
+Wave 3: CLEW-091
+```
+
+All v0.8 cards use `updated: 2026-09-03`, `evidence_policy: v1`, and `owner: null`. Worktree results remain manually transferable through merge, cherry-pick, or PR.
+
 ## Later backlog
 
 These items stay outside v0.2 until usage provides a concrete trigger.

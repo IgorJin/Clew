@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 function runGitCommand(args, cwd) {
@@ -66,7 +66,13 @@ export class GitWorktreeManager {
     const canonicalRoot = realpathSync(this.root);
 
     return entries
-      .map((entry) => ({ ...entry, path: realpathSync(resolve(entry.path)) }))
+      .map((entry) => ({ ...entry, path: resolve(entry.path) }))
+      .filter((entry) => entry.path === canonicalRoot || entry.path.startsWith(`${canonicalRoot}/`))
+      .map((entry) =>
+        existsSync(entry.path)
+          ? { ...entry, path: realpathSync(entry.path), missing: false }
+          : { ...entry, missing: true },
+      )
       .filter(
         (entry) => entry.path === canonicalRoot || entry.path.startsWith(`${canonicalRoot}/`),
       );
@@ -122,6 +128,10 @@ export class GitWorktreeManager {
     const skipped = [];
 
     for (const worktree of this.listWorktrees()) {
+      if (worktree.missing) {
+        skipped.push({ ...worktree, reason: 'missing' });
+        continue;
+      }
       if (protectedSet.has(worktree.path)) {
         skipped.push({ ...worktree, reason: 'active run' });
         continue;

@@ -49,30 +49,36 @@ Human-authorized transitions are valid product behavior when the card calls for 
 
 ## Current index
 
-| Task                           | Release | Status     | Depends on    | Parallel group     |
-| ------------------------------ | ------- | ---------- | ------------- | ------------------ |
-| [CLEW-042](./done/CLEW-042.md) | v0.3    | done       | —             | —                  |
-| [CLEW-043](./done/CLEW-043.md) | v0.3    | done       | CLEW-042      | —                  |
-| [CLEW-067](./done/CLEW-067.md) | v0.3    | done       | 042, 043      | —                  |
-| [CLEW-068](./done/CLEW-068.md) | v0.4    | done       | 067           | —                  |
-| [CLEW-069](./done/CLEW-069.md) | v0.4    | done       | 068           | v0.4-control-plane |
-| [CLEW-070](./done/CLEW-070.md) | v0.4    | done       | 068           | v0.4-control-plane |
-| [CLEW-071](./done/CLEW-071.md) | v0.4    | done       | 068           | v0.4-control-plane |
-| [CLEW-072](./done/CLEW-072.md) | v0.4    | done       | 068           | v0.4-control-plane |
-| [CLEW-073](./done/CLEW-073.md) | v0.4    | done       | 068           | v0.4-control-plane |
-| [CLEW-074](./CLEW-074.md)      | v0.4    | superseded | 069–073       | —                  |
-| [CLEW-075](./done/CLEW-075.md) | v0.6    | done       | 077           | —                  |
-| [CLEW-076](./CLEW-076.md)      | v0.7    | planned    | 075, 080      | —                  |
-| [CLEW-077](./done/CLEW-077.md) | v0.5    | done       | 078, 079      | —                  |
-| [CLEW-078](./done/CLEW-078.md) | v0.5    | done       | 068, 069, 072 | —                  |
-| [CLEW-079](./done/CLEW-079.md) | v0.5    | done       | 078           | —                  |
-| [CLEW-080](./CLEW-080.md)      | v0.7    | planned    | 075           | —                  |
-| [CLEW-081](./CLEW-081.md)      | v0.7    | planned    | 075, 076, 080 | —                  |
-| [CLEW-082](./done/CLEW-082.md) | v0.6    | done       | 077           | —                  |
-| [CLEW-083](./done/CLEW-083.md) | v0.6    | done       | 082           | v0.6-transport     |
-| [CLEW-084](./done/CLEW-084.md) | v0.6    | done       | 082           | v0.6-transport     |
-| [CLEW-085](./done/CLEW-085.md) | v0.6    | done       | 083, 084      | —                  |
-| [CLEW-086](./done/CLEW-086.md) | v0.6    | done       | 082–085       | —                  |
+| Task                           | Release | Status     | Depends on    | Parallel group      |
+| ------------------------------ | ------- | ---------- | ------------- | ------------------- |
+| [CLEW-042](./done/CLEW-042.md) | v0.3    | done       | —             | —                   |
+| [CLEW-043](./done/CLEW-043.md) | v0.3    | done       | CLEW-042      | —                   |
+| [CLEW-067](./done/CLEW-067.md) | v0.3    | done       | 042, 043      | —                   |
+| [CLEW-068](./done/CLEW-068.md) | v0.4    | done       | 067           | —                   |
+| [CLEW-069](./done/CLEW-069.md) | v0.4    | done       | 068           | v0.4-control-plane  |
+| [CLEW-070](./done/CLEW-070.md) | v0.4    | done       | 068           | v0.4-control-plane  |
+| [CLEW-071](./done/CLEW-071.md) | v0.4    | done       | 068           | v0.4-control-plane  |
+| [CLEW-072](./done/CLEW-072.md) | v0.4    | done       | 068           | v0.4-control-plane  |
+| [CLEW-073](./done/CLEW-073.md) | v0.4    | done       | 068           | v0.4-control-plane  |
+| [CLEW-074](./CLEW-074.md)      | v0.4    | superseded | 069–073       | —                   |
+| [CLEW-075](./done/CLEW-075.md) | v0.6    | done       | 077           | —                   |
+| [CLEW-076](./CLEW-076.md)      | v0.7    | planned    | 075, 080      | —                   |
+| [CLEW-077](./done/CLEW-077.md) | v0.5    | done       | 078, 079      | —                   |
+| [CLEW-078](./done/CLEW-078.md) | v0.5    | done       | 068, 069, 072 | —                   |
+| [CLEW-079](./done/CLEW-079.md) | v0.5    | done       | 078           | —                   |
+| [CLEW-080](./CLEW-080.md)      | v0.7    | planned    | 075           | —                   |
+| [CLEW-081](./CLEW-081.md)      | v0.7    | planned    | 075, 076, 080 | —                   |
+| [CLEW-082](./done/CLEW-082.md) | v0.6    | done       | 077           | —                   |
+| [CLEW-083](./done/CLEW-083.md) | v0.6    | done       | 082           | v0.6-transport      |
+| [CLEW-084](./done/CLEW-084.md) | v0.6    | done       | 082           | v0.6-transport      |
+| [CLEW-085](./done/CLEW-085.md) | v0.6    | done       | 083, 084      | —                   |
+| [CLEW-086](./done/CLEW-086.md) | v0.6    | done       | 082–085       | —                   |
+| [CLEW-087](./CLEW-087.md)      | v0.8    | planned    | —             | —                   |
+| [CLEW-088](./CLEW-088.md)      | v0.8    | planned    | 087           | v0.8-change-data    |
+| [CLEW-089](./CLEW-089.md)      | v0.8    | planned    | 087           | v0.8-change-viewers |
+| [CLEW-090](./CLEW-090.md)      | v0.8    | superseded | 088, 089      | —                   |
+| [CLEW-092](./CLEW-092.md)      | v0.8    | planned    | 088, 089      | —                   |
+| [CLEW-091](./CLEW-091.md)      | v0.8    | planned    | 087–089, 092  | —                   |
 
 ## Execution waves
 
@@ -88,6 +94,7 @@ Wave 6: CLEW-085 (done)
 Wave 7: CLEW-086 (done)
 Next v0.7: CLEW-080 → CLEW-076 → CLEW-081
 Completed interactive response slice: CLEW-078 → CLEW-079 → CLEW-077
+Next v0.8: CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091; CLEW-090 superseded
 ```
 
 The Wave 2 tasks deliberately own separate primary areas to reduce merge conflicts. Their shared contracts and fixtures must land in `CLEW-068` first.

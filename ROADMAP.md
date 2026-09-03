@@ -352,7 +352,43 @@ Own the v0.6 migration, clean Docker deployment, pairing/revocation, upgrade, ba
 5. No privileged host mount, Docker socket, repository root, or harness credential is required by Controller.
 6. One-Runner scope remains explicit; multi-Runner scheduling stays deferred.
 
-## Research queue after v0.7
+## v0.8 — Agent Change Visibility
+
+**Outcome:** Operators can inspect exactly what each agent changed in its persisted worktree, open that worktree in an editor, or review a run-scoped unified diff without implicit merge or push behavior.
+
+### [CLEW-087](./tasks/CLEW-087.md) — Persist immutable run Git provenance
+
+Store each run's base SHA and branch with safe migration and explicit unavailable recovery for legacy runs.
+
+### [CLEW-088](./tasks/CLEW-088.md) — Implement Git change inspection service
+
+Provide read-only summary, file list, and patch inspection relative to the persisted run baseline, including committed, staged, unstaged, untracked, binary, rename, empty-diff, remote-worktree, and runner-local cases.
+
+### [CLEW-089](./tasks/CLEW-089.md) — Add extensible change-viewer adapters
+
+Add `task open-changes --run` with explicit viewer configuration, Cursor-first then VS Code fallback, and worktree-path copying. No merge or push is performed.
+
+### [CLEW-090](./tasks/CLEW-090.md) — Show per-agent Changes in the Web UI
+
+Superseded by CLEW-092 after workflow review rejected per-agent placement in favor of one task-level Changes control.
+
+### [CLEW-092](./tasks/CLEW-092.md) — Refine task activity and change-review UX
+
+Consolidate Changes in the task header, adopt a proven open-source diff surface, move next-step details into the selectable stepper, remove duplicate waiting notices, fix editor launching, and restore newest-first task ordering.
+
+### [CLEW-091](./tasks/CLEW-091.md) — v0.8 acceptance and release
+
+Complete migration, Git change matrix, viewer fallback, retry/restart, worktree/runner-local, no-auto-merge, documentation, and installed-package acceptance for v0.8.
+
+### v0.8 execution order and release gate
+
+```text
+CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091
+```
+
+The v0.7 scope remains unchanged. Worktree results are transferred to the target branch manually through merge, cherry-pick, or PR; `Complete` does not merge or push automatically.
+
+## Research queue after v0.8
 
 These topics require discovery before release commitment:
 

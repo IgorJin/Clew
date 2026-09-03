@@ -1,10 +1,14 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureTasks } from './fixtures';
 import type { ThreadItem } from './types';
 
 const api = vi.hoisted(() => ({
-  execute: vi.fn(async () => ({ fixture: true })),
+  execute: vi.fn(async (args: string[]): Promise<unknown> => {
+    void args;
+
+    return { fixture: true };
+  }),
   loadTasks: vi.fn(async () => ({ tasks: structuredClone(fixtureTasks), state: 'fixture' })),
   subscribeToEvents: vi.fn(
     (
@@ -28,17 +32,39 @@ const api = vi.hoisted(() => ({
 
 vi.mock('./api', () => api);
 vi.mock('./TerminalPane', () => ({
-  TerminalPane: ({ runId }: { runId: string }) => (
-    <section aria-label="Live Codex terminal">terminal {runId}</section>
+  TerminalPane: ({ terminalId }: { terminalId: string }) => (
+    <section aria-label="Live Codex terminal">terminal {terminalId}</section>
   ),
 }));
 
 import App, { Thread } from './App';
 
+function availableChanges(runId: string, additions = 4, deletions = 2) {
+  return {
+    version: 1,
+    runId,
+    state: 'available',
+    summary: { files: 1, additions, deletions },
+    files: ['src/change.ts'],
+    statuses: [{ path: 'src/change.ts', status: 'M ' }],
+    patch: 'diff --git a/src/change.ts b/src/change.ts\n+added line',
+    additions,
+    deletions,
+    binary: false,
+    dirty: true,
+    revisions: { base: 'base-sha', head: 'head-sha' },
+  };
+}
+
 describe('Preact control plane', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     sessionStorage.clear();
+    api.execute.mockReset();
+    api.execute.mockResolvedValue({ fixture: true });
+    api.loadTasks.mockReset();
+    api.loadTasks.mockResolvedValue({ tasks: structuredClone(fixtureTasks), state: 'fixture' });
+    api.subscribeToEvents.mockClear();
   });
 
   it('confirms completion and sends the pinned revision', async () => {
@@ -216,7 +242,7 @@ describe('Preact control plane', () => {
     ]);
   });
 
-  it('opens the live worker terminal before a Codex session id exists', async () => {
+  it('opens the live worker terminal externally before a Codex session id exists', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const runningTasks = structuredClone(fixtureTasks);
 
@@ -227,7 +253,7 @@ describe('Preact control plane', () => {
     runningTasks[0].sessionStageId = 'worker';
     api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
     render(<App />);
-    const open = await screen.findByRole('button', { name: /open live terminal/i });
+    const open = await screen.findByRole('button', { name: /open worker externally/i });
 
     expect(open.hasAttribute('disabled')).toBe(false);
     fireEvent.click(open);
@@ -265,6 +291,18 @@ describe('Preact control plane', () => {
     expect(terminal.textContent).toContain('run-live-1');
   });
 
+  it('expands a stored architect session inside its agent card', async () => {
+    const tasks = structuredClone(fixtureTasks);
+    tasks[0].roles = ['architect', 'worker'];
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /expand architect terminal/i }));
+
+    const terminal = await screen.findByRole('region', { name: /live codex terminal/i });
+    expect(terminal.textContent).toContain('CLEW-071:architect:arch-session-1');
+  });
+
   it('shows when a completed worker turn is waiting for operator input', async () => {
     const waitingTasks = structuredClone(fixtureTasks);
 
@@ -280,5 +318,199 @@ describe('Preact control plane', () => {
     expect(await screen.findByText('Terminal is waiting for you')).toBeTruthy();
     expect(screen.getByText(/worker returned a response/i)).toBeTruthy();
     expect(screen.getByText('Waiting for operator')).toBeTruthy();
+  });
+
+  it('shows run-scoped counts and opens the selected run in the editor', async () => {
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes')
+        return availableChanges(args[2], args[2] === 'run-2' ? 7 : 1, 2);
+      if (args[0] === 'task' && args[1] === 'open-changes') return { state: 'opened' };
+      return { fixture: true };
+    });
+    render(<App />);
+
+    const changes = await screen.findByRole('button', { name: 'Changes +7 −2' });
+
+    fireEvent.click(changes);
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'open-changes',
+      'CLEW-071',
+      '--run',
+      'run-2',
+    ]);
+  });
+
+  it('shows files, unified patch, binary and empty states in the built-in viewer', async () => {
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes')
+        return { ...availableChanges(args[2]), binary: true };
+      return { fixture: true };
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /change actions for worker/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
+    const dialog = await screen.findByRole('dialog', { name: /changes for worker/i });
+
+    expect(within(dialog).getByText('src/change.ts')).toBeTruthy();
+    expect(within(dialog).getByText('Includes binary changes')).toBeTruthy();
+    expect(within(dialog).getByText(/diff --git/)).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /close diff/i }));
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes')
+        return {
+          ...availableChanges(args[2], 0, 0),
+          summary: { files: 0, additions: 0, deletions: 0 },
+          files: [],
+          statuses: [],
+          patch: '',
+          binary: false,
+          dirty: false,
+        };
+      return { fixture: true };
+    });
+    fireEvent.click(screen.getByRole('button', { name: /change actions for worker/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
+
+    expect(await screen.findByText(/no changes relative to the run baseline/i)).toBeTruthy();
+  });
+
+  it('uses the latest retry for each Deep stage and exposes unavailable Runner state', async () => {
+    const tasks = structuredClone(fixtureTasks);
+
+    tasks[0].profile = 'deep';
+    tasks[0].roles = ['worker'];
+    tasks[0].stages = [
+      { id: 'backend', status: 'COMPLETED', kind: 'worker' },
+      { id: 'frontend', status: 'RUNNING', kind: 'worker' },
+    ];
+    tasks[0].runs = [
+      { ...tasks[0].runs[0], id: 'backend-1', stageId: 'backend', attempt: 1 },
+      { ...tasks[0].runs[1], id: 'backend-2', stageId: 'backend', attempt: 2 },
+      {
+        ...tasks[0].runs[1],
+        id: 'frontend-1',
+        stageId: 'frontend',
+        attempt: 1,
+        status: 'RUNNING',
+        workspace: null,
+        terminalAccess: 'runner_local',
+      },
+    ];
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes') {
+        if (args[2] === 'frontend-1')
+          return {
+            ...availableChanges(args[2], 0, 0),
+            state: 'unavailable',
+            reason: 'runner-local-unavailable',
+          };
+        return availableChanges(args[2], args[2] === 'backend-2' ? 9 : 1, 0);
+      }
+      if (args[0] === 'task' && args[1] === 'open-changes') return { state: 'opened' };
+      return { fixture: true };
+    });
+    render(<App />);
+
+    const backendCard = (await screen.findByText('worker · backend')).closest(
+      '.agent-card',
+    ) as HTMLElement;
+    const frontendCard = screen
+      .getByText('worker · frontend')
+      .closest('.agent-card') as HTMLElement;
+
+    fireEvent.click(await within(backendCard).findByRole('button', { name: 'Changes +9 −0' }));
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'open-changes',
+      'CLEW-071',
+      '--run',
+      'backend-2',
+    ]);
+    expect(
+      await within(frontendCard).findByRole('button', { name: 'Changes unavailable' }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /change actions for frontend/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
+    expect(await screen.findByText(/available only on the runner host/i)).toBeTruthy();
+  });
+
+  it('polls running runs every two seconds and copies paths only on explicit action', async () => {
+    const tasks = structuredClone(fixtureTasks);
+    let poll: (() => void) | undefined;
+
+    tasks[0].runs[1].status = 'RUNNING';
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes') return availableChanges(args[2]);
+      if (args[0] === 'task' && args[1] === 'open-changes') return { state: 'opened' };
+      return { fixture: true };
+    });
+    vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 2_000) poll = callback as () => void;
+      return 42;
+    });
+    render(<App />);
+    await screen.findByRole('button', { name: 'Changes +4 −2' });
+
+    const before = api.execute.mock.calls.filter(
+      ([args]) => args[0] === 'task' && args[1] === 'changes' && args[2] === 'run-2',
+    ).length;
+    poll?.();
+    await waitFor(() =>
+      expect(
+        api.execute.mock.calls.filter(
+          ([args]) => args[0] === 'task' && args[1] === 'changes' && args[2] === 'run-2',
+        ).length,
+      ).toBeGreaterThan(before),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /change actions for worker/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /copy worktree path/i }));
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'open-changes',
+      'CLEW-071',
+      '--run',
+      'run-2',
+      '--viewer',
+      'worktree-path',
+    ]);
+  });
+
+  it('ignores stale polling responses and clears the active-run timer', async () => {
+    const tasks = structuredClone(fixtureTasks);
+    const resolvers: ((value: ReturnType<typeof availableChanges>) => void)[] = [];
+    let poll: (() => void) | undefined;
+
+    tasks[0].runs = [{ ...tasks[0].runs[1], id: 'active-run', status: 'RUNNING' }];
+    tasks[0].stages = [{ id: 'worker', status: 'RUNNING', kind: 'worker' }];
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.execute.mockImplementation((args: string[]) =>
+      args[0] === 'task' && args[1] === 'changes'
+        ? new Promise((resolve) => resolvers.push(resolve))
+        : Promise.resolve({ fixture: true }),
+    );
+    vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 2_000) poll = callback as () => void;
+      return 73;
+    });
+    const clearInterval = vi.spyOn(window, 'clearInterval');
+    const view = render(<App />);
+
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+    poll?.();
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    resolvers[1](availableChanges('active-run', 9, 1));
+    await screen.findByRole('button', { name: 'Changes +9 −1' });
+    resolvers[0](availableChanges('active-run', 1, 0));
+    await Promise.resolve();
+
+    expect(screen.getByRole('button', { name: 'Changes +9 −1' })).toBeTruthy();
+    view.unmount();
+    expect(clearInterval).toHaveBeenCalledWith(73);
   });
 });

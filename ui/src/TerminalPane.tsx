@@ -32,11 +32,19 @@ function decode(value: string) {
 }
 
 export function TerminalPane({
+  terminalId,
   runId,
+  agentSessionId,
+  taskId,
+  role,
   sessionId,
   onClose,
 }: {
-  runId: string;
+  terminalId: string;
+  runId?: string | null;
+  agentSessionId?: string | null;
+  taskId?: string;
+  role?: string;
   sessionId: string | null;
   onClose: () => void;
 }) {
@@ -75,7 +83,7 @@ export function TerminalPane({
           JSON.stringify({
             ch: 'terminal',
             type: 'resize',
-            id: runId,
+            id: terminalId,
             cols: terminal.cols,
             rows: terminal.rows,
           }),
@@ -84,8 +92,13 @@ export function TerminalPane({
     const connect = () => {
       if (stopped) return;
       setState('connecting');
+      const query = new URLSearchParams();
+      if (runId) query.set('runId', runId);
+      if (agentSessionId) query.set('agentSessionId', agentSessionId);
+      if (taskId) query.set('taskId', taskId);
+      if (role) query.set('role', role);
       socket = new WebSocket(
-        `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/terminal?runId=${encodeURIComponent(runId)}`,
+        `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/terminal?${query}`,
       );
       socketRef.current = socket;
       socket.onopen = () => {
@@ -100,7 +113,7 @@ export function TerminalPane({
           return;
         }
 
-        if (message.ch !== 'terminal' || message.id !== runId) return;
+        if (message.ch !== 'terminal' || message.id !== terminalId) return;
         if (message.type === 'opened') {
           interactive = message.mode === 'interactive';
           setState(
@@ -143,7 +156,7 @@ export function TerminalPane({
     const input = terminal.onData((data) => {
       if (interactive && socket?.readyState === WebSocket.OPEN)
         socket.send(
-          JSON.stringify({ ch: 'terminal', type: 'data', id: runId, data: encode(data) }),
+          JSON.stringify({ ch: 'terminal', type: 'data', id: terminalId, data: encode(data) }),
         );
     });
     const resizeObserver = new ResizeObserver(sendResize);
@@ -159,7 +172,7 @@ export function TerminalPane({
       socket?.close();
       terminal.dispose();
     };
-  }, [runId]);
+  }, [agentSessionId, role, runId, taskId, terminalId]);
 
   const closeTerminal = () => {
     socketRef.current?.close(1000, 'terminal panel hidden');
@@ -171,7 +184,7 @@ export function TerminalPane({
       <div className="terminal-panel-head">
         <div>
           <strong>Live Codex terminal</strong>
-          <span>{sessionId ?? runId}</span>
+          <span>{sessionId ?? terminalId}</span>
         </div>
         <div className="terminal-panel-actions">
           <span className={`terminal-state terminal-state-${state}`}>{state}</span>

@@ -24,38 +24,59 @@ function validateWorkspace(workspace) {
   return resolve(workspace);
 }
 
-function launchCommand(command, workspace, launcher) {
-  const args = [workspace];
+export function resolveViewerLaunch({ command, application, platform = process.platform }) {
+  const lookup = platform === 'win32' ? 'where' : 'which';
 
   try {
-    if (!launcher) {
-      const lookup = process.platform === 'win32' ? 'where' : 'which';
+    execFileSync(lookup, [command], { stdio: 'ignore' });
 
-      execFileSync(lookup, [command], { stdio: 'ignore' });
-    }
+    return { command, argsPrefix: [] };
+  } catch (error) {
+    const applicationPath = application ? `/Applications/${application}.app` : null;
+
+    if (platform === 'darwin' && applicationPath && existsSync(applicationPath))
+      return { command: 'open', argsPrefix: ['-a', application] };
+    throw error;
+  }
+}
+
+function launchCommand(command, workspace, launcher, options = {}) {
+  let launch = { command, argsPrefix: [] };
+
+  try {
+    if (!launcher) launch = resolveViewerLaunch({ command, ...options });
+    const args = [...launch.argsPrefix, workspace];
     const child =
-      launcher?.(command, args, {
+      launcher?.(launch.command, args, {
         cwd: workspace,
         shell: false,
         stdio: 'ignore',
         detached: true,
-      }) ?? spawn(command, args, { cwd: workspace, stdio: 'ignore', detached: true });
+      }) ?? spawn(launch.command, args, { cwd: workspace, stdio: 'ignore', detached: true });
 
     if (!child) return unavailable(command, 'no viewer launcher is available', 'LAUNCHER_MISSING');
     child.on?.('error', () => {});
     child.unref?.();
 
-    return { state: 'opened', command: [command, ...args], pid: child.pid ?? null };
+    return { state: 'opened', command: [launch.command, ...args], pid: child.pid ?? null };
   } catch (error) {
     return unavailable(command, error instanceof Error ? error.message : 'viewer failed to start');
   }
 }
 
 export class CommandChangeViewer {
-  constructor({ id, command, launcher = null } = {}) {
+  constructor({
+    id,
+    command,
+    application = null,
+    launcher = null,
+    platform = process.platform,
+  } = {}) {
     this.id = id;
     this.command = command;
+    this.application = application;
     this.launcher = launcher;
+    this.platform = platform;
     this.fallback = true;
   }
 
@@ -67,7 +88,10 @@ export class CommandChangeViewer {
     } catch (error) {
       return unavailable(this.id, error.message, 'WORKSPACE_INVALID');
     }
-    const result = launchCommand(this.command, resolved, this.launcher);
+    const result = launchCommand(this.command, resolved, this.launcher, {
+      application: this.application,
+      platform: this.platform,
+    });
 
     return { ...result, viewer: this.id, workspace: resolved };
   }
@@ -162,8 +186,20 @@ export function createChangeViewerRegistry({
   return new ChangeViewerRegistry({
     explicit,
     viewers: [
-      new CommandChangeViewer({ id: 'cursor', command: 'cursor', launcher }),
-      new CommandChangeViewer({ id: 'vscode', command: 'code', launcher }),
+      new CommandChangeViewer({
+        id: 'cursor',
+        command: 'cursor',
+        application: 'Cursor',
+        launcher,
+        platform,
+      }),
+      new CommandChangeViewer({
+        id: 'vscode',
+        command: 'code',
+        application: 'Visual Studio Code',
+        launcher,
+        platform,
+      }),
       new WorktreePathViewer({ copy, platform }),
     ],
   });
