@@ -1,14 +1,14 @@
 ---
 id: CLEW-074
 title: v0.4 upgrade, acceptance, and release
-status: in_review
+status: superseded
 release: v0.4
 priority: P0
 size: L
 depends_on: [CLEW-069, CLEW-070, CLEW-071, CLEW-072, CLEW-073]
 parallel_group: null
 owner: null
-updated: 2026-08-28
+updated: 2026-09-02
 evidence_policy: v1
 ---
 
@@ -111,10 +111,11 @@ Primary ownership: cross-component acceptance, release documentation, package co
 
 ## Blockers
 
-Commit, CI on `main`, tag, and publication were intentionally not performed because the operator requested no commit.
+None. The standalone `v0.4.0` publication gate was superseded by the cumulative `v0.5.0` release.
 
 ## Completion record
 
 - Implementation: v0.4.0 package integration with Preact UI, daemon static serving/bootstrap, API/Task Thread/WebSocket wiring, migration coverage, and installed-package acceptance.
 - Verification: local `npm run check`, production browser smoke, dependency audit, and installed daemon/API/UI/WS/restart acceptance passed on 2026-08-28; live Codex smoke is optional and skipped without explicit provider credentials.
 - Release evidence: [RELEASE-0.4.md](../RELEASE-0.4.md).
+- Supersession: the implemented v0.4 control-plane scope shipped cumulatively in tagged GitHub release `v0.5.0` on 2026-09-02.

@@ -176,6 +176,12 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     runId: typeof latestRun?.id === 'string' ? latestRun.id : null,
     runStatus: typeof latestRun?.status === 'string' ? latestRun.status : null,
     terminalAvailable: latestRun?.terminalAvailable === true,
+    terminalAccess:
+      latestRun?.terminalAccess === 'runner_local'
+        ? 'runner_local'
+        : latestRun?.terminalAccess === 'controller_local'
+          ? 'controller_local'
+          : 'unavailable',
     terminalActive: latestRun?.terminalActive === true,
     interactionStatus:
       typeof latestRun?.interactionStatus === 'string' ? latestRun.interactionStatus : null,

@@ -4,6 +4,15 @@
 
 No changes yet.
 
+## 0.6.0
+
+- Added protocol-v1 contracts for one authenticated Controller/Runner connection with bounded envelopes, compatibility negotiation, TLS enforcement, idempotency, and lease epoch fencing.
+- Added the foreground Runner service, stable identity, standalone configuration, local process ownership, durable outbox/inbound ledger, reconnect, heartbeat, cancellation, and safe diagnostics.
+- Added the Controller Runner gateway, durable lease/command/result migration, health projection, restart reconciliation, and explicit ambiguous-loss recovery.
+- Added Scheduler `--execution paired` support with Standard review/retry and Deep Runner-side planning, approval-gated DAG execution, isolated Runner worktrees, dependency integration, and final review while preserving local execution as the default.
+- Kept native credentials, repository paths, raw output, and terminal bytes on the Runner host; remote terminal streaming remains out of scope.
+- Added populated v0.5 migration coverage, product-version fencing, heartbeat recovery, dropped/reordered/replayed-frame coverage, separate-process installed acceptance, and a passing live Codex Runner smoke.
+
 ## 0.5.0
 
 The headline feature of this release is an interactive terminal for native Codex workers.

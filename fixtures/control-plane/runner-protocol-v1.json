@@ -1,0 +1,33 @@
+{
+  "compatibility": {
+    "controller": { "protocolVersions": [1], "requiredCapabilities": ["execute"] },
+    "runner": {
+      "protocolVersions": [1],
+      "productVersion": "0.6.0",
+      "capabilities": ["execute", "runner_local_terminal"]
+    }
+  },
+  "registration": {
+    "version": 1,
+    "kind": "runner.register",
+    "direction": "runner_to_controller",
+    "messageId": "message-register-1",
+    "idempotencyKey": "runner-1:registration",
+    "correlationId": "connection-1",
+    "sentAt": "2026-09-02T00:00:00.000Z",
+    "payloadVersion": 1,
+    "payload": {
+      "runnerId": "runner-1",
+      "productVersion": "0.6.0",
+      "protocolVersions": [1],
+      "capabilities": ["execute", "runner_local_terminal"],
+      "workspaces": [{ "id": "clew", "capabilities": ["codex", "fake"] }]
+    }
+  },
+  "lease": {
+    "leaseId": "lease-1",
+    "runnerId": "runner-1",
+    "epoch": 1,
+    "state": "offered"
+  }
+}

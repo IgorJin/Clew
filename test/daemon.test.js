@@ -201,8 +201,10 @@ test('local daemon authenticates API requests and serializes service commands', 
     assert.equal(snapshot.tasks.length, 1);
     assert.equal(snapshot.tasks[0].show.id, 'DAEMON-1');
     assert.equal(snapshot.tasks[0].thread.items[0].kind, 'task_created');
-    daemon.store.appendEvent('DAEMON-1', 'LARGE_EVENT', { value: 'x'.repeat(70_000) });
-    const replay = await websocketEvents(metadata, token, 'LARGE_EVENT');
+    daemon.store.appendEvent('DAEMON-1', 'WORKER_OUTPUT_RECORDED', {
+      value: 'x'.repeat(70_000),
+    });
+    const replay = await websocketEvents(metadata, token, 'WORKER_OUTPUT_RECORDED');
 
     assert.equal(replay.at(-1).payload.value.length, 70_000);
 

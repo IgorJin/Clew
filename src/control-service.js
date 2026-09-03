@@ -25,6 +25,7 @@ import { redactSecrets } from './security.js';
 import { Scheduler } from './scheduler.js';
 import { createSessionSurface, openSessionForRun } from './session-surface.js';
 import { GitWorktreeManager } from './workspace.js';
+import { PairedExecutionPort } from './execution-port.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -195,11 +196,18 @@ async function probeOpenCodeEndpoint(value) {
 }
 
 export class ClewService {
-  constructor({ cwd = process.cwd(), store, config, terminalManager = null }) {
+  constructor({
+    cwd = process.cwd(),
+    store,
+    config,
+    terminalManager = null,
+    runnerGateway = null,
+  }) {
     this.cwd = resolve(cwd);
     this.store = store;
     this.config = config;
     this.terminalManager = terminalManager;
+    this.runnerGateway = runnerGateway;
   }
 
   supports(args) {
@@ -278,6 +286,18 @@ export class ClewService {
                 run.session_id &&
                 run.workspace,
               ),
+            terminalAccess:
+              run.execution_mode === 'paired'
+                ? 'runner_local'
+                : Boolean(terminal) ||
+                    Boolean(
+                      run.status !== RUN_STATUS.RUNNING &&
+                      run.harness === 'codex' &&
+                      run.session_id &&
+                      run.workspace,
+                    )
+                  ? 'controller_local'
+                  : 'unavailable',
             interactionStatus: terminal?.interactionStatus ?? null,
             interactionTurnId: terminal?.interactionTurnId ?? null,
             lastAgentMessage: terminal?.lastAgentMessage ?? null,
@@ -1079,10 +1099,26 @@ export class ClewService {
   scheduler(args, signal) {
     const runtimeConfig = this.resolveCommandConfig(args);
     const manager = new GitWorktreeManager(runtimeConfig.worktreeRoot, this.cwd);
+    const executionMode = getOptionValue(args, '--execution', 'local');
+    let executionPort = null;
+
+    if (executionMode === 'paired') {
+      const runner = this.store.getRunnerProjection();
+
+      if (!this.runnerGateway || !runner)
+        throw new Error('paired execution requires a configured, registered Runner gateway');
+      executionPort = new PairedExecutionPort({
+        store: this.store,
+        transport: this.runnerGateway,
+        runnerId: runner.runnerId,
+      });
+    } else if (executionMode !== 'local')
+      throw new Error(`unsupported execution mode: ${executionMode}`);
 
     return new Scheduler(this.store, manager, {
       signal,
       adapterConfig: { ...runtimeConfig, terminalManager: this.terminalManager },
+      executionPort,
     });
   }
 

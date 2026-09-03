@@ -26,6 +26,7 @@ import { FakeReviewer, CodexReviewer } from './review.js';
 import { FakeArchitect, CodexArchitect } from './architect.js';
 import { verificationEnvironment } from './trust.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
+import { RUNNER_MESSAGE_KIND, createRunnerEnvelope } from './runner-protocol.js';
 
 export class Scheduler {
   constructor(
@@ -42,6 +43,7 @@ export class Scheduler {
       approvalPollMs = 250,
       approvalTimeoutMs = 30 * 60_000,
       adapterConfig = {},
+      executionPort = null,
     } = {},
   ) {
     this.store = store;
@@ -56,6 +58,7 @@ export class Scheduler {
     this.approvalPollMs = approvalPollMs;
     this.approvalTimeoutMs = approvalTimeoutMs;
     this.adapterConfig = adapterConfig;
+    this.executionPort = executionPort;
     this.taskSignals = new Map();
     this.resumeSessions = new Map();
   }
@@ -104,7 +107,9 @@ export class Scheduler {
     const resolvedProfile = resolveProfile(requestedProfile || row.contract.profile);
     const harnessName = requestedHarness || resolvedProfile.harness;
     const profile = { ...resolvedProfile, harness: harnessName };
-    const harness = this.createHarnessAdapter(harnessName);
+
+    const pairedExecution = this.executionPort?.describe().mode === 'paired';
+    const harness = pairedExecution ? null : this.createHarnessAdapter(harnessName);
 
     if (profile.mode === EXECUTION_MODE.PARALLEL && !options.forceSingleWorker)
       return this.runDeep(
@@ -115,6 +120,18 @@ export class Scheduler {
         requestedReviewHarness,
         requestedArchitect,
         taskSignal,
+        options,
+      );
+    if (pairedExecution)
+      return this.runPairedTask(
+        row,
+        profile,
+        harnessName,
+        requestedReviewHarness,
+        requestedArchitect,
+        taskSignal,
+        resumeSessionId,
+        retryFeedback,
         options,
       );
     const stageId = options.stageId ?? 'worker';
@@ -475,6 +492,322 @@ export class Scheduler {
     }
   }
 
+  async runPairedTask(
+    row,
+    profile,
+    harnessName,
+    requestedReviewHarness,
+    requestedArchitect,
+    signal,
+    resumeSessionId,
+    retryFeedback,
+    options = {},
+  ) {
+    const taskId = row.id;
+    const stageId = options.stageId ?? 'worker';
+
+    if (!this.store.listStages(taskId).some((stage) => stage.id === stageId))
+      this.store.addStage(taskId, stageId, [], STAGE_STATUS.QUEUED);
+    if (row.state !== TASK_STATE.QUEUED) this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+    this.store.setTaskState(taskId, TASK_STATE.EXECUTING);
+    const needsReview = profile.review || options.correctionOnly;
+    let stageResult;
+
+    try {
+      stageResult = await this.executePairedStage({
+        task: this.withRetryFeedback(row.contract, retryFeedback),
+        stage: { id: stageId, goal: row.contract.goal, kind: 'worker' },
+        harnessName,
+        policy: profile,
+        signal,
+        resumeSessionId,
+        readOnly: options.readOnly === true,
+        review: needsReview,
+        reviewHarness:
+          requestedReviewHarness ??
+          (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
+        workspaceMappingId: options.workspaceMappingId,
+      });
+    } catch (error) {
+      const currentState = this.store.getTask(taskId).state;
+
+      if (![TASK_STATE.RECOVERING, TASK_STATE.CANCELLED].includes(currentState))
+        this.store.setTaskState(taskId, TASK_STATE.FAILED);
+      throw error;
+    }
+
+    this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
+    this.store.setTaskState(taskId, needsReview ? TASK_STATE.REVIEWING : TASK_STATE.READY);
+
+    if (needsReview) {
+      let review = stageResult.review;
+
+      if (!review && harnessName === HARNESS_NAME.FAKE) {
+        const reviewer = this.createReviewerAdapter(requestedReviewHarness ?? HARNESS_NAME.FAKE);
+
+        review = await reviewer.review({
+          task: row.contract,
+          evidence: stageResult.evidence,
+          revision: stageResult.revision,
+          cwd: stageResult.workspace.path,
+        });
+      }
+      if (!review) throw new Error('paired Runner completed without the required review result');
+      this.store.appendEvent(taskId, 'REVIEW_RECORDED', {
+        ...review,
+        runId: stageResult.runId,
+        stageId,
+      });
+      if (review.verdict === REVIEW_VERDICT.PASS) this.store.setTaskState(taskId, TASK_STATE.READY);
+      else {
+        const reviewAttempt = options.reviewAttempt ?? stageResult.attempt;
+        const requiresHuman = review.verdict === REVIEW_VERDICT.NEEDS_HUMAN;
+        const exhausted =
+          options.correctionOnly || requiresHuman || reviewAttempt >= profile.maxAttempts;
+
+        this.store.setTaskState(
+          taskId,
+          exhausted ? TASK_STATE.WAITING_FOR_HUMAN : TASK_STATE.FAILED,
+        );
+        this.store.appendEvent(taskId, 'CHANGES_REQUESTED', { findings: review.findings });
+        if (exhausted) {
+          this.store.appendEvent(taskId, 'REVIEW_EXHAUSTED', {
+            stageId,
+            runId: stageResult.runId,
+            attempts: reviewAttempt,
+            findings: review.findings,
+            reason: requiresHuman
+              ? 'reviewer reported ambiguity requiring human judgment'
+              : options.correctionOnly
+                ? 'explicit continuation correction completed'
+                : 'automatic review correction budget exhausted',
+          });
+        } else {
+          this.store.appendEvent(taskId, 'RETRY_SCHEDULED', {
+            failedAttempt: reviewAttempt,
+            nextAttempt: reviewAttempt + 1,
+            reason: 'blocking review findings',
+          });
+          this.store.setStage(taskId, stageId, STAGE_STATUS.QUEUED);
+          this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+
+          return this.runTask(
+            taskId,
+            profile.name,
+            harnessName,
+            requestedReviewHarness,
+            requestedArchitect,
+            null,
+            review.findings,
+            { ...options, reviewAttempt: reviewAttempt + 1 },
+          );
+        }
+      }
+    }
+
+    return {
+      taskId,
+      runId: stageResult.runId,
+      attempt: stageResult.attempt,
+      workspace: stageResult.workspace,
+      revision: stageResult.revision,
+      state: this.store.getTask(taskId).state,
+    };
+  }
+
+  async executePairedStage({
+    task,
+    stage,
+    harnessName,
+    policy,
+    signal,
+    resumeSessionId = null,
+    readOnly = false,
+    review = false,
+    reviewHarness = null,
+    operation = 'execute',
+    dependencyRevisions = [],
+    workspaceMappingId = null,
+  }) {
+    const taskId = task.id;
+    const runnerDescription = this.executionPort.describe();
+    const runner = runnerDescription.runner;
+
+    if (!runner || !runnerDescription.available) throw new Error('paired Runner is unavailable');
+    const mappingId = workspaceMappingId ?? runner.workspaces[0]?.id;
+
+    if (!mappingId) throw new Error('paired Runner has no workspace mapping');
+    const runId = randomUUID();
+    const leaseId = randomUUID();
+    const attempt =
+      this.store.listRuns(taskId).filter((run) => run.stage_id === stage.id).length + 1;
+    const requirements = {
+      task: { ...task, title: stage.goal ?? task.title },
+      operation,
+      readOnly,
+      review,
+      reviewHarness,
+      resumeSessionId,
+      model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
+      dependencyRevisions,
+    };
+    const run = {
+      id: runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      status: RUN_STATUS.RUNNING,
+      harness: harnessName,
+      profile: policy?.name ?? task.profile,
+      policy,
+      startedAt: new Date().toISOString(),
+    };
+    const lease = {
+      id: leaseId,
+      runnerId: runner.runnerId,
+      epoch: 1,
+      workspaceMappingId: mappingId,
+      requirements: { capabilities: ['execute'], operation },
+    };
+    const offer = createRunnerEnvelope({
+      kind: RUNNER_MESSAGE_KIND.LEASE_OFFER,
+      messageId: randomUUID(),
+      idempotencyKey: `lease-offer:${leaseId}:1`,
+      correlationId: leaseId,
+      payload: {
+        runnerId: runner.runnerId,
+        leaseId,
+        epoch: 1,
+        taskId,
+        stageId: stage.id,
+        runId,
+        attempt,
+        workspaceId: mappingId,
+        profile: policy?.name ?? task.profile,
+        harness: harnessName,
+        requirements,
+      },
+    });
+
+    await this.executionPort.executeStage({
+      run,
+      lease,
+      offer,
+      requirements: lease.requirements,
+    });
+    let storedResult = null;
+
+    while (!storedResult) {
+      if (signal?.aborted) {
+        const command = createRunnerEnvelope({
+          kind: RUNNER_MESSAGE_KIND.CANCEL,
+          messageId: randomUUID(),
+          idempotencyKey: `lease-cancel:${leaseId}:1`,
+          correlationId: leaseId,
+          payload: {
+            runnerId: runner.runnerId,
+            leaseId,
+            epoch: 1,
+            reason: 'scheduler interrupted',
+          },
+        });
+
+        await this.executionPort.cancelStage({
+          leaseId,
+          reason: 'scheduler interrupted',
+          command,
+        });
+        this.store.finishRun(runId, RUN_STATUS.INTERRUPTED);
+        this.store.setStage(taskId, stage.id, STAGE_STATUS.CANCELLED);
+        throw new HarnessInterruptedError('paired Runner');
+      }
+      const currentLease = this.store.getRunnerLease(leaseId);
+
+      if (currentLease?.state === 'recovering') {
+        this.store.setTaskState(taskId, TASK_STATE.RECOVERING);
+        const error = new Error(
+          `paired Runner execution ${leaseId}@1 has ambiguous ownership; reconnect the same Runner or resolve recovery explicitly`,
+        );
+
+        error.code = 'AMBIGUOUS_RUNNER_LOSS';
+        throw error;
+      }
+      if (currentLease?.state === 'failed' && !this.store.getRunnerLeaseResult(leaseId)) {
+        this.store.finishRun(runId, RUN_STATUS.FAILED);
+        this.store.setStage(taskId, stage.id, STAGE_STATUS.FAILED);
+        throw new Error('paired Runner rejected or failed the lease');
+      }
+      storedResult = this.store.getRunnerLeaseResult(leaseId);
+      if (!storedResult)
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, this.interruptPollMs));
+    }
+    const result = storedResult.result;
+
+    if (result.status !== 'completed') {
+      this.store.finishRun(
+        runId,
+        result.status === 'cancelled' ? RUN_STATUS.INTERRUPTED : RUN_STATUS.FAILED,
+      );
+      this.store.setStage(
+        taskId,
+        stage.id,
+        result.status === 'cancelled' ? STAGE_STATUS.CANCELLED : STAGE_STATUS.FAILED,
+      );
+      throw new Error(`paired Runner ended ${result.status}`);
+    }
+    const revision = result.revision ?? `runner-result:${result.resultId}`;
+    const evidence = this.normalizeVerificationEvidence(task, policy, result.evidence ?? []).map(
+      (item) => ({ ...item, revision }),
+    );
+
+    try {
+      this.assertVerificationPassed(evidence);
+    } catch (error) {
+      this.store.finishRun(runId, RUN_STATUS.FAILED);
+      this.store.setStage(taskId, stage.id, STAGE_STATUS.FAILED);
+      this.store.appendEvent(taskId, 'STAGE_RUN_FAILED', {
+        stageId: stage.id,
+        message: error.message,
+        failureClass: classifyFailure(error),
+      });
+      throw error;
+    }
+    this.store.setRunIdentity(runId, result.sessionId ?? null, result.turnId ?? null);
+    this.store.finishRun(runId, RUN_STATUS.COMPLETED, revision);
+    this.store.setStage(taskId, stage.id, STAGE_STATUS.COMPLETED);
+    this.store.appendEvent(
+      taskId,
+      'VERIFICATION_RECORDED',
+      validateVerificationReport({
+        taskId,
+        stageId: stage.id,
+        runId,
+        attempt,
+        workspace: `runner-workspace:${mappingId}`,
+        revision,
+        evidence,
+        rationale: result.summary ?? 'Paired Runner reported completion',
+        skippedChecks: [],
+      }),
+    );
+
+    return {
+      runId,
+      stageId: stage.id,
+      attempt,
+      workspace: {
+        path: `runner-workspace:${mappingId}`,
+        ref: `runner-workspace:${mappingId}`,
+        access: 'runner_local',
+      },
+      revision,
+      evidence,
+      review: result.review ?? null,
+      plan: result.plan ?? null,
+      leaseId,
+    };
+  }
+
   reconcileSingleWorker(row, requestedSessionId = null) {
     const recoverableStates = [
       TASK_STATE.RECOVERING,
@@ -603,14 +936,37 @@ export class Scheduler {
         architect: this.planFactory ? 'plan-factory' : architectName,
       });
     }
-    const proposedPlan = persistedPlan
-      ? persistedPlan.plan
-      : this.planFactory
-        ? await this.planFactory(row.contract, profile)
-        : await this.createArchitectAdapter(architectName).createPlan({
-            task: row.contract,
-            cwd: this.workspaceManager.projectRoot ?? process.cwd(),
-          });
+    let proposedPlan;
+
+    if (persistedPlan) proposedPlan = persistedPlan.plan;
+    else if (this.planFactory) proposedPlan = await this.planFactory(row.contract, profile);
+    else if (this.executionPort?.describe().mode === 'paired') {
+      const architectStage = {
+        id: 'control-architect',
+        kind: 'architect',
+        goal: `Architecture plan: ${row.contract.title}`,
+      };
+
+      this.store.addStage(taskId, architectStage.id, [], STAGE_STATUS.QUEUED);
+      const planning = await this.executePairedStage({
+        task: row.contract,
+        stage: architectStage,
+        harnessName: architectName,
+        policy: profile,
+        signal: taskSignal,
+        readOnly: true,
+        operation: 'plan',
+        workspaceMappingId: options.workspaceMappingId,
+      });
+
+      if (!planning.plan) throw new Error('paired Runner completed without an execution plan');
+      proposedPlan = planning.plan;
+    } else {
+      proposedPlan = await this.createArchitectAdapter(architectName).createPlan({
+        task: row.contract,
+        cwd: this.workspaceManager.projectRoot ?? process.cwd(),
+      });
+    }
     const plan = validateExecutionPlan(proposedPlan);
     const integrationStage = this.getIntegrationStage(plan);
     const planRecord =
@@ -727,16 +1083,21 @@ export class Scheduler {
     });
     this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
     this.store.setTaskState(taskId, TASK_STATE.REVIEWING);
-    const reviewer = this.createReviewerAdapter(
-      requestedReviewHarness ??
-        (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
-    );
-    const review = await reviewer.review({
-      task: row.contract,
-      evidence: integrationResult.evidence,
-      revision: integrationResult.revision,
-      cwd: integrationResult.workspace.path,
-    });
+    let review = integrationResult.review;
+
+    if (!review) {
+      const reviewer = this.createReviewerAdapter(
+        requestedReviewHarness ??
+          (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
+      );
+
+      review = await reviewer.review({
+        task: row.contract,
+        evidence: integrationResult.evidence,
+        revision: integrationResult.revision,
+        cwd: integrationResult.workspace.path,
+      });
+    }
 
     this.store.appendEvent(taskId, 'REVIEW_RECORDED', {
       ...review,
@@ -942,7 +1303,12 @@ export class Scheduler {
       while (running.size < concurrencyLimit && runnableStages.length) {
         const stage = runnableStages.shift();
         const stageHarnessName = stage.harness ?? harnessName;
-        const stageHarness = stage.harness ? this.createHarnessAdapter(stageHarnessName) : harness;
+        const stageHarness =
+          this.executionPort?.describe().mode === 'paired'
+            ? null
+            : stage.harness
+              ? this.createHarnessAdapter(stageHarnessName)
+              : harness;
 
         pending.delete(stage.id);
         const stageExecution = this.executePlannedStage({
@@ -1026,7 +1392,6 @@ export class Scheduler {
     signal = null,
     resumeSessionId = null,
   }) {
-    let workspace;
     const attempt =
       this.store.listRuns(task.id).filter((run) => run.stage_id === stage.id).length + 1;
 
@@ -1035,6 +1400,43 @@ export class Scheduler {
         dependencies: stage.dependsOn,
       });
     }
+    if (this.executionPort?.describe().mode === 'paired') {
+      const ancestorStageIds = this.getAncestorStageIds(plan, stage.id);
+
+      if (ancestorStageIds.length) {
+        const revisions = ancestorStageIds.map((ancestorId) => completed.get(ancestorId).revision);
+
+        this.store.appendEvent(task.id, 'STAGE_DEPENDENCIES_INTEGRATED', {
+          stageId: stage.id,
+          sourceStages: ancestorStageIds,
+          revisions,
+          mode: 'runner_workspace',
+        });
+        if (stage.id === integrationStageId)
+          this.store.appendEvent(task.id, 'COMMITS_INTEGRATED', {
+            sourceStages: ancestorStageIds,
+            revisions,
+            mode: 'runner_workspace',
+          });
+      }
+
+      return this.executePairedStage({
+        task,
+        stage,
+        harnessName,
+        policy,
+        signal,
+        resumeSessionId,
+        review: stage.id === integrationStageId,
+        reviewHarness: harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : policy.reviewHarness,
+        dependencyRevisions: ancestorStageIds.map(
+          (ancestorId) => completed.get(ancestorId).revision,
+        ),
+      });
+    }
+
+    let workspace;
+
     try {
       workspace = this.workspaceManager.createWorktree(task.id, stage.id, task.base_ref, attempt);
       const ancestorStageIds = this.getAncestorStageIds(plan, stage.id);

@@ -823,7 +823,11 @@ export class CodexHarness {
         input: [
           {
             type: 'text',
-            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.\n\nREAD-ONLY MVP: inspect and report only. Do not create, edit, delete, or commit files. For this task, read package.json and return its contents in your final response.`,
+            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.${
+              readOnly
+                ? '\n\nRead-only operation: inspect and report only. Do not create, edit, delete, or commit files.'
+                : '\n\nImplement the requested changes in this workspace. Do not modify files outside it.'
+            }`,
           },
         ],
       });

@@ -28,7 +28,7 @@ The live terminal and Task Thread currently use different data paths. The termin
 
 Codex CLI `0.148.0` exposes `turn/started` and `turn/completed` in its generated App Server protocol. A read-only `thread/read` against the active persisted thread was verified to return the completed turn and final `agentMessage` while the TUI remained attached. The previously attempted `app-server proxy --sock` path is not a safe basis for this feature because it produced `invalid token` failures in the same installed version.
 
-The accepted design therefore keeps the TUI as the sole writer and observes persisted thread state through an independent stdio App Server reader. See [`../problems/terminal.md`](../problems/terminal.md) for the terminal ownership history and failure analysis.
+The accepted design therefore keeps the TUI as the sole writer and observes persisted thread state through an independent stdio App Server reader. See [`../../problems/terminal.md`](../../problems/terminal.md) for the terminal ownership history and failure analysis.
 
 ## Scope
 

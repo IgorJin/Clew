@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
+const packageVersion = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')).version;
 const sandbox = mkdtempSync(join(tmpdir(), 'clew-installed-'));
 const npmEnvironment = {
   ...process.env,
@@ -45,6 +46,33 @@ async function apiCommand(metadata, args, cookie = null) {
     throw new Error(body.error?.message ?? `API command failed: ${response.status}`);
 
   return body.payload;
+}
+
+async function waitFor(predicate, message, timeoutMs = 10_000) {
+  const started = Date.now();
+
+  while (Date.now() - started < timeoutMs) {
+    const result = await predicate();
+
+    if (result) return result;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`timed out waiting for ${message}`);
+}
+
+function stopChild(child, signal = 'SIGTERM') {
+  if (!child || child.exitCode !== null) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Runner process did not stop')), 5_000);
+
+    child.once('exit', (code, exitSignal) => {
+      clearTimeout(timeout);
+      if (code === 0 || exitSignal === signal) resolve();
+      else reject(new Error(`Runner process exited with ${code ?? exitSignal}`));
+    });
+    child.kill(signal);
+  });
 }
 
 function websocketHandshake(metadata, origin) {
@@ -92,6 +120,8 @@ function websocketHandshake(metadata, origin) {
 }
 
 let daemon = null;
+let runnerProcess = null;
+const originalUserConfig = process.env.CLEW_USER_CONFIG;
 
 try {
   const packed = run('npm', ['pack', '--json', '--pack-destination', sandbox], packageRoot, {
@@ -113,7 +143,12 @@ try {
     'package/migrations/015_continuation_lifecycle.sql',
     'package/migrations/010_telemetry_context.sql',
     'package/migrations/011_usage_costs.sql',
-    'package/RELEASE-0.5.md',
+    'package/RELEASE-0.6.md',
+    'package/migrations/017_runner_leases.sql',
+    'package/src/runner-protocol.js',
+    'package/src/runner-store.js',
+    'package/src/runner-transport.js',
+    'package/src/runner.js',
   ]) {
     if (!listing.includes(required)) throw new Error(`tarball is missing ${required}`);
   }
@@ -132,7 +167,7 @@ try {
     readFileSync(join(sandbox, 'node_modules', 'clew', 'package.json'), 'utf8'),
   );
 
-  if (installedPackageJson.version !== '0.5.0')
+  if (installedPackageJson.version !== packageVersion)
     throw new Error(`installed package version is ${installedPackageJson.version}`);
   const installedAssets = readdirSync(
     join(sandbox, 'node_modules', 'clew', 'ui', 'dist', 'assets'),
@@ -156,9 +191,77 @@ try {
   run(process.execPath, [cli, 'init'], sandbox);
   const installedRoot = join(sandbox, 'node_modules', 'clew');
   const { LocalDaemon } = await import(pathToFileURL(join(installedRoot, 'src', 'daemon.js')).href);
+  const pairedCredential = 'installed-paired-transport-secret';
+  const runnerStateDir = join(sandbox, 'runner-state');
+  const userConfigPath = join(sandbox, 'clew-acceptance-config.json');
 
-  daemon = new LocalDaemon({ cwd: sandbox });
+  writeFileSync(
+    userConfigPath,
+    JSON.stringify({
+      controllerRunner: {
+        runnerId: 'installed-runner',
+        requiredCapabilities: ['execute'],
+      },
+      runner: {
+        id: 'installed-runner',
+        controllerUrl: 'ws://127.0.0.1:1/runner/v1',
+        stateDir: runnerStateDir,
+        workspaces: { installed: sandbox },
+        capabilities: ['execute', 'runner_local_terminal'],
+        reconnect: { minDelayMs: 25, maxDelayMs: 250 },
+      },
+    }),
+  );
+  process.env.CLEW_USER_CONFIG = userConfigPath;
+  process.env.CLEW_CONTROLLER_RUNNER_TOKEN = pairedCredential;
+
+  daemon = new LocalDaemon({ cwd: sandbox, port: 0 });
   let metadata = await daemon.start();
+  const acceptanceConfig = JSON.parse(readFileSync(userConfigPath, 'utf8'));
+
+  acceptanceConfig.runner.controllerUrl = metadata.endpoint.replace(/^http/, 'ws') + '/runner/v1';
+  writeFileSync(userConfigPath, JSON.stringify(acceptanceConfig));
+  runnerProcess = spawn(process.execPath, [cli, 'runner', 'serve'], {
+    cwd: sandbox,
+    env: {
+      ...process.env,
+      CLEW_USER_CONFIG: userConfigPath,
+      CLEW_RUNNER_TOKEN: pairedCredential,
+      CLEW_CONTROLLER_RUNNER_TOKEN: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let runnerStderr = '';
+  let runnerStdout = '';
+  let lastRunnerSnapshot = null;
+
+  runnerProcess.stdout.on('data', (chunk) => {
+    runnerStdout += chunk.toString('utf8');
+  });
+  runnerProcess.stderr.on('data', (chunk) => {
+    runnerStderr += chunk.toString('utf8');
+  });
+  try {
+    await waitFor(async () => {
+      if (runnerProcess.exitCode !== null)
+        throw new Error(`installed Runner exited early: ${runnerStderr.trim()}`);
+      const response = await fetch(`${metadata.endpoint}/api/v1/health`, {
+        headers: { authorization: `Bearer ${readFileSync(metadata.tokenFile, 'utf8').trim()}` },
+      });
+
+      if (!response.ok) return false;
+      const body = await response.json();
+
+      lastRunnerSnapshot = body.runner;
+
+      return body.runner?.connected === true;
+    }, 'installed Runner registration');
+  } catch (error) {
+    throw new Error(
+      `${error.message}; Runner stdout=${runnerStdout.trim()}; Runner stderr=${runnerStderr.trim()}; projection=${JSON.stringify(lastRunnerSnapshot)}`,
+      { cause: error },
+    );
+  }
   const page = await fetch(`${metadata.endpoint}/`);
 
   if (!page.ok || !(await page.text()).includes('Clew / Task control plane'))
@@ -273,12 +376,94 @@ try {
   )
     throw new Error('installed WebSocket accepted a foreign origin');
 
+  for (const profile of ['quick', 'standard', 'deep']) {
+    const taskId = `PAIRED-${profile.toUpperCase()}`;
+
+    await apiCommand(
+      metadata,
+      [
+        'task',
+        'create',
+        '--id',
+        taskId,
+        '--title',
+        `${profile} paired package`,
+        '--goal',
+        'installed paired package acceptance',
+        '--accept',
+        'paired fixture reaches READY',
+        '--profile',
+        profile,
+      ],
+      cookie,
+    );
+    let result = await apiCommand(
+      metadata,
+      ['run', taskId, '--harness', 'fake', '--execution', 'paired'],
+      cookie,
+    );
+
+    if (profile === 'deep') {
+      if (result.state !== 'WAITING_FOR_HUMAN')
+        throw new Error(`paired deep did not wait for approval: ${result.state}`);
+      await apiCommand(metadata, ['approve', taskId], cookie);
+      result = await apiCommand(
+        metadata,
+        ['run', taskId, '--harness', 'fake', '--execution', 'paired'],
+        cookie,
+      );
+    }
+    if (result.state !== 'READY')
+      throw new Error(`${profile} installed paired run ended in ${result.state}`);
+  }
+  const pairedSnapshotResponse = await fetch(`${metadata.endpoint}/api/v1/snapshot`, {
+    headers: { cookie },
+  });
+  const pairedSnapshot = await pairedSnapshotResponse.json();
+
+  const pairedHealth = await (
+    await fetch(`${metadata.endpoint}/api/v1/health`, { headers: { cookie } })
+  ).json();
+
+  if (!pairedHealth.runner?.connected)
+    throw new Error('installed health projection lost the paired Runner');
+  const pairedDeep = pairedSnapshot.tasks.find((task) => task.show.id === 'PAIRED-DEEP');
+
+  if (
+    !pairedDeep?.show.runs.every(
+      (run) => run.execution_mode === 'paired' && run.terminalAccess === 'runner_local',
+    )
+  )
+    throw new Error('installed paired projection did not preserve Runner-local ownership');
+  await stopChild(runnerProcess);
+  runnerProcess = null;
+  const runnerStatus = JSON.parse(
+    run(process.execPath, [cli, 'runner', 'status'], sandbox, {
+      env: {
+        ...process.env,
+        CLEW_USER_CONFIG: userConfigPath,
+        CLEW_RUNNER_TOKEN: pairedCredential,
+        CLEW_CONTROLLER_RUNNER_TOKEN: '',
+      },
+    }),
+  );
+
+  if (runnerStatus.process.running || runnerStatus.process.stale)
+    throw new Error('installed Runner shutdown left a process ownership lock');
+  for (const database of [
+    join(sandbox, '.clew', 'clew.sqlite'),
+    join(runnerStateDir, 'runner.sqlite'),
+  ]) {
+    if (readFileSync(database).includes(Buffer.from(pairedCredential)))
+      throw new Error(`installed persistence leaked the paired credential into ${database}`);
+  }
+
   await daemon.stop();
   daemon = new LocalDaemon({ cwd: sandbox });
   metadata = await daemon.start();
   const restartedTasks = await apiCommand(metadata, ['task', 'list']);
 
-  if (restartedTasks.length !== 3) throw new Error('daemon restart lost or duplicated tasks');
+  if (restartedTasks.length !== 6) throw new Error('daemon restart lost or duplicated tasks');
 
   const version = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')).version;
 
@@ -289,6 +474,10 @@ try {
       .join(', ')}`,
   );
 } finally {
+  await stopChild(runnerProcess).catch(() => {});
   await daemon?.stop();
+  if (originalUserConfig === undefined) delete process.env.CLEW_USER_CONFIG;
+  else process.env.CLEW_USER_CONFIG = originalUserConfig;
+  delete process.env.CLEW_CONTROLLER_RUNNER_TOKEN;
   rmSync(sandbox, { recursive: true, force: true });
 }

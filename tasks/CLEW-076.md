@@ -1,18 +1,18 @@
 ---
 id: CLEW-076
-title: Docker packaging and self-hosted acceptance
+title: Docker packaging and deployment operations
 status: planned
-release: v0.6
+release: v0.7
 priority: P1
 size: L
-depends_on: [CLEW-075]
+depends_on: [CLEW-075, CLEW-080]
 parallel_group: null
 owner: null
-updated: 2026-08-28
+updated: 2026-09-02
 evidence_policy: legacy
 ---
 
-# CLEW-076 — Docker packaging and self-hosted acceptance
+# CLEW-076 — Docker packaging and deployment operations
 
 ## Objective
 
@@ -31,13 +31,13 @@ The Docker container owns control-plane metadata only. Repositories, native harn
 - published Controller/UI Docker image;
 - documented Docker Compose deployment;
 - persistent data volume and migration lifecycle;
-- first-run UI and one-time Runner pairing flow;
+- first-run integration of the pairing flow delivered by `CLEW-080`;
 - reverse-proxy/TLS and origin configuration guidance;
 - backup and restore procedure;
 - Controller upgrade and rollback constraints;
 - installed Runner package and service guidance;
 - network disconnect/reconnect diagnostics;
-- self-hosted acceptance, troubleshooting, release notes, and publication.
+- deployment acceptance and troubleshooting documentation.
 
 ## Out of scope
 
@@ -52,9 +52,9 @@ The Docker container owns control-plane metadata only. Repositories, native harn
 
 - Dockerfile/image and Compose example;
 - persistent storage migration and backup scripts/documentation;
-- pairing UX and operational diagnostics;
+- pairing integration and deployment diagnostics;
 - clean self-hosted acceptance fixture;
-- versioned release artifact and sign-off.
+- versioned container artifact and deployment acceptance evidence.
 
 ## Acceptance criteria
 
@@ -77,7 +77,7 @@ The Docker container owns control-plane metadata only. Repositories, native harn
 
 ## Dependencies and parallelization
 
-Depends on `CLEW-075`. Documentation and Compose fixtures may be prepared earlier, but release acceptance requires the finished transport and credential lifecycle.
+Depends on `CLEW-075` and `CLEW-080`. Documentation and Compose fixtures may be prepared earlier, but release acceptance requires the finished transport and credential lifecycle.
 
 ## Risks
 
@@ -87,7 +87,7 @@ Depends on `CLEW-075`. Documentation and Compose fixtures may be prepared earlie
 
 ## Blockers
 
-Waiting for `CLEW-075`.
+Waiting for `CLEW-075` and `CLEW-080`.
 
 ## Completion record
 

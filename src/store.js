@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import {
   TASK_STATE,
@@ -17,12 +17,21 @@ import { redactSecrets } from './security.js';
 import { evaluateEvidence, verificationEnvironment } from './trust.js';
 import { aggregateUsage, calculateUsageCost, normalizeUsage, snapshotChecksum } from './usage.js';
 import { projectDiagnosticEvents, queryTaskThread } from './thread.js';
+import {
+  LEASE_STATE,
+  RUNNER_MESSAGE_KIND,
+  RUNNER_PROTOCOL_VERSION,
+  assertLeaseTransition,
+  createRunnerEnvelope,
+  validateRunnerEnvelope,
+} from './runner-protocol.js';
 
 export class Store {
   constructor(file) {
     mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.transactionDepth = 0;
+    this.pendingObservedEvents = [];
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     applyMigrations(this.db);
   }
@@ -33,14 +42,20 @@ export class Store {
     if (this.transactionDepth > 0) return operation();
     this.db.exec('BEGIN IMMEDIATE');
     this.transactionDepth += 1;
+    const observedEventOffset = this.pendingObservedEvents.length;
+
     try {
       const result = operation();
 
       this.db.exec('COMMIT');
+      const committedEvents = this.pendingObservedEvents.splice(observedEventOffset);
+
+      for (const event of committedEvents) this.notifyEventObserver(event);
 
       return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
+      this.pendingObservedEvents.splice(observedEventOffset);
       throw error;
     } finally {
       this.transactionDepth -= 1;
@@ -261,6 +276,531 @@ export class Store {
         run.runtimeNamespace ? JSON.stringify(run.runtimeNamespace) : null,
       );
   }
+  registerRunner({
+    runnerId,
+    protocolVersion = RUNNER_PROTOCOL_VERSION,
+    productVersion,
+    capabilities = [],
+    workspaces = [],
+  }) {
+    return this.runInTransaction(() => {
+      const configured = this.db.prepare('SELECT runner_id FROM runner_peers LIMIT 1').get();
+
+      if (configured && configured.runner_id !== runnerId)
+        throw new Error(`configured Runner identity mismatch: ${runnerId}`);
+      const now = new Date().toISOString();
+      const current = this.db
+        .prepare('SELECT connection_generation,registered_at FROM runner_peers WHERE runner_id=?')
+        .get(runnerId);
+      const generation = (current?.connection_generation ?? 0) + 1;
+
+      this.db
+        .prepare(
+          `INSERT INTO runner_peers
+            (runner_id,protocol_version,product_version,capabilities,workspace_mappings,connection_generation,health_status,registered_at,last_seen_at,disconnected_at,updated_at)
+           VALUES (?,?,?,?,?,?, 'healthy', ?,?,NULL,?)
+           ON CONFLICT(runner_id) DO UPDATE SET
+             protocol_version=excluded.protocol_version,
+             product_version=excluded.product_version,
+             capabilities=excluded.capabilities,
+             workspace_mappings=excluded.workspace_mappings,
+             connection_generation=excluded.connection_generation,
+             health_status='healthy',
+             last_seen_at=excluded.last_seen_at,
+             disconnected_at=NULL,
+             updated_at=excluded.updated_at`,
+        )
+        .run(
+          runnerId,
+          protocolVersion,
+          productVersion,
+          JSON.stringify([...new Set(capabilities)].sort()),
+          JSON.stringify(workspaces),
+          generation,
+          current?.registered_at ?? now,
+          now,
+          now,
+        );
+
+      return this.getRunnerProjection(runnerId);
+    });
+  }
+  recordRunnerHeartbeat({ runnerId, connectionGeneration }) {
+    const runner = this.getRunnerProjection(runnerId);
+
+    if (!runner) throw new Error(`Runner is not registered: ${runnerId}`);
+    if (runner.connectionGeneration !== connectionGeneration)
+      throw new Error('stale Runner connection generation');
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare(
+        "UPDATE runner_peers SET health_status='healthy',last_seen_at=?,updated_at=? WHERE runner_id=? AND connection_generation=?",
+      )
+      .run(now, now, runnerId, connectionGeneration);
+
+    return this.getRunnerProjection(runnerId);
+  }
+  getRunnerProjection(runnerId = null) {
+    const row = runnerId
+      ? this.db.prepare('SELECT * FROM runner_peers WHERE runner_id=?').get(runnerId)
+      : this.db.prepare('SELECT * FROM runner_peers LIMIT 1').get();
+
+    if (!row) return null;
+
+    return {
+      runnerId: row.runner_id,
+      protocolVersion: row.protocol_version,
+      productVersion: row.product_version,
+      capabilities: JSON.parse(row.capabilities),
+      workspaces: JSON.parse(row.workspace_mappings),
+      connectionGeneration: row.connection_generation,
+      healthStatus: row.health_status,
+      registeredAt: row.registered_at,
+      lastSeenAt: row.last_seen_at,
+      disconnectedAt: row.disconnected_at,
+    };
+  }
+  markRunnerDisconnected({ runnerId, connectionGeneration = null, reason = 'connection_lost' }) {
+    return this.runInTransaction(() => {
+      const runner = this.getRunnerProjection(runnerId);
+
+      if (!runner) return null;
+      if (connectionGeneration !== null && runner.connectionGeneration !== connectionGeneration)
+        return runner;
+      const now = new Date().toISOString();
+
+      this.db
+        .prepare(
+          "UPDATE runner_peers SET health_status='disconnected',disconnected_at=?,updated_at=? WHERE runner_id=?",
+        )
+        .run(now, now, runnerId);
+      const active = this.db
+        .prepare(
+          'SELECT * FROM runner_leases WHERE runner_id=? AND state IN (?,?) ORDER BY offered_at',
+        )
+        .all(runnerId, LEASE_STATE.ACCEPTED, LEASE_STATE.RUNNING);
+
+      for (const lease of active) {
+        this.transitionRunnerLease(lease, LEASE_STATE.RECOVERING, {
+          details: { classification: 'ambiguous_runner_loss', reason },
+          at: now,
+        });
+        this.db
+          .prepare(
+            'UPDATE runner_leases SET recovery_classification=?,recovery_reason=? WHERE id=?',
+          )
+          .run('ambiguous_runner_loss', reason, lease.id);
+        this.db
+          .prepare("UPDATE tasks SET state='RECOVERING',updated_at=? WHERE id=?")
+          .run(now, lease.task_id);
+        this.appendEvent(lease.task_id, 'RUNNER_RECOVERY_REQUIRED', {
+          leaseId: lease.id,
+          epoch: lease.epoch,
+          runnerId,
+          classification: 'ambiguous_runner_loss',
+          reason,
+        });
+      }
+
+      return this.getRunnerProjection(runnerId);
+    });
+  }
+  reconcileRunnerLeasesOnRestart(reason = 'controller_restart') {
+    const runner = this.getRunnerProjection();
+
+    if (!runner) return { runner: null, recovering: [] };
+    this.markRunnerDisconnected({ runnerId: runner.runnerId, reason });
+
+    return {
+      runner: this.getRunnerProjection(runner.runnerId),
+      recovering: this.listRunnerLeases({ state: LEASE_STATE.RECOVERING }),
+    };
+  }
+  allocateRunnerLease({ run, lease, offer }) {
+    const envelope = validateRunnerEnvelope(offer);
+
+    if (envelope.kind !== RUNNER_MESSAGE_KIND.LEASE_OFFER)
+      throw new Error('Runner lease allocation requires a lease offer');
+
+    return this.runInTransaction(() => {
+      const runner = this.getRunnerProjection(lease.runnerId);
+
+      if (!runner) throw new Error(`Runner is not registered: ${lease.runnerId}`);
+      const stage = this.db
+        .prepare('SELECT * FROM stages WHERE task_id=? AND id=?')
+        .get(run.taskId, run.stageId);
+
+      if (!stage) throw new Error(`stage not found: ${run.taskId}/${run.stageId}`);
+      if (
+        envelope.payload.runnerId !== lease.runnerId ||
+        envelope.payload.leaseId !== lease.id ||
+        envelope.payload.epoch !== lease.epoch ||
+        envelope.payload.runId !== run.id
+      )
+        throw new Error('lease offer does not match allocation');
+      const now = new Date().toISOString();
+
+      this.createRun({ ...run, workspace: null });
+      this.db
+        .prepare(
+          "UPDATE runs SET execution_mode='paired',workspace=NULL,workspace_ref=?,runner_id=? WHERE id=?",
+        )
+        .run(`runner-workspace:${lease.workspaceMappingId}`, lease.runnerId, run.id);
+      this.db
+        .prepare('UPDATE stages SET status=? WHERE task_id=? AND id=?')
+        .run(STAGE_STATUS.RUNNING, run.taskId, run.stageId);
+      this.db
+        .prepare(
+          `INSERT INTO runner_leases
+            (id,task_id,stage_id,run_id,attempt,runner_id,epoch,state,workspace_mapping_id,requirements,offered_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        )
+        .run(
+          lease.id,
+          run.taskId,
+          run.stageId,
+          run.id,
+          run.attempt,
+          lease.runnerId,
+          lease.epoch,
+          LEASE_STATE.OFFERED,
+          lease.workspaceMappingId,
+          JSON.stringify(lease.requirements ?? {}),
+          now,
+          now,
+        );
+      this.db
+        .prepare(
+          `INSERT INTO runner_commands
+            (message_id,idempotency_key,runner_id,lease_id,epoch,kind,payload,status,created_at)
+           VALUES (?,?,?,?,?,?,?,'pending',?)`,
+        )
+        .run(
+          envelope.messageId,
+          envelope.idempotencyKey,
+          lease.runnerId,
+          lease.id,
+          lease.epoch,
+          envelope.kind,
+          JSON.stringify(envelope),
+          now,
+        );
+      this.db
+        .prepare(
+          'INSERT INTO runner_lease_transitions (lease_id,epoch,from_state,to_state,message_id,idempotency_key,details,at) VALUES (?,?,?,?,?,?,?,?)',
+        )
+        .run(
+          lease.id,
+          lease.epoch,
+          null,
+          LEASE_STATE.OFFERED,
+          envelope.messageId,
+          envelope.idempotencyKey,
+          '{}',
+          now,
+        );
+      this.appendEvent(run.taskId, 'RUNNER_LEASE_OFFERED', {
+        leaseId: lease.id,
+        epoch: lease.epoch,
+        runnerId: lease.runnerId,
+        runId: run.id,
+        workspaceMappingId: lease.workspaceMappingId,
+      });
+
+      return this.getRunnerLease(lease.id);
+    });
+  }
+  getRunnerLease(id) {
+    const row = this.db.prepare('SELECT * FROM runner_leases WHERE id=?').get(id);
+
+    return row ? parseRunnerLease(row) : null;
+  }
+
+  getRunnerLeaseResult(leaseId) {
+    const row = this.db
+      .prepare(
+        `SELECT result_id,lease_id,epoch,result,received_at
+         FROM runner_lease_results WHERE lease_id=? ORDER BY received_at DESC LIMIT 1`,
+      )
+      .get(leaseId);
+
+    return row
+      ? {
+          resultId: row.result_id,
+          leaseId: row.lease_id,
+          epoch: row.epoch,
+          result: JSON.parse(row.result),
+          receivedAt: row.received_at,
+        }
+      : null;
+  }
+  listRunnerLeases({ state = null } = {}) {
+    const rows = state
+      ? this.db.prepare('SELECT * FROM runner_leases WHERE state=? ORDER BY offered_at').all(state)
+      : this.db.prepare('SELECT * FROM runner_leases ORDER BY offered_at').all();
+
+    return rows.map(parseRunnerLease);
+  }
+  listPendingRunnerCommands(runnerId) {
+    return this.db
+      .prepare(
+        "SELECT * FROM runner_commands WHERE runner_id=? AND status IN ('pending','sent') ORDER BY created_at,message_id",
+      )
+      .all(runnerId)
+      .map(parseRunnerCommand);
+  }
+  markRunnerCommandSent(messageId) {
+    this.db
+      .prepare("UPDATE runner_commands SET status='sent',sent_at=? WHERE message_id=?")
+      .run(new Date().toISOString(), messageId);
+  }
+  processRunnerEnvelope(input) {
+    const envelope = validateRunnerEnvelope(input);
+
+    if (envelope.kind === RUNNER_MESSAGE_KIND.REGISTER)
+      throw new Error('registration must be handled before Runner frames');
+
+    return this.runInTransaction(() => {
+      const payloadHash = canonicalHash(envelope.payload);
+      const prior = this.db
+        .prepare('SELECT * FROM runner_inbox WHERE runner_id=? AND idempotency_key=?')
+        .get(envelope.payload.runnerId, envelope.idempotencyKey);
+
+      if (prior) {
+        if (prior.payload_hash !== payloadHash || prior.kind !== envelope.kind)
+          throw new Error('Runner idempotency conflict');
+
+        return JSON.parse(prior.response);
+      }
+      const duplicateMessage = this.db
+        .prepare('SELECT payload_hash FROM runner_inbox WHERE runner_id=? AND message_id=?')
+        .get(envelope.payload.runnerId, envelope.messageId);
+
+      if (duplicateMessage) throw new Error('Runner message identity conflict');
+      const response = this.applyRunnerEnvelope(envelope);
+
+      this.db
+        .prepare(
+          `INSERT INTO runner_inbox
+            (runner_id,message_id,idempotency_key,kind,lease_id,epoch,payload_hash,response,processed_at)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
+        )
+        .run(
+          envelope.payload.runnerId,
+          envelope.messageId,
+          envelope.idempotencyKey,
+          envelope.kind,
+          envelope.payload.leaseId ?? null,
+          envelope.payload.epoch ?? null,
+          payloadHash,
+          JSON.stringify(response),
+          new Date().toISOString(),
+        );
+
+      return response;
+    });
+  }
+  applyRunnerEnvelope(envelope) {
+    const payload = envelope.payload;
+    const runner = this.getRunnerProjection(payload.runnerId);
+
+    if (!runner) throw new Error(`Runner is not registered: ${payload.runnerId}`);
+    if (envelope.kind === RUNNER_MESSAGE_KIND.HEARTBEAT) {
+      this.recordRunnerHeartbeat({
+        runnerId: payload.runnerId,
+        connectionGeneration: runner.connectionGeneration,
+      });
+
+      return createRunnerAck(envelope);
+    }
+    const lease = this.db.prepare('SELECT * FROM runner_leases WHERE id=?').get(payload.leaseId);
+
+    if (!lease) throw new Error(`Runner lease not found: ${payload.leaseId}`);
+    if (lease.runner_id !== payload.runnerId) throw new Error('Runner identity mismatch');
+    if (lease.epoch !== payload.epoch) throw new Error('stale lease epoch');
+    const now = new Date().toISOString();
+
+    if (envelope.kind === RUNNER_MESSAGE_KIND.LEASE_ACCEPTED) {
+      this.transitionRunnerLease(lease, LEASE_STATE.ACCEPTED, { envelope, at: now });
+      this.db
+        .prepare(
+          "UPDATE runner_commands SET status='acknowledged',acknowledged_at=? WHERE lease_id=? AND kind=?",
+        )
+        .run(now, lease.id, RUNNER_MESSAGE_KIND.LEASE_OFFER);
+    } else if (envelope.kind === RUNNER_MESSAGE_KIND.LEASE_REJECTED) {
+      this.transitionRunnerLease(lease, LEASE_STATE.FAILED, {
+        envelope,
+        details: { reason: payload.reason },
+        at: now,
+      });
+    } else if (envelope.kind === RUNNER_MESSAGE_KIND.LEASE_STARTED) {
+      this.transitionRunnerLease(lease, LEASE_STATE.RUNNING, { envelope, at: now });
+    } else if (envelope.kind === RUNNER_MESSAGE_KIND.EVENT) {
+      if (![LEASE_STATE.RUNNING, LEASE_STATE.RECOVERING].includes(lease.state))
+        throw new Error(`Runner event is invalid while lease is ${lease.state}`);
+      this.db
+        .prepare(
+          'INSERT INTO runner_lease_events (runner_id,lease_id,epoch,event_id,event,received_at) VALUES (?,?,?,?,?,?)',
+        )
+        .run(
+          payload.runnerId,
+          lease.id,
+          lease.epoch,
+          payload.eventId,
+          JSON.stringify(payload),
+          now,
+        );
+      this.appendEvent(lease.task_id, 'RUNNER_LEASE_EVENT', {
+        leaseId: lease.id,
+        epoch: lease.epoch,
+        eventId: payload.eventId,
+        type: payload.type,
+        at: payload.at,
+        summary: payload.summary ?? null,
+        progress: payload.progress ?? null,
+      });
+    } else if (envelope.kind === RUNNER_MESSAGE_KIND.RESULT) {
+      const resultState = normalizeResultState(payload.status);
+
+      this.transitionRunnerLease(lease, resultState, { envelope, at: now });
+      this.db
+        .prepare(
+          'INSERT INTO runner_lease_results (result_id,lease_id,epoch,result,received_at) VALUES (?,?,?,?,?)',
+        )
+        .run(payload.resultId, lease.id, lease.epoch, JSON.stringify(payload), now);
+      this.db
+        .prepare('UPDATE runner_leases SET result_received_at=?,acknowledged_at=? WHERE id=?')
+        .run(now, now, lease.id);
+      this.appendEvent(lease.task_id, 'RUNNER_RESULT_RECEIVED', safeResultProjection(payload));
+    } else if (envelope.kind === RUNNER_MESSAGE_KIND.CANCEL_ACK) {
+      const terminal = [LEASE_STATE.COMPLETED, LEASE_STATE.FAILED, LEASE_STATE.CANCELLED].includes(
+        lease.state,
+      );
+
+      if (!terminal)
+        this.transitionRunnerLease(lease, LEASE_STATE.CANCELLED, {
+          envelope,
+          details: { acknowledgement: payload.status },
+          at: now,
+        });
+      else if (payload.status !== 'already_terminal')
+        throw new Error(`Runner cancellation acknowledgment conflicts with ${lease.state} lease`);
+      this.db
+        .prepare(
+          "UPDATE runner_leases SET cancellation_state='acknowledged',cancel_acknowledged_at=? WHERE id=?",
+        )
+        .run(now, lease.id);
+      this.db
+        .prepare(
+          "UPDATE runner_commands SET status='acknowledged',acknowledged_at=? WHERE lease_id=? AND kind=?",
+        )
+        .run(now, lease.id, RUNNER_MESSAGE_KIND.CANCEL);
+    } else {
+      throw new Error(`unsupported Runner frame: ${envelope.kind}`);
+    }
+
+    return createRunnerAck(envelope);
+  }
+  transitionRunnerLease(lease, nextState, { envelope = null, details = {}, at } = {}) {
+    assertLeaseTransition(
+      {
+        leaseId: lease.id,
+        runnerId: lease.runner_id,
+        epoch: lease.epoch,
+        state: lease.state,
+      },
+      {
+        leaseId: lease.id,
+        runnerId: lease.runner_id,
+        epoch: lease.epoch,
+        state: nextState,
+      },
+    );
+    const timestamp = at ?? new Date().toISOString();
+    const timestampColumn =
+      nextState === LEASE_STATE.ACCEPTED
+        ? 'accepted_at'
+        : nextState === LEASE_STATE.RUNNING
+          ? 'running_at'
+          : null;
+
+    this.db
+      .prepare(
+        `UPDATE runner_leases SET state=?,updated_at=?${timestampColumn ? `,${timestampColumn}=?` : ''} WHERE id=?`,
+      )
+      .run(
+        ...(timestampColumn
+          ? [nextState, timestamp, timestamp, lease.id]
+          : [nextState, timestamp, lease.id]),
+      );
+    this.db
+      .prepare(
+        'INSERT INTO runner_lease_transitions (lease_id,epoch,from_state,to_state,message_id,idempotency_key,details,at) VALUES (?,?,?,?,?,?,?,?)',
+      )
+      .run(
+        lease.id,
+        lease.epoch,
+        lease.state,
+        nextState,
+        envelope?.messageId ?? null,
+        envelope?.idempotencyKey ?? null,
+        JSON.stringify(details),
+        timestamp,
+      );
+    this.appendEvent(lease.task_id, 'RUNNER_LEASE_STATE_CHANGED', {
+      leaseId: lease.id,
+      epoch: lease.epoch,
+      runnerId: lease.runner_id,
+      from: lease.state,
+      state: nextState,
+      ...details,
+    });
+  }
+  requestRunnerLeaseCancellation({ leaseId, reason, envelope }) {
+    const command = validateRunnerEnvelope(envelope);
+
+    if (command.kind !== RUNNER_MESSAGE_KIND.CANCEL)
+      throw new Error('Runner cancellation requires a cancel command');
+
+    return this.runInTransaction(() => {
+      const lease = this.db.prepare('SELECT * FROM runner_leases WHERE id=?').get(leaseId);
+
+      if (!lease) throw new Error(`Runner lease not found: ${leaseId}`);
+      if (command.payload.leaseId !== leaseId || command.payload.epoch !== lease.epoch)
+        throw new Error('cancel command does not match lease fencing identity');
+      const now = new Date().toISOString();
+
+      this.db
+        .prepare(
+          `INSERT INTO runner_commands
+            (message_id,idempotency_key,runner_id,lease_id,epoch,kind,payload,status,created_at)
+           VALUES (?,?,?,?,?,?,?,'pending',?)`,
+        )
+        .run(
+          command.messageId,
+          command.idempotencyKey,
+          lease.runner_id,
+          lease.id,
+          lease.epoch,
+          command.kind,
+          JSON.stringify(command),
+          now,
+        );
+      this.db
+        .prepare(
+          "UPDATE runner_leases SET cancellation_state='requested',cancel_requested_at=?,updated_at=? WHERE id=?",
+        )
+        .run(now, now, lease.id);
+      this.appendEvent(lease.task_id, 'RUNNER_CANCEL_REQUESTED', {
+        leaseId: lease.id,
+        epoch: lease.epoch,
+        reason,
+      });
+
+      return this.getRunnerLease(lease.id);
+    });
+  }
   setRunIdentity(id, sessionId, turnId = null) {
     this.db.prepare('UPDATE runs SET session_id=?,turn_id=? WHERE id=?').run(sessionId, turnId, id);
   }
@@ -435,6 +975,10 @@ export class Store {
     this.db
       .prepare('INSERT INTO events (task_id,type,payload,at,version) VALUES (?,?,?,?,1)')
       .run(event.task_id, event.type, JSON.stringify(event.payload), event.at);
+    if (this.transactionDepth > 0) this.pendingObservedEvents.push({ ...event });
+    else this.notifyEventObserver(event);
+  }
+  notifyEventObserver(event) {
     try {
       if (typeof this.eventObserver === 'function') this.eventObserver({ ...event });
       else this.eventObserver?.onEvent?.({ ...event });
@@ -1111,5 +1655,102 @@ function parseRun(run) {
     ...run,
     policy: run.policy ? JSON.parse(run.policy) : null,
     runtimeNamespace: run.runtime_namespace ? JSON.parse(run.runtime_namespace) : null,
+  };
+}
+
+function parseRunnerLease(row) {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    stageId: row.stage_id,
+    runId: row.run_id,
+    attempt: row.attempt,
+    runnerId: row.runner_id,
+    epoch: row.epoch,
+    state: row.state,
+    cancellationState: row.cancellation_state,
+    workspaceMappingId: row.workspace_mapping_id,
+    requirements: JSON.parse(row.requirements),
+    recoveryClassification: row.recovery_classification,
+    recoveryReason: row.recovery_reason,
+    offeredAt: row.offered_at,
+    acceptedAt: row.accepted_at,
+    runningAt: row.running_at,
+    resultReceivedAt: row.result_received_at,
+    acknowledgedAt: row.acknowledged_at,
+    cancelRequestedAt: row.cancel_requested_at,
+    cancelAcknowledgedAt: row.cancel_acknowledged_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseRunnerCommand(row) {
+  return {
+    messageId: row.message_id,
+    idempotencyKey: row.idempotency_key,
+    runnerId: row.runner_id,
+    leaseId: row.lease_id,
+    epoch: row.epoch,
+    kind: row.kind,
+    envelope: JSON.parse(row.payload),
+    status: row.status,
+    createdAt: row.created_at,
+    sentAt: row.sent_at,
+    acknowledgedAt: row.acknowledged_at,
+  };
+}
+
+function canonicalHash(value) {
+  return createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object')
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+
+  return JSON.stringify(value);
+}
+
+function createRunnerAck(envelope) {
+  const digest = createHash('sha256')
+    .update(`${envelope.payload.runnerId}:${envelope.idempotencyKey}`)
+    .digest('hex')
+    .slice(0, 32);
+
+  return createRunnerEnvelope({
+    kind: RUNNER_MESSAGE_KIND.ACK,
+    messageId: `ack-${digest}`,
+    idempotencyKey: `ack-${digest}`,
+    correlationId: envelope.correlationId,
+    payload: {
+      runnerId: envelope.payload.runnerId,
+      ackedMessageId: envelope.messageId,
+    },
+  });
+}
+
+function normalizeResultState(status) {
+  const normalized = String(status).toLowerCase();
+
+  if (['completed', 'success', 'succeeded'].includes(normalized)) return LEASE_STATE.COMPLETED;
+  if (['failed', 'failure'].includes(normalized)) return LEASE_STATE.FAILED;
+  if (['cancelled', 'canceled'].includes(normalized)) return LEASE_STATE.CANCELLED;
+  throw new Error(`unsupported Runner result status: ${status}`);
+}
+
+function safeResultProjection(payload) {
+  return {
+    leaseId: payload.leaseId,
+    epoch: payload.epoch,
+    resultId: payload.resultId,
+    status: payload.status,
+    summary: payload.summary ?? null,
+    revision: payload.revision ?? null,
+    evidence: payload.evidence ?? null,
+    usage: payload.usage ?? null,
   };
 }

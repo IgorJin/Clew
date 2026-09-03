@@ -1,6 +1,6 @@
 # Clew task cards
 
-This directory is the operational source of truth for active and planned task status. [`../tasks.md`](../tasks.md) remains the historical completion ledger and compact backlog; [`../ROADMAP.md`](../ROADMAP.md) defines release outcomes and dependency order.
+This directory is the operational source of truth for active and planned task status. Completed cards live in [`done/`](./done/). [`../tasks.md`](../tasks.md) remains the historical completion ledger and compact backlog; [`../ROADMAP.md`](../ROADMAP.md) defines release outcomes and dependency order.
 
 ## Status workflow
 
@@ -49,23 +49,30 @@ Human-authorized transitions are valid product behavior when the card calls for 
 
 ## Current index
 
-| Task                      | Release | Status    | Depends on    | Parallel group     |
-| ------------------------- | ------- | --------- | ------------- | ------------------ |
-| [CLEW-042](./CLEW-042.md) | v0.3    | done      | —             | —                  |
-| [CLEW-043](./CLEW-043.md) | v0.3    | done      | CLEW-042      | —                  |
-| [CLEW-067](./CLEW-067.md) | v0.3    | ready     | 042, 043      | —                  |
-| [CLEW-068](./CLEW-068.md) | v0.4    | done      | 067           | —                  |
-| [CLEW-069](./CLEW-069.md) | v0.4    | done      | 068           | v0.4-control-plane |
-| [CLEW-070](./CLEW-070.md) | v0.4    | done      | 068           | v0.4-control-plane |
-| [CLEW-071](./CLEW-071.md) | v0.4    | ready     | 068           | v0.4-control-plane |
-| [CLEW-072](./CLEW-072.md) | v0.4    | ready     | 068           | v0.4-control-plane |
-| [CLEW-073](./CLEW-073.md) | v0.4    | in_review | 068           | v0.4-control-plane |
-| [CLEW-074](./CLEW-074.md) | v0.4    | planned   | 069–073       | —                  |
-| [CLEW-075](./CLEW-075.md) | v0.6    | planned   | 074           | —                  |
-| [CLEW-076](./CLEW-076.md) | v0.6    | planned   | 075           | —                  |
-| [CLEW-077](./CLEW-077.md) | v0.5    | done      | 078, 079      | —                  |
-| [CLEW-078](./CLEW-078.md) | v0.5    | done      | 068, 069, 072 | —                  |
-| [CLEW-079](./CLEW-079.md) | v0.5    | done      | 078           | —                  |
+| Task                           | Release | Status     | Depends on    | Parallel group     |
+| ------------------------------ | ------- | ---------- | ------------- | ------------------ |
+| [CLEW-042](./done/CLEW-042.md) | v0.3    | done       | —             | —                  |
+| [CLEW-043](./done/CLEW-043.md) | v0.3    | done       | CLEW-042      | —                  |
+| [CLEW-067](./done/CLEW-067.md) | v0.3    | done       | 042, 043      | —                  |
+| [CLEW-068](./done/CLEW-068.md) | v0.4    | done       | 067           | —                  |
+| [CLEW-069](./done/CLEW-069.md) | v0.4    | done       | 068           | v0.4-control-plane |
+| [CLEW-070](./done/CLEW-070.md) | v0.4    | done       | 068           | v0.4-control-plane |
+| [CLEW-071](./done/CLEW-071.md) | v0.4    | done       | 068           | v0.4-control-plane |
+| [CLEW-072](./done/CLEW-072.md) | v0.4    | done       | 068           | v0.4-control-plane |
+| [CLEW-073](./done/CLEW-073.md) | v0.4    | done       | 068           | v0.4-control-plane |
+| [CLEW-074](./CLEW-074.md)      | v0.4    | superseded | 069–073       | —                  |
+| [CLEW-075](./done/CLEW-075.md) | v0.6    | done       | 077           | —                  |
+| [CLEW-076](./CLEW-076.md)      | v0.7    | planned    | 075, 080      | —                  |
+| [CLEW-077](./done/CLEW-077.md) | v0.5    | done       | 078, 079      | —                  |
+| [CLEW-078](./done/CLEW-078.md) | v0.5    | done       | 068, 069, 072 | —                  |
+| [CLEW-079](./done/CLEW-079.md) | v0.5    | done       | 078           | —                  |
+| [CLEW-080](./CLEW-080.md)      | v0.7    | planned    | 075           | —                  |
+| [CLEW-081](./CLEW-081.md)      | v0.7    | planned    | 075, 076, 080 | —                  |
+| [CLEW-082](./done/CLEW-082.md) | v0.6    | done       | 077           | —                  |
+| [CLEW-083](./done/CLEW-083.md) | v0.6    | done       | 082           | v0.6-transport     |
+| [CLEW-084](./done/CLEW-084.md) | v0.6    | done       | 082           | v0.6-transport     |
+| [CLEW-085](./done/CLEW-085.md) | v0.6    | done       | 083, 084      | —                  |
+| [CLEW-086](./done/CLEW-086.md) | v0.6    | done       | 082–085       | —                  |
 
 ## Execution waves
 
@@ -74,9 +81,13 @@ Wave 0: CLEW-067
 Wave 1: CLEW-068
 Wave 2: CLEW-069 + 070 + 071 + 072 + 073
 Wave 3: CLEW-074
-Wave 4: CLEW-075
-Wave 5: CLEW-076
-Interactive response slice: CLEW-078 → CLEW-079 → CLEW-077 acceptance
+Completed v0.6: CLEW-075
+Wave 4: CLEW-082 (done)
+Wave 5: CLEW-083 + CLEW-084 (done)
+Wave 6: CLEW-085 (done)
+Wave 7: CLEW-086 (done)
+Next v0.7: CLEW-080 → CLEW-076 → CLEW-081
+Completed interactive response slice: CLEW-078 → CLEW-079 → CLEW-077
 ```
 
 The Wave 2 tasks deliberately own separate primary areas to reduce merge conflicts. Their shared contracts and fixtures must land in `CLEW-068` first.

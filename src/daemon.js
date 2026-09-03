@@ -18,7 +18,8 @@ import pino from 'pino';
 import WebSocket, { WebSocketServer } from 'ws';
 import { Store } from './store.js';
 import { ClewService } from './control-service.js';
-import { loadConfig } from './config.js';
+import { loadConfig, loadControllerRunnerConfig } from './config.js';
+import { ControllerRunnerGateway } from './controller-runner-gateway.js';
 import { Observability } from './observability.js';
 import { TerminalSessionManager } from './terminal-manager.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
@@ -179,6 +180,7 @@ export class LocalDaemon {
     this.observability = null;
     this.logger = null;
     this.terminalManager = null;
+    this.runnerGateway = null;
     this.running = false;
     this.commandQueue = Promise.resolve();
   }
@@ -229,14 +231,27 @@ export class LocalDaemon {
       terminalManager: this.terminalManager,
     });
     this.server = createServer((request, response) => this.handle(request, response));
+    const runnerConfig = loadControllerRunnerConfig();
+
+    if (runnerConfig) {
+      this.store.reconcileRunnerLeasesOnRestart();
+      this.runnerGateway = new ControllerRunnerGateway({
+        store: this.store,
+        productVersion: DAEMON_VERSION,
+        ...runnerConfig,
+      }).attach(this.server);
+      this.control.runnerGateway = this.runnerGateway;
+    }
     this.webSocketServer = new WebSocketServer({
       noServer: true,
       perMessageDeflate: false,
       maxPayload: 1_000_000,
     });
-    this.server.on('upgrade', (request, socket, head) =>
-      this.handleUpgrade(request, socket, head, token),
-    );
+    this.server.on('upgrade', (request, socket, head) => {
+      const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+
+      if (pathname !== '/runner/v1') this.handleUpgrade(request, socket, head, token);
+    });
     this.heartbeat = setInterval(() => {
       for (const client of this.clients.keys()) {
         if (client.isAlive === false) {
@@ -288,6 +303,8 @@ export class LocalDaemon {
     this.clients.clear();
     this.terminalManager?.closeAll();
     this.terminalManager = null;
+    this.runnerGateway?.close();
+    this.runnerGateway = null;
     await new Promise((resolveClose) => this.webSocketServer.close(resolveClose));
     await new Promise((resolveClose) => this.server.close(resolveClose));
     await this.observability?.shutdown();
@@ -377,6 +394,7 @@ export class LocalDaemon {
           endpoint: this.metadata.endpoint,
           stateDirectory: this.stateDir,
           status: 'running',
+          runner: this.runnerGateway?.status() ?? { configured: false, connected: false },
         });
       if (request.method === 'GET' && request.url === '/api/v1/snapshot')
         return json(response, 200, this.control.snapshot());

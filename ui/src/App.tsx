@@ -610,16 +610,27 @@ function App() {
                   </div>
                   <button
                     className="text-button"
-                    disabled={!canMutate || !task.terminalAvailable || !task.runId}
+                    disabled={
+                      !canMutate ||
+                      !task.terminalAvailable ||
+                      !task.runId ||
+                      task.terminalAccess === 'runner_local'
+                    }
                     title={
-                      task.terminalAvailable
-                        ? 'Show the embedded terminal attached to the active Codex thread.'
-                        : 'The managed Codex terminal is not available for this run'
+                      task.terminalAccess === 'runner_local'
+                        ? 'This terminal remains on the Runner host and is not proxied by Controller.'
+                        : task.terminalAvailable
+                          ? 'Show the embedded terminal attached to the active Codex thread.'
+                          : 'The managed Codex terminal is not available for this run'
                     }
                     onClick={() => setTerminalVisible(true)}
                   >
                     <SquareTerminal size={14} />
-                    {task.terminalAvailable ? ' Show live terminal' : ' Terminal unavailable'}
+                    {task.terminalAccess === 'runner_local'
+                      ? ' Terminal is on Runner host'
+                      : task.terminalAvailable
+                        ? ' Show live terminal'
+                        : ' Terminal unavailable'}
                   </button>
                 </section>
               </aside>

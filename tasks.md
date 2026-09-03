@@ -1,10 +1,10 @@
 # Clew — implementation backlog
 
-**Status:** v0.2.0 released; CLEW-042 and CLEW-043 implemented on `main`; CLEW-067 remains for v0.3.0
+**Status:** v0.6.0 release complete; completed detailed cards are archived in [`tasks/done/`](./tasks/done/)
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Clew v0.5.0 interactive terminal release; v0.6 is planned in [`ROADMAP.md`](./ROADMAP.md)
+**Active target:** Clew v0.7.0 pairing operations and self-hosted packaging
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -31,7 +31,7 @@ Detailed cards and canonical status fields for the active roadmap horizon are ma
 | `CLEW-029–036` | Complete | OpenCode adapter, native architect smoke, Deep DAG/routing/integration/review and routed retry            |
 | `CLEW-037–041` | Complete | Security hardening, diagnostics, cancellation/cleanup, acceptance matrix, packaging documentation         |
 
-All work selected for v0.1 and v0.2 is complete. `CLEW-042` and `CLEW-043` are implemented on `main`; `CLEW-067` is the remaining v0.3 release package. Later release outcomes are maintained in `ROADMAP.md`.
+All work through the cumulative v0.6 Controller/Runner release is complete. Active v0.7 pairing and self-hosting work is maintained in [`tasks/`](./tasks/README.md) and [`ROADMAP.md`](./ROADMAP.md).
 
 ## Milestone 0 — Repository foundation
 
@@ -242,12 +242,26 @@ Ownership boundaries minimize merge conflicts:
 - `CLEW-072`: Session Surface and terminal adapters;
 - `CLEW-073`: domain, Store, Scheduler, and CLI continuation workflow.
 
-## v0.6 plan — Self-hosted Controller and paired Runner
+## v0.6 completion — Controller/Runner transport and leases
 
-| ID       | Pri | Size | Work package                                | Depends on | Done when                                                                                                                                                              |
-| -------- | --- | ---- | ------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CLEW-075 | P1  | L    | Controller/Runner split                     | 074        | One paired Runner uses authenticated outbound transport, leases Stages idempotently, and keeps repositories, host access, and credentials local.                       |
-| CLEW-076 | P1  | L    | Docker packaging and self-hosted acceptance | 075        | Docker Controller/UI plus installed local Runner survive pairing, reconnect, upgrade, backup/restore, and clean self-hosted acceptance without privileged host mounts. |
+All six cards are complete. Release evidence includes 174/174 unsandboxed backend tests, 16/16 UI tests, populated v0.5 migration, clean installed separate-process paired acceptance, and a passing live Codex Runner smoke.
+
+| ID       | Pri | Size | Work package                           | Depends on | Done when                                                                                                                                               |
+| -------- | --- | ---- | -------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-075 | P0  | L    | v0.6 parent work package               | 077        | Protocol, Runner, lease authority, paired recovery, migration, and dedicated release evidence satisfy the complete v0.6 acceptance criteria.            |
+| CLEW-082 | P0  | M    | Controller/Runner protocol contracts   | 077        | Envelopes, identities, compatibility, fencing, transport security, payload bounds, and data ownership are fixed by conformance fixtures.                |
+| CLEW-083 | P0  | L    | Runner process and outbound transport  | 082        | Registration, heartbeat, reconnect, durable outbox, inbound idempotency, and local execution ownership survive restart and outage.                      |
+| CLEW-084 | P0  | L    | Controller gateway and lease authority | 082        | Durable lease epochs, fencing, health, restart reconciliation, and local-or-paired Scheduler execution preserve canonical Task semantics.               |
+| CLEW-085 | P0  | L    | Paired delivery and recovery           | 083, 084   | Parity, cancellation, duplicate/reorder handling, restart, reconnect, and ambiguous-loss recovery pass across separate processes.                       |
+| CLEW-086 | P0  | L    | v0.6 transport release acceptance      | 082–085    | Migration, installed paired acceptance, fault matrix, security inspection, local regression, documentation, CI, tag, and publication pass for `v0.6.0`. |
+
+## v0.7 plan — Pairing operations and self-hosted packaging
+
+| ID       | Pri | Size | Work package                               | Depends on    | Done when                                                                                                                                                             |
+| -------- | --- | ---- | ------------------------------------------ | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-080 | P0  | M    | Runner pairing and credential operations   | 075           | Operators can pair, inspect, rotate, revoke, and intentionally replace the one supported Runner without leaking credentials.                                          |
+| CLEW-076 | P1  | L    | Docker packaging and deployment operations | 075, 080      | Docker Controller/UI plus installed local Runner survive pairing, reconnect, upgrade, backup/restore, and clean deployment acceptance without privileged host mounts. |
+| CLEW-081 | P0  | L    | v0.7 self-hosted acceptance and release    | 075, 076, 080 | Migration, pairing, Docker, security, installed-artifact, backup/restore, CI, and publication gates pass for `v0.7.0`.                                                |
 
 ## Later backlog
 

@@ -19,16 +19,12 @@ This document contains planned release outcomes. Implemented guarantees live in 
 Released:
 
 - `v0.1.0`: native harness integration and durable local task engine;
-- `v0.2.0`: result inspection, explicit control, completion, export, cleanup, runtime isolation, and role routing.
+- `v0.2.0`: result inspection, explicit control, completion, export, cleanup, runtime isolation, and role routing;
+- cumulative `v0.5.0`: telemetry and usage accounting, local daemon/API, Task Thread, Web UI, continuation, and interactive Codex terminal lifecycle.
 
-Implemented on `main` after `v0.2.0`:
+Next target:
 
-- [`CLEW-042`](./tasks/CLEW-042.md): optional OpenTelemetry tracing;
-- [`CLEW-043`](./tasks/CLEW-043.md): provider-reported usage and cost accounting.
-
-Remaining before `v0.3.0`:
-
-- [`CLEW-067`](./tasks/CLEW-067.md): upgrade, installed-package acceptance, packaging, release notes, and release publication.
+- `v0.6.0`: Controller/Runner transport and durable leases with one preconfigured Runner.
 
 ## v0.3 — Explainable execution economics
 
@@ -87,7 +83,7 @@ CLEW-068
           CLEW-074  v0.4 release
 ```
 
-### [CLEW-068](./tasks/CLEW-068.md) — Local control plane contracts
+### [CLEW-068](./tasks/done/CLEW-068.md) — Local control plane contracts
 
 Define stable boundaries before parallel runtime and UI work begins.
 
@@ -112,7 +108,7 @@ Done when:
 - compatibility and unknown-field behavior are documented;
 - downstream packages can build against fixtures without importing each other's implementation.
 
-### [CLEW-069](./tasks/CLEW-069.md) — Local daemon and API server
+### [CLEW-069](./tasks/done/CLEW-069.md) — Local daemon and API server
 
 Build a single-user local Controller with an in-process Runner.
 
@@ -137,7 +133,7 @@ Done when:
 - unauthenticated local requests are rejected;
 - daemon restart preserves Task state and does not duplicate native execution.
 
-### [CLEW-070](./tasks/CLEW-070.md) — Task Thread projection
+### [CLEW-070](./tasks/done/CLEW-070.md) — Task Thread projection
 
 Build a deterministic causal read model over the existing append-only event log.
 
@@ -159,7 +155,7 @@ Done when:
 - every Thread item identifies its durable source;
 - projection failure cannot mutate execution state.
 
-### [CLEW-071](./tasks/CLEW-071.md) — React Web UI
+### [CLEW-071](./tasks/done/CLEW-071.md) — React Web UI
 
 Build the first Task-oriented UI against `CLEW-068` fixtures while backend packages proceed independently.
 
@@ -190,7 +186,7 @@ Done when:
 - reload/reconnect preserves Thread order and selected Task;
 - operator actions show confirmation, attribution, and resulting durable state.
 
-### [CLEW-072](./tasks/CLEW-072.md) — Native Session Surface
+### [CLEW-072](./tasks/done/CLEW-072.md) — Native Session Surface
 
 Open the native coding session behind Architect, Worker, or Reviewer without replacing its terminal UX.
 
@@ -212,7 +208,7 @@ Done when:
 - unsupported surfaces degrade explicitly;
 - conformance fixtures cover attach/resume, detach, stale session, and process interruption.
 
-### [CLEW-073](./tasks/CLEW-073.md) — Continue and review exhaustion handoff
+### [CLEW-073](./tasks/done/CLEW-073.md) — Continue and review exhaustion handoff
 
 Make operator continuation a first-class durable workflow independent of the Web UI.
 
@@ -268,9 +264,9 @@ Done when every v0.4 release gate is reproducible from a clean installed package
 
 Included work:
 
-- [`CLEW-078`](./tasks/CLEW-078.md): read-only native turn monitoring;
-- [`CLEW-079`](./tasks/CLEW-079.md): durable worker responses and live operator-attention UI;
-- [`CLEW-077`](./tasks/CLEW-077.md): integrated terminal lifecycle acceptance and release sign-off.
+- [`CLEW-078`](./tasks/done/CLEW-078.md): read-only native turn monitoring;
+- [`CLEW-079`](./tasks/done/CLEW-079.md): durable worker responses and live operator-attention UI;
+- [`CLEW-077`](./tasks/done/CLEW-077.md): integrated terminal lifecycle acceptance and release sign-off.
 
 ### v0.5 release gate
 
@@ -280,64 +276,83 @@ Included work:
 4. `Finish worker` remains the only handoff to verification.
 5. Restart, reconnect, duplicate suppression, package installation, and the production UI build pass.
 
-## v0.6 — Self-hosted Controller and paired Runner
+## v0.6 — Controller/Runner transport and leases
 
-**Outcome:** a user can run the Clew Controller and Web UI in Docker while code, Git, credentials, native harnesses, and terminal access remain on one paired execution machine.
+**Outcome:** Controller and one Runner operate as separate authenticated processes with durable leased execution, while local-first mode remains unchanged. This release proves the distributed correctness boundary without Docker or pairing UX.
 
-### [CLEW-075](./tasks/CLEW-075.md) — Controller/Runner split
+The v0.6 Runner uses one preconfigured identity and pre-shared credential. Terminal processes stay local to the Runner host; Clew does not proxy PTY bytes through Controller.
 
-Extract the local Runner boundary without changing Task semantics.
+```text
+CLEW-082  protocol contracts
+    ├── CLEW-083  Runner process + outbound transport
+    └── CLEW-084  Controller gateway + lease authority
+                 ↓
+             CLEW-085  paired delivery + recovery
+                 ↓
+             CLEW-086  v0.6 acceptance + release
+```
 
-Scope:
+### [CLEW-075](./tasks/done/CLEW-075.md) — v0.6 work package
 
-- one Runner per Controller;
-- outbound authenticated WebSocket connection;
-- one-time pairing token and durable Runner credentials;
-- capability registration;
-- leased Stage assignment, heartbeat, cancellation, and result upload;
-- stable `runner_id` on execution records;
-- reconnect and duplicate-delivery idempotency;
-- no direct Controller access to host filesystem, Docker socket, or harness credentials.
+The parent work package defines ownership, protocol guarantees, lease semantics, security boundaries, complete acceptance criteria, and release scope. It is complete only when `CLEW-082`–`086` pass.
 
-Done when:
+### [CLEW-082](./tasks/done/CLEW-082.md) — Protocol contracts
 
-- the same acceptance Task produces equivalent results through local in-process and remote paired Runner modes;
-- disconnect cannot create a second logical Run;
-- revoked credentials prevent reconnect;
-- secrets and repository contents stay on the Runner unless explicitly included in a normalized result.
+Freeze versioned envelopes, identities, compatibility, lease transitions, fencing, transport security, payload bounds, and the Controller/Runner data allowlist.
 
-### [CLEW-076](./tasks/CLEW-076.md) — Docker packaging and self-hosted acceptance
+### [CLEW-083](./tasks/done/CLEW-083.md) — Runner process and outbound transport
 
-Package and document the self-hosted topology.
+Build the Runner service, authenticated outbound WebSocket, registration, heartbeat, reconnect, durable outbox, inbound idempotency, and local execution/session ownership.
 
-Scope:
+### [CLEW-084](./tasks/done/CLEW-084.md) — Controller gateway and lease authority
 
-- Docker image and Compose example for Controller/UI;
-- persistent storage and upgrade procedure;
-- pairing UX in Web UI and CLI;
-- TLS/reverse-proxy guidance;
-- backup and restore documentation;
-- installed Runner package;
-- degraded network and reconnect acceptance;
-- self-hosted release notes and troubleshooting.
+Build the authenticated Runner gateway, durable lease/epoch state, fencing, health projection, restart reconciliation, and local-or-paired Scheduler execution port.
 
-Done when:
+### [CLEW-085](./tasks/done/CLEW-085.md) — Paired execution delivery and recovery
 
-- a clean Docker deployment pairs one local Runner and completes a Task;
-- Controller replacement with restored persistent data preserves history;
-- Runner disconnect/reconnect is recoverable and auditable;
-- no privileged host mount is required by the Controller container.
+Integrate separate Controller and Runner processes through Quick, Standard, and Deep flows, cancellation, duplicate/reordered delivery, restart, reconnect, explicit ambiguous-loss recovery, and Runner-local terminal capability.
+
+### [CLEW-086](./tasks/done/CLEW-086.md) — v0.6 transport release acceptance
+
+Own the v0.5 migration, clean installed paired acceptance, fault matrix, security/package inspection, local regression proof, optional Runner-host Codex smoke, release notes, CI, tag, and publication.
 
 ### v0.6 release gate
 
-1. Local-first mode remains supported and simpler than self-hosting.
-2. Docker deployment is reproducible from published artifacts.
-3. Pairing credentials are rotatable and revocable.
-4. Controller/Runner transport survives reconnect and duplicate delivery.
-5. A Controller compromise does not automatically expose host credentials or arbitrary filesystem access.
-6. One-Runner scope is explicit; multi-runner scheduling remains deferred.
+1. One authenticated Runner registers outbound with stable identity, compatible versions, capabilities, and workspace mappings.
+2. Local and paired fake-harness Quick, Standard, and Deep produce equivalent canonical outcomes.
+3. Every remote Stage has one durable lease identity and epoch; stale or replayed messages cannot mutate canonical state.
+4. Disconnect and restart at every lease boundary never cause automatic duplicate execution.
+5. Ambiguous Runner loss becomes an explicit recovery state rather than silent reassignment.
+6. Controller receives no Runner/harness credentials, arbitrary repository files, environment values, or PTY bytes.
+7. Local-first mode remains the default and its existing release gates stay green.
+8. The release explicitly documents pre-shared credentials, one Runner, Runner-local terminal access, no Docker, and no failover.
 
-## Research queue after v0.6
+## v0.7 — Pairing operations and self-hosted packaging
+
+**Outcome:** a user can deploy Controller/UI with Docker, pair one local Runner through an operator-friendly credential lifecycle, and preserve history across upgrades and backup/restore.
+
+### [CLEW-080](./tasks/CLEW-080.md) — Runner pairing and credential operations
+
+Add single-use pairing codes, pair/status/rotate/revoke/replace operations, CLI/UI health views, restrictive credential storage, and restart-safe revocation.
+
+### [CLEW-076](./tasks/CLEW-076.md) — Docker packaging and deployment operations
+
+Add the Controller/UI image, Compose, persistent volumes, pairing integration, TLS/reverse-proxy guidance, backup/restore, installed Runner guidance, and deployment diagnostics.
+
+### [CLEW-081](./tasks/CLEW-081.md) — v0.7 self-hosted acceptance and release
+
+Own the v0.6 migration, clean Docker deployment, pairing/revocation, upgrade, backup/restore, image/package inspection, release notes, CI, and publication.
+
+### v0.7 release gate
+
+1. Local-first and preconfigured paired modes remain supported.
+2. Docker deployment is reproducible from published artifacts.
+3. Pairing credentials are single-use, rotatable, revocable, and secret-safe.
+4. Controller replacement with restored data preserves history and Runner trust state.
+5. No privileged host mount, Docker socket, repository root, or harness credential is required by Controller.
+6. One-Runner scope remains explicit; multi-Runner scheduling stays deferred.
+
+## Research queue after v0.7
 
 These topics require discovery before release commitment:
 

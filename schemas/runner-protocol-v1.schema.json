@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.dev/schemas/runner-protocol-v1.schema.json",
+  "title": "Clew Controller/Runner protocol v1 envelope",
+  "type": "object",
+  "required": [
+    "version",
+    "kind",
+    "direction",
+    "messageId",
+    "idempotencyKey",
+    "correlationId",
+    "sentAt",
+    "payloadVersion",
+    "payload"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": {
+      "enum": [
+        "runner.register",
+        "controller.registered",
+        "runner.heartbeat",
+        "controller.lease_offer",
+        "runner.lease_accepted",
+        "runner.lease_rejected",
+        "runner.lease_started",
+        "controller.cancel",
+        "runner.cancel_ack",
+        "runner.event",
+        "runner.result",
+        "controller.ack"
+      ]
+    },
+    "direction": { "enum": ["runner_to_controller", "controller_to_runner"] },
+    "messageId": { "$ref": "#/$defs/id" },
+    "idempotencyKey": { "$ref": "#/$defs/id" },
+    "correlationId": { "$ref": "#/$defs/id" },
+    "sentAt": { "type": "string", "format": "date-time" },
+    "payloadVersion": { "const": 1 },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    }
+  }
+}

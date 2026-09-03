@@ -46,6 +46,7 @@ export type Task = {
   runId?: string | null;
   runStatus?: string | null;
   terminalAvailable?: boolean;
+  terminalAccess?: 'controller_local' | 'runner_local' | 'unavailable';
   terminalActive?: boolean;
   interactionStatus?: string | null;
   interactionTurnId?: string | null;

@@ -2,7 +2,7 @@
 
 Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
 
-This repository contains the `v0.5.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
+This repository contains the `v0.6.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
 
 ## Requirements
 
@@ -23,7 +23,7 @@ npm run check
 node bin/clew.js --help
 ```
 
-`npm run check` runs Prettier, ESLint, the automated test suite, and syntax checks. The only runtime dependency is `ws`, which provides standards-compliant WebSocket framing, protocol validation, and heartbeat support; ESLint and Prettier are development-only dependencies.
+`npm run check` runs Prettier, ESLint, the UI build/tests, the backend suite, task-card validation, and syntax checks. Runtime dependencies provide WebSocket transport, structured logging, and the managed terminal; ESLint and Prettier are development-only dependencies.
 
 ## Quick start without external credentials
 
@@ -77,6 +77,32 @@ node bin/clew.js approve DEMO-DEEP --actor your-name
 node bin/clew.js run DEMO-DEEP --profile deep --harness fake
 ```
 
+## Controller and Runner
+
+v0.6 can keep Controller/UI on one host and execute leased stages on one configured Runner host. Local execution remains the default. Put the shared credential in environment variables or restrictive `0600` files, and define the Runner's logical workspace mappings only in the user config on the Runner host.
+
+```json
+{
+  "controllerRunner": {
+    "runnerId": "runner-1",
+    "credentialFile": "/secure/controller-runner.token"
+  },
+  "runner": {
+    "id": "runner-1",
+    "controllerUrl": "wss://controller.example/runner/v1",
+    "credentialFile": "/secure/controller-runner.token",
+    "stateDir": "/var/lib/clew-runner",
+    "workspaces": {
+      "clew": "/absolute/path/to/Clew"
+    }
+  }
+}
+```
+
+Start `clew daemon start` on Controller and `clew runner serve` on the execution host, then use `clew run TASK --execution paired`. `ws://` is accepted only on loopback; remote endpoints require `wss://`. v0.6 supports one preconfigured Runner, no automatic failover, and no Docker/pairing workflow. Accepted work becomes `RECOVERING` after ambiguous loss and is never silently duplicated. Terminal ownership stays on the Runner host, and the Controller UI labels it instead of proxying PTY bytes.
+
+Release packages are attached to GitHub Releases. The public npm name `clew` belongs to an unrelated project, so this repository does not publish to that namespace.
+
 ## Operations
 
 ```sh
@@ -128,10 +154,11 @@ Role-specific models can be selected with `models.worker`, `models.architect`, `
 - [`RELEASE-0.2.md`](./RELEASE-0.2.md) — v0.2 scope and release gates;
 - [`RELEASE-0.3.md`](./RELEASE-0.3.md) — planned observability and execution-economics release;
 - [`RELEASE-0.5.md`](./RELEASE-0.5.md) — interactive terminal and worker lifecycle release;
+- [`RELEASE-0.6.md`](./RELEASE-0.6.md) — Controller/Runner transport, leases, and release evidence;
 - [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
 
 ## Intentional limits
 
-Clew has no dashboard, remote scheduler, PR/merge automation, or automatic merge-conflict resolution. Runtime namespaces are identifiers and coordination metadata; Clew does not provision ports, databases, or containers. Node's built-in SQLite API is still marked experimental by Node.js.
+Clew has no multi-Runner scheduler, automatic failover, PR/merge automation, or automatic merge-conflict resolution. Runtime namespaces are identifiers and coordination metadata; Clew does not provision ports, databases, or containers. Node's built-in SQLite API is still marked experimental by Node.js.
 
 Clew does not implement a model loop: native harnesses own coding intelligence and tools; Clew owns the durable task lifecycle above them.

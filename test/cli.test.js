@@ -28,6 +28,29 @@ test('CLI help reports the package version', () => {
   assert.match(runCli(['--help'], process.cwd()), new RegExp(`^Clew v${packageJson.version}\\b`));
 });
 
+test('CLI reports standalone Runner persistence without exposing credentials or paths', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'clew-runner-cli-'));
+
+  try {
+    const output = runCommand(process.execPath, [cliFile, 'runner', 'status'], directory, {
+      CLEW_USER_CONFIG: join(directory, 'missing-user-config.json'),
+      CLEW_RUNNER_CONTROLLER: 'ws://127.0.0.1:4319/runner/v1',
+      CLEW_RUNNER_ID: 'runner-cli',
+      CLEW_RUNNER_TOKEN: 'runner-cli-secret',
+      CLEW_RUNNER_STATE_DIR: join(directory, 'runner-state'),
+    });
+    const status = JSON.parse(output);
+
+    assert.equal(status.runnerId, 'runner-cli');
+    assert.equal(status.process.running, false);
+    assert.equal(status.persistence.outbox.entries, 0);
+    assert.equal(output.includes('runner-cli-secret'), false);
+    assert.equal(output.includes(directory), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('CLI creates the same inert MVP task from JSON and Markdown', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-create-mvp-'));
 

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 
 const taskDir = fileURLToPath(new URL('../tasks/', import.meta.url));
@@ -78,14 +78,21 @@ function section(text, heading) {
   return match?.[1] ?? null;
 }
 
-const cards = readdirSync(taskDir)
-  .filter((file) => /^CLEW-\d{3}\.md$/.test(file))
-  .sort()
-  .map(parseCard);
+const cardFiles = [
+  ...readdirSync(taskDir).filter((file) => /^CLEW-\d{3}\.md$/.test(file)),
+  ...(existsSync(`${taskDir}/done`)
+    ? readdirSync(`${taskDir}/done`)
+        .filter((file) => /^CLEW-\d{3}\.md$/.test(file))
+        .map((file) => `done/${file}`)
+    : []),
+];
+
+const cards = cardFiles.sort().map(parseCard);
 const byId = new Map(cards.map((card) => [card.id, card]));
 
 for (const card of cards) {
-  if (`${card.id}.md` !== card.file) throw new Error(`${card.file}: id does not match filename`);
+  if (!card.file.endsWith(`${card.id}.md`))
+    throw new Error(`${card.file}: id does not match filename`);
   if (!allowedStatuses.has(card.status))
     throw new Error(`${card.file}: unsupported status ${card.status}`);
   if (!Array.isArray(card.depends_on))
