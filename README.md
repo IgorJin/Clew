@@ -128,7 +128,7 @@ node bin/clew.js worktree prune
 
 `worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
 
-Use `task open-changes TASK` to inspect a task workspace. The viewer priority is an explicit `--viewer cursor|vscode|worktree-path` (or `changeViewer` configuration), Cursor, VS Code, then copying the worktree path to the system clipboard; pass `--run RUN-ID` to select a persisted run.
+Use `task open-changes TASK` to inspect a task workspace. The viewer priority is an explicit `--viewer cursor|vscode` (or `changeViewer` configuration), Cursor, then VS Code; pass `--run RUN-ID` to select a persisted run. Copying the path is an explicit action via `--viewer worktree-path` and is never used as an automatic fallback.
 
 `task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
 

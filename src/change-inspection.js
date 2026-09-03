@@ -5,7 +5,8 @@ function git(args, cwd, { allowFailure = false } = {}) {
   try {
     return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (error) {
-    if (allowFailure) return error.stdout ?? '';
+    // `git diff --no-index` uses exit code 1 to report that files differ.
+    if (allowFailure && error.status === 1) return error.stdout ?? '';
     throw error;
   }
 }
@@ -19,9 +20,10 @@ function parseStatus(output) {
     const status = token.slice(0, 2);
     const path = token.slice(3);
     const renamed = status.includes('R') || status.includes('C');
-    const nextPath = renamed ? tokens[++index] : null;
+    const oldPath = renamed ? tokens[++index] : null;
 
-    files.push({ path: nextPath ?? path, ...(nextPath ? { oldPath: path } : {}), status });
+    // porcelain v1 -z emits `newPath\0oldPath\0` for renames and copies.
+    files.push({ path, ...(oldPath ? { oldPath } : {}), status });
   }
 
   return files;
@@ -90,7 +92,9 @@ export class GitChangeInspectionService {
     });
 
     if (run.execution_mode === 'paired' || !run.workspace)
-      return unavailable(run.execution_mode === 'paired' ? 'runner-local-unavailable' : 'missing-worktree');
+      return unavailable(
+        run.execution_mode === 'paired' ? 'runner-local-unavailable' : 'missing-worktree',
+      );
     if (!existsSync(run.workspace)) return unavailable('missing-worktree');
     const base = run.base_sha ?? run.baseSha;
 
@@ -98,7 +102,9 @@ export class GitChangeInspectionService {
 
     try {
       const status = parseStatus(git(['status', '--porcelain=v1', '-z'], run.workspace));
-      const committed = parseNameStatus(git(['diff', '--name-status', '-z', `${base}..HEAD`], run.workspace));
+      const committed = parseNameStatus(
+        git(['diff', '--name-status', '-z', `${base}..HEAD`], run.workspace),
+      );
       const statusByPath = new Map(committed.map((item) => [item.path, item]));
 
       for (const item of status) statusByPath.set(item.path, item);
@@ -106,19 +112,22 @@ export class GitChangeInspectionService {
       const untracked = status.filter((item) => item.status === '??');
       const trackedDiff = git(['diff', '--binary', base], run.workspace);
       let patch = trackedDiff;
-      let binary = numbers(git(['diff', '--numstat', base], run.workspace)).binary;
-      let additions = numbers(git(['diff', '--numstat', base], run.workspace)).additions;
-      let deletions = numbers(git(['diff', '--numstat', base], run.workspace)).deletions;
+      const trackedNumbers = numbers(git(['diff', '--numstat', base], run.workspace));
+      let { binary, additions, deletions } = trackedNumbers;
 
       for (const file of untracked) {
-        const result = git(['diff', '--binary', '--no-index', '/dev/null', file.path], run.workspace, {
-          allowFailure: true,
-        });
+        const result = git(
+          ['diff', '--binary', '--no-index', '--', '/dev/null', file.path],
+          run.workspace,
+          { allowFailure: true },
+        );
 
         if (result !== null) patch += result;
-        const stats = git(['diff', '--numstat', '--no-index', '/dev/null', file.path], run.workspace, {
-          allowFailure: true,
-        });
+        const stats = git(
+          ['diff', '--numstat', '--no-index', '--', '/dev/null', file.path],
+          run.workspace,
+          { allowFailure: true },
+        );
 
         if (stats !== null) {
           const count = numbers(stats);
@@ -146,7 +155,7 @@ export class GitChangeInspectionService {
         revisions: { base, head, committed: run.commit_sha ?? head },
       };
     } catch {
-      return unavailable('runner-local-unavailable');
+      return unavailable('git-inspection-failed');
     }
   }
 }

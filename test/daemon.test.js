@@ -118,6 +118,32 @@ test('live session inspection bypasses a running worker command', async () => {
   assert.equal(await running, 'worker-finished');
 });
 
+test('Git change inspection bypasses a running worker command', async () => {
+  const daemon = new LocalDaemon();
+  let releaseWorker;
+  const worker = new Promise((resolve) => {
+    releaseWorker = resolve;
+  });
+
+  daemon.control = {
+    execute: async (args) => {
+      if (args[0] === 'task' && args[1] === 'approve-step') {
+        await worker;
+
+        return 'worker-finished';
+      }
+
+      return 'changes-inspected';
+    },
+  };
+  const running = daemon.dispatch(['task', 'approve-step', 'CHANGES-1']);
+  const inspected = daemon.dispatch(['task', 'changes', 'run-1']);
+
+  assert.equal(await inspected, 'changes-inspected');
+  releaseWorker();
+  assert.equal(await running, 'worker-finished');
+});
+
 test('public event filtering suppresses tool and protocol events', async () => {
   const { isPublicThreadEvent } = await import('../src/thread.js');
 

@@ -23,11 +23,7 @@ import { APPROVAL_DECISION } from './harness.js';
 import { Observability } from './observability.js';
 import { redactSecrets } from './security.js';
 import { Scheduler } from './scheduler.js';
-import {
-  createSessionSurface,
-  openSessionForRun,
-  openWorkspaceInEditor,
-} from './session-surface.js';
+import { createSessionSurface, openSessionForRun } from './session-surface.js';
 import { GitWorktreeManager } from './workspace.js';
 import { PairedExecutionPort } from './execution-port.js';
 import { createChangeViewerRegistry } from './change-viewer.js';
@@ -396,26 +392,35 @@ export class ClewService {
       : runs.at(-1);
 
     if (requestedRun && !run) throw new Error(`run not found: ${requestedRun}`);
-    const workspace = run?.workspace ?? this.cwd;
+    if (!run)
+      return {
+        version: 1,
+        taskId,
+        runId: null,
+        state: 'unavailable',
+        viewer: 'none',
+        code: 'RUN_UNAVAILABLE',
+        reason: 'task has no persisted run',
+      };
+    if (!run.workspace)
+      return {
+        version: 1,
+        taskId,
+        runId: run.id,
+        state: 'unavailable',
+        viewer: 'none',
+        code: 'WORKSPACE_UNAVAILABLE',
+        reason: run.execution_mode === 'paired' ? 'runner-local-unavailable' : 'missing-worktree',
+      };
+    const workspace = run.workspace;
     const explicit = getOptionValue(args, '--viewer', this.config.changeViewer);
-    // Keep the injected legacy launcher contract usable for embedders while the
-    // normal CLI path uses the extensible viewer registry.
-    const result =
-      this.editorLauncher && !explicit
-        ? openWorkspaceInEditor({
-            editorBin: this.config.editorBin,
-            workspace,
-            launcher: this.editorLauncher,
-          })
-        : createChangeViewerRegistry({ explicit, launcher: this.editorLauncher }).open({
-            taskId,
-            runId: run?.id ?? null,
-            workspace,
-          });
+    const result = createChangeViewerRegistry({ explicit, launcher: this.editorLauncher }).open({
+      taskId,
+      runId: run.id,
+      workspace,
+    });
 
-    if (result.state !== 'opened') throw new Error(result.reason || 'could not open changes');
-
-    return { version: 1, taskId, ...result };
+    return { version: 1, taskId, runId: run.id, ...result };
   }
 
   createTask(args) {

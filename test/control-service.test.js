@@ -106,7 +106,7 @@ test('MVP exposes one durable next step and requires an explicit approval', asyn
   }
 });
 
-test('task open-changes opens the latest run workspace in the configured editor', async () => {
+test('task open-changes opens the latest run workspace in Cursor by default', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'clew-service-open-changes-'));
   const store = new Store(join(cwd, '.clew', 'clew.sqlite'));
   const calls = [];
@@ -150,10 +150,57 @@ test('task open-changes opens the latest run workspace in the configured editor'
 
     assert.equal(result.state, 'opened');
     assert.equal(result.workspace, workspace);
-    assert.equal(calls[0].bin, 'code');
+    assert.equal(calls[0].bin, 'cursor');
     assert.deepEqual(calls[0].args, [workspace]);
     assert.equal(service.supports(['task', 'open-changes']), true);
     await assert.rejects(() => service.execute(['task', 'open-changes', 'MISSING']), /not found/);
+  } finally {
+    store.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('task open-changes never falls back to the primary checkout', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-service-no-primary-fallback-'));
+  const store = new Store(join(cwd, '.clew', 'clew.sqlite'));
+  const calls = [];
+  const service = new ClewService({
+    cwd,
+    store,
+    config: DEFAULT_CONFIG,
+    editorLauncher: (...args) => {
+      calls.push(args);
+
+      return { pid: 99 };
+    },
+  });
+
+  try {
+    store.createTask({ id: 'OPEN-NONE', title: 'No run', description: 'No workspace' });
+    assert.deepEqual(await service.execute(['task', 'open-changes', 'OPEN-NONE']), {
+      version: 1,
+      taskId: 'OPEN-NONE',
+      runId: null,
+      state: 'unavailable',
+      viewer: 'none',
+      code: 'RUN_UNAVAILABLE',
+      reason: 'task has no persisted run',
+    });
+
+    store.createRun({
+      id: 'paired-run',
+      taskId: 'OPEN-NONE',
+      stageId: 'worker',
+      attempt: 1,
+      status: 'RUNNING',
+      harness: 'codex',
+      executionMode: 'paired',
+    });
+    const paired = await service.execute(['task', 'open-changes', 'OPEN-NONE']);
+
+    assert.equal(paired.state, 'unavailable');
+    assert.equal(paired.reason, 'runner-local-unavailable');
+    assert.deepEqual(calls, []);
   } finally {
     store.close();
     rmSync(cwd, { recursive: true, force: true });

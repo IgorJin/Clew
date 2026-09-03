@@ -34,13 +34,14 @@ test('change viewer registry prefers explicit viewer and returns unified result'
   });
 
   assert.deepEqual(registry.open({ workspace: '/tmp/worktree' }), {
+    version: 1,
     state: 'opened',
     viewer: 'second',
   });
   assert.deepEqual(calls, ['second']);
 });
 
-test('default viewer order is Cursor, VS Code, then worktree path', () => {
+test('default viewer order starts with Cursor', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-viewer-'));
   const calls = [];
 
@@ -59,6 +60,58 @@ test('default viewer order is Cursor, VS Code, then worktree path', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('falls back from Cursor to VS Code without copying the worktree path', () => {
+  const calls = [];
+  let copied = false;
+  const registry = new ChangeViewerRegistry({
+    viewers: [
+      { id: 'cursor', open: () => ({ state: 'unavailable', viewer: 'cursor' }) },
+      {
+        id: 'vscode',
+        open: () => {
+          calls.push('vscode');
+
+          return { state: 'opened', viewer: 'vscode' };
+        },
+      },
+      {
+        id: 'worktree-path',
+        fallback: false,
+        open: () => {
+          copied = true;
+
+          return { state: 'opened', viewer: 'worktree-path' };
+        },
+      },
+    ],
+  });
+
+  assert.equal(registry.open({ workspace: '/tmp/worktree' }).viewer, 'vscode');
+  assert.deepEqual(calls, ['vscode']);
+  assert.equal(copied, false);
+});
+
+test('returns unavailable when editors are missing and rejects unsupported explicit viewers', () => {
+  const viewers = [
+    { id: 'cursor', open: () => ({ state: 'unavailable', viewer: 'cursor' }) },
+    { id: 'vscode', open: () => ({ state: 'unavailable', viewer: 'vscode' }) },
+    {
+      id: 'worktree-path',
+      fallback: false,
+      open: () => ({ state: 'opened', viewer: 'worktree-path' }),
+    },
+  ];
+  const unavailable = new ChangeViewerRegistry({ viewers }).open({ workspace: '/tmp/worktree' });
+  const unsupported = new ChangeViewerRegistry({ viewers, explicit: 'jetbrains' }).open({
+    workspace: '/tmp/worktree',
+  });
+
+  assert.equal(unavailable.state, 'unavailable');
+  assert.equal(unavailable.code, 'NO_VIEWER_AVAILABLE');
+  assert.equal(unsupported.state, 'unavailable');
+  assert.equal(unsupported.code, 'VIEWER_UNSUPPORTED');
 });
 
 test('worktree-path viewer copies an absolute path', () => {

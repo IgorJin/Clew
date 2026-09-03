@@ -56,6 +56,7 @@ export class CommandChangeViewer {
     this.id = id;
     this.command = command;
     this.launcher = launcher;
+    this.fallback = true;
   }
 
   open({ workspace }) {
@@ -77,6 +78,7 @@ export class WorktreePathViewer {
     this.id = 'worktree-path';
     this.copy = copy;
     this.platform = platform;
+    this.fallback = false;
   }
 
   open({ workspace }) {
@@ -125,13 +127,23 @@ export class ChangeViewerRegistry {
     const preferred = this.explicit
       ? this.viewers.filter((viewer) => viewer.id === this.explicit)
       : [];
-    const ordered = [...preferred, ...this.viewers.filter((viewer) => !preferred.includes(viewer))];
+
+    if (this.explicit && preferred.length === 0)
+      return unavailable(
+        this.explicit,
+        `unsupported change viewer: ${this.explicit}`,
+        'VIEWER_UNSUPPORTED',
+      );
+    const ordered = [
+      ...preferred,
+      ...this.viewers.filter((viewer) => !preferred.includes(viewer) && viewer.fallback !== false),
+    ];
     const unavailableResults = [];
 
     for (const viewer of ordered) {
       const result = viewer.open(request);
 
-      if (result.state === 'opened') return result;
+      if (result.state === 'opened') return { version: CHANGE_VIEWER_RESULT_VERSION, ...result };
       unavailableResults.push(result);
     }
 
