@@ -394,6 +394,7 @@ export class ClewService {
     const run = requestedRun
       ? runs.find((candidate) => candidate.id === requestedRun)
       : runs.at(-1);
+
     if (requestedRun && !run) throw new Error(`run not found: ${requestedRun}`);
     const workspace = run?.workspace ?? this.cwd;
     const explicit = getOptionValue(args, '--viewer', this.config.changeViewer);

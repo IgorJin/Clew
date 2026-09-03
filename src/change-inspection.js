@@ -23,6 +23,7 @@ function parseStatus(output) {
 
     files.push({ path: nextPath ?? path, ...(nextPath ? { oldPath: path } : {}), status });
   }
+
   return files;
 }
 
@@ -35,8 +36,10 @@ function parseNameStatus(output) {
     const oldPath = tokens[index++];
     const renamed = status.startsWith('R') || status.startsWith('C');
     const path = renamed ? tokens[index++] : oldPath;
+
     files.push({ path, ...(renamed ? { oldPath } : {}), status });
   }
+
   return files;
 }
 
@@ -47,12 +50,14 @@ function numbers(text) {
 
   for (const line of text.split('\n').filter(Boolean)) {
     const [added, removed] = line.split('\t');
+
     if (added === '-' || removed === '-') binary = true;
     else {
       additions += Number(added) || 0;
       deletions += Number(removed) || 0;
     }
   }
+
   return { additions, deletions, binary };
 }
 
@@ -65,6 +70,7 @@ export class GitChangeInspectionService {
   inspect(runId) {
     if (!runId) throw new Error('run id is required');
     const run = this.store.getRun(runId);
+
     if (!run) throw new Error(`run not found: ${runId}`);
 
     const unavailable = (reason) => ({
@@ -87,12 +93,14 @@ export class GitChangeInspectionService {
       return unavailable(run.execution_mode === 'paired' ? 'runner-local-unavailable' : 'missing-worktree');
     if (!existsSync(run.workspace)) return unavailable('missing-worktree');
     const base = run.base_sha ?? run.baseSha;
+
     if (!base) return unavailable('base-revision-unavailable');
 
     try {
       const status = parseStatus(git(['status', '--porcelain=v1', '-z'], run.workspace));
       const committed = parseNameStatus(git(['diff', '--name-status', '-z', `${base}..HEAD`], run.workspace));
       const statusByPath = new Map(committed.map((item) => [item.path, item]));
+
       for (const item of status) statusByPath.set(item.path, item);
       const statuses = [...statusByPath.values()];
       const untracked = status.filter((item) => item.status === '??');
@@ -106,12 +114,15 @@ export class GitChangeInspectionService {
         const result = git(['diff', '--binary', '--no-index', '/dev/null', file.path], run.workspace, {
           allowFailure: true,
         });
+
         if (result !== null) patch += result;
         const stats = git(['diff', '--numstat', '--no-index', '/dev/null', file.path], run.workspace, {
           allowFailure: true,
         });
+
         if (stats !== null) {
           const count = numbers(stats);
+
           additions += count.additions;
           deletions += count.deletions;
           binary ||= count.binary;

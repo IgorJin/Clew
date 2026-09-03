@@ -20,14 +20,17 @@ function validateWorkspace(workspace) {
     throw new Error('workspace must be an absolute path');
   if (!existsSync(workspace) || !statSync(workspace).isDirectory())
     throw new Error(`workspace does not exist: ${workspace}`);
+
   return resolve(workspace);
 }
 
 function launchCommand(command, workspace, launcher) {
   const args = [workspace];
+
   try {
     if (!launcher) {
       const lookup = process.platform === 'win32' ? 'where' : 'which';
+
       execFileSync(lookup, [command], { stdio: 'ignore' });
     }
     const child =
@@ -37,9 +40,11 @@ function launchCommand(command, workspace, launcher) {
         stdio: 'ignore',
         detached: true,
       }) ?? spawn(command, args, { cwd: workspace, stdio: 'ignore', detached: true });
+
     if (!child) return unavailable(command, 'no viewer launcher is available', 'LAUNCHER_MISSING');
     child.on?.('error', () => {});
     child.unref?.();
+
     return { state: 'opened', command: [command, ...args], pid: child.pid ?? null };
   } catch (error) {
     return unavailable(command, error instanceof Error ? error.message : 'viewer failed to start');
@@ -55,12 +60,14 @@ export class CommandChangeViewer {
 
   open({ workspace }) {
     let resolved;
+
     try {
       resolved = validateWorkspace(workspace);
     } catch (error) {
       return unavailable(this.id, error.message, 'WORKSPACE_INVALID');
     }
     const result = launchCommand(this.command, resolved, this.launcher);
+
     return { ...result, viewer: this.id, workspace: resolved };
   }
 }
@@ -74,6 +81,7 @@ export class WorktreePathViewer {
 
   open({ workspace }) {
     let resolved;
+
     try {
       resolved = validateWorkspace(workspace);
     } catch (error) {
@@ -85,8 +93,10 @@ export class WorktreePathViewer {
         const command =
           this.platform === 'darwin' ? 'pbcopy' : this.platform === 'win32' ? 'clip' : 'xclip';
         const args = this.platform === 'linux' ? ['-selection', 'clipboard'] : [];
+
         execFileSync(command, args, { input: resolved, stdio: ['pipe', 'ignore', 'ignore'] });
       }
+
       return {
         version: CHANGE_VIEWER_RESULT_VERSION,
         state: 'opened',
@@ -117,11 +127,14 @@ export class ChangeViewerRegistry {
       : [];
     const ordered = [...preferred, ...this.viewers.filter((viewer) => !preferred.includes(viewer))];
     const unavailableResults = [];
+
     for (const viewer of ordered) {
       const result = viewer.open(request);
+
       if (result.state === 'opened') return result;
       unavailableResults.push(result);
     }
+
     return unavailable('none', 'no change viewer is available', 'NO_VIEWER_AVAILABLE', {
       attempts: unavailableResults,
     });

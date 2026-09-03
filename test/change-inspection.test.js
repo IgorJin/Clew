@@ -14,6 +14,7 @@ function git(cwd, args) {
 test('inspects committed, working, and untracked changes from persisted run provenance', () => {
   const root = mkdtempSync(join(tmpdir(), 'clew-change-inspection-'));
   const state = mkdtempSync(join(tmpdir(), 'clew-change-state-'));
+
   git(root, ['init', '-q']);
   git(root, ['config', 'user.email', 'test@example.com']);
   git(root, ['config', 'user.name', 'test']);
@@ -21,6 +22,7 @@ test('inspects committed, working, and untracked changes from persisted run prov
   git(root, ['add', '.']);
   git(root, ['commit', '-qm', 'base']);
   const base = git(root, ['rev-parse', 'HEAD']);
+
   writeFileSync(join(root, 'tracked.txt'), 'before\nafter\n');
   writeFileSync(join(root, 'new.txt'), 'new\n');
   const store = new Store(join(state, 'clew.sqlite'));
@@ -32,6 +34,7 @@ test('inspects committed, working, and untracked changes from persisted run prov
       status: 'RUNNING', harness: 'fake', workspace: root, baseSha: base,
     });
     const result = new GitChangeInspectionService(store).inspect('run-1');
+
     assert.equal(result.state, 'available');
     assert.deepEqual(result.files.sort(), ['new.txt', 'tracked.txt']);
     assert.equal(result.additions, 2);
@@ -52,6 +55,7 @@ test('returns explicit unavailable state for paired and missing persisted worksp
     store.createRun({ id: 'paired', taskId: 'CHANGES-2', stageId: 'worker', attempt: 1, status: 'RUNNING', harness: 'fake', executionMode: 'paired' });
     store.createRun({ id: 'missing', taskId: 'CHANGES-2', stageId: 'worker', attempt: 2, status: 'RUNNING', harness: 'fake', workspace: '/definitely/missing', baseSha: 'abc' });
     const service = new GitChangeInspectionService(store);
+
     assert.equal(service.inspect('paired').reason, 'runner-local-unavailable');
     assert.equal(service.inspect('missing').reason, 'missing-worktree');
   } finally {

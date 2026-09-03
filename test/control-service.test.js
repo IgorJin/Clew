@@ -170,9 +170,11 @@ test('task open-changes selects an explicit run and viewer', async () => {
     config: { ...DEFAULT_CONFIG, changeViewer: 'vscode' },
     editorLauncher: (bin, args) => {
       calls.push({ bin, args });
+
       return { pid: 7 };
     },
   });
+
   try {
     await service.execute([
       'task',
@@ -186,6 +188,7 @@ test('task open-changes selects an explicit run and viewer', async () => {
     ]);
     const first = join(cwd, '.clew', 'worktrees', 'OPEN-2-first');
     const second = join(cwd, '.clew', 'worktrees', 'OPEN-2-second');
+
     mkdirSync(first, { recursive: true });
     mkdirSync(second, { recursive: true });
     store.createRun({
@@ -217,6 +220,7 @@ test('task open-changes selects an explicit run and viewer', async () => {
       '--run',
       'run-open-2-first',
     ]);
+
     assert.equal(result.viewer, 'vscode');
     assert.equal(result.workspace, first);
     assert.deepEqual(calls[0].args, [first]);

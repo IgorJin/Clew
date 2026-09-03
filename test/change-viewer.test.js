@@ -18,6 +18,7 @@ test('change viewer registry prefers explicit viewer and returns unified result'
         id: 'first',
         open: () => {
           calls.push('first');
+
           return { state: 'opened', viewer: 'first' };
         },
       },
@@ -25,11 +26,13 @@ test('change viewer registry prefers explicit viewer and returns unified result'
         id: 'second',
         open: () => {
           calls.push('second');
+
           return { state: 'opened', viewer: 'second' };
         },
       },
     ],
   });
+
   assert.deepEqual(registry.open({ workspace: '/tmp/worktree' }), {
     state: 'opened',
     viewer: 'second',
@@ -40,13 +43,16 @@ test('change viewer registry prefers explicit viewer and returns unified result'
 test('default viewer order is Cursor, VS Code, then worktree path', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-viewer-'));
   const calls = [];
+
   try {
     const result = createChangeViewerRegistry({
       launcher: (bin) => {
         calls.push(bin);
+
         return { pid: 12 };
       },
     }).open({ workspace: dir });
+
     assert.equal(result.state, 'opened');
     assert.equal(result.viewer, 'cursor');
     assert.deepEqual(calls, ['cursor']);
@@ -58,12 +64,14 @@ test('default viewer order is Cursor, VS Code, then worktree path', () => {
 test('worktree-path viewer copies an absolute path', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-copy-'));
   let copied;
+
   try {
     const result = new WorktreePathViewer({
       copy: (path) => {
         copied = path;
       },
     }).open({ workspace: dir });
+
     assert.equal(result.state, 'opened');
     assert.equal(result.viewer, 'worktree-path');
     assert.equal(result.path, dir);
