@@ -23,6 +23,7 @@ import { ControllerRunnerGateway } from './controller-runner-gateway.js';
 import { Observability } from './observability.js';
 import { TerminalSessionManager } from './terminal-manager.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
+import { assertWorkspace, buildCodexResumeArgs } from './session-surface.js';
 import { isPublicThreadEvent } from './thread.js';
 import {
   validateApiEnvelope,
@@ -589,14 +590,47 @@ export class LocalDaemon {
       this.webSocketServer.emit('connection', client, request);
       const url = new URL(request.url, this.metadata.endpoint);
 
-      if (url.pathname === '/terminal')
-        void this.attachTerminal(client, url.searchParams.get('runId'));
+      if (url.pathname === '/terminal') void this.attachTerminal(client, url);
       else this.attachWebSocket(client, request);
     });
   }
 
-  async attachTerminal(client, runId) {
+  async attachTerminal(client, url) {
+    const runId = url.searchParams.get('runId');
+    const agentSessionId = url.searchParams.get('agentSessionId');
+    const taskId = url.searchParams.get('taskId');
+    const role = url.searchParams.get('role');
+    const terminalId = runId ?? agentSessionId;
+
     try {
+      if (!runId && agentSessionId) {
+        const agentSession = taskId
+          ? this.store
+              ?.listAgentSessions(taskId)
+              .find((session) => session.id === agentSessionId && session.role === role)
+          : null;
+
+        if (!agentSession || agentSession.harness !== 'codex')
+          throw new Error('persisted Codex agent terminal is unavailable');
+        const workspace = assertWorkspace(agentSession.workspace);
+
+        if (!this.terminalManager.has(agentSession.id))
+          this.terminalManager.start({
+            id: agentSession.id,
+            taskId: agentSession.task_id,
+            sessionId: agentSession.session_id,
+            command: this.config?.codexBin ?? 'codex',
+            args: buildCodexResumeArgs({ sessionId: agentSession.session_id }),
+            cwd: workspace,
+          });
+        this.terminalManager.attach(client, agentSession.id);
+        this.logger?.info(
+          { event: 'terminal.attached', taskId, role, agentSessionId },
+          'Agent terminal attached',
+        );
+
+        return;
+      }
       const run = this.store?.getRun(runId);
 
       if (!run || run.harness !== 'codex' || !run.session_id || !run.workspace)
@@ -626,13 +660,13 @@ export class LocalDaemon {
           JSON.stringify({
             ch: 'terminal',
             type: 'error',
-            id: runId,
+            id: terminalId,
             error: error.message,
           }),
         );
       client.close(1011, 'terminal startup failed');
       this.logger?.warn(
-        { event: 'terminal.start.failed', runId, error: error.message },
+        { event: 'terminal.start.failed', runId, agentSessionId, error: error.message },
         'Terminal startup failed',
       );
     }
