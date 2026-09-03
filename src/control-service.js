@@ -30,6 +30,7 @@ import {
 } from './session-surface.js';
 import { GitWorktreeManager } from './workspace.js';
 import { PairedExecutionPort } from './execution-port.js';
+import { createChangeViewerRegistry } from './change-viewer.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -336,7 +337,7 @@ export class ClewService {
   task(subcommand, args) {
     if (subcommand === 'create') return this.createTask(args);
     if (subcommand === 'next-step') return this.nextStep(args[0]);
-    if (subcommand === 'open-changes') return this.openChanges(args[0]);
+    if (subcommand === 'open-changes') return this.openChanges(args[0], args);
     if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;
@@ -380,22 +381,33 @@ export class ClewService {
     throw new Error(`unsupported task command: ${subcommand}`);
   }
 
-  openChanges(taskId) {
+  openChanges(taskId, args = []) {
     if (!taskId) throw new Error('task id is required');
     const task = this.store.getTask(taskId);
 
     if (!task) throw new Error(`task not found: ${taskId}`);
     const runs = this.store.listRuns(taskId);
-    const workspace =
-      runs
-        .map((run) => run.workspace)
-        .filter((value) => typeof value === 'string' && value)
-        .at(-1) ?? this.cwd;
-    const result = openWorkspaceInEditor({
-      editorBin: this.config.editorBin,
-      workspace,
-      launcher: this.editorLauncher,
-    });
+    const requestedRun = getOptionValue(args, '--run');
+    const run = requestedRun
+      ? runs.find((candidate) => candidate.id === requestedRun)
+      : runs.at(-1);
+    if (requestedRun && !run) throw new Error(`run not found: ${requestedRun}`);
+    const workspace = run?.workspace ?? this.cwd;
+    const explicit = getOptionValue(args, '--viewer', this.config.changeViewer);
+    // Keep the injected legacy launcher contract usable for embedders while the
+    // normal CLI path uses the extensible viewer registry.
+    const result =
+      this.editorLauncher && !explicit
+        ? openWorkspaceInEditor({
+            editorBin: this.config.editorBin,
+            workspace,
+            launcher: this.editorLauncher,
+          })
+        : createChangeViewerRegistry({ explicit, launcher: this.editorLauncher }).open({
+            taskId,
+            runId: run?.id ?? null,
+            workspace,
+          });
 
     if (result.state !== 'opened') throw new Error(result.reason || 'could not open changes');
 

@@ -159,3 +159,69 @@ test('task open-changes opens the latest run workspace in the configured editor'
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test('task open-changes selects an explicit run and viewer', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-service-open-selected-'));
+  const store = new Store(join(cwd, '.clew', 'clew.sqlite'));
+  const calls = [];
+  const service = new ClewService({
+    cwd,
+    store,
+    config: { ...DEFAULT_CONFIG, changeViewer: 'vscode' },
+    editorLauncher: (bin, args) => {
+      calls.push({ bin, args });
+      return { pid: 7 };
+    },
+  });
+  try {
+    await service.execute([
+      'task',
+      'create',
+      '--id',
+      'OPEN-2',
+      '--title',
+      'Selected',
+      '--description',
+      'Select a run',
+    ]);
+    const first = join(cwd, '.clew', 'worktrees', 'OPEN-2-first');
+    const second = join(cwd, '.clew', 'worktrees', 'OPEN-2-second');
+    mkdirSync(first, { recursive: true });
+    mkdirSync(second, { recursive: true });
+    store.createRun({
+      id: 'run-open-2-first',
+      taskId: 'OPEN-2',
+      stageId: 'worker',
+      attempt: 1,
+      status: 'COMPLETED',
+      harness: 'codex',
+      workspace: first,
+      profile: 'quick',
+      policy: {},
+    });
+    store.createRun({
+      id: 'run-open-2-second',
+      taskId: 'OPEN-2',
+      stageId: 'worker',
+      attempt: 2,
+      status: 'COMPLETED',
+      harness: 'codex',
+      workspace: second,
+      profile: 'quick',
+      policy: {},
+    });
+    const result = await service.execute([
+      'task',
+      'open-changes',
+      'OPEN-2',
+      '--run',
+      'run-open-2-first',
+    ]);
+    assert.equal(result.viewer, 'vscode');
+    assert.equal(result.workspace, first);
+    assert.deepEqual(calls[0].args, [first]);
+  } finally {
+    store.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

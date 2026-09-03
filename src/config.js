@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   openCodeBin: 'opencode',
   openCodeUrl: 'http://127.0.0.1:4096',
   editorBin: 'code',
+  changeViewer: null,
   worktreeRoot: '.clew/worktrees',
   models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
   pricing: Object.freeze({ sources: [] }),
@@ -64,6 +65,7 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
     ...(env.CLEW_OPENCODE_BIN ? { openCodeBin: env.CLEW_OPENCODE_BIN } : {}),
     ...(env.CLEW_OPENCODE_URL ? { openCodeUrl: env.CLEW_OPENCODE_URL } : {}),
     ...(env.CLEW_EDITOR_BIN ? { editorBin: env.CLEW_EDITOR_BIN } : {}),
+    ...(env.CLEW_CHANGE_VIEWER ? { changeViewer: env.CLEW_CHANGE_VIEWER } : {}),
     ...(env.CLEW_WORKTREE_ROOT ? { worktreeRoot: env.CLEW_WORKTREE_ROOT } : {}),
     observability: {
       ...DEFAULT_CONFIG.observability,

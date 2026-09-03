@@ -124,7 +124,7 @@ function printHelp() {
   console.log('  clew finish-worker TASK [--run RUN-ID]');
   console.log('  clew task next-step ID');
   console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
-  console.log('  clew task open-changes ID');
+  console.log('  clew task open-changes ID [--run RUN-ID] [--viewer cursor|vscode|worktree-path]');
   console.log(
     '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
   );

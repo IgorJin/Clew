@@ -128,6 +128,8 @@ node bin/clew.js worktree prune
 
 `worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
 
+Use `task open-changes TASK` to inspect a task workspace. The viewer priority is an explicit `--viewer cursor|vscode|worktree-path` (or `changeViewer` configuration), Cursor, VS Code, then copying the worktree path to the system clipboard; pass `--run RUN-ID` to select a persisted run.
+
 `task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
 
 Each completed native turn records reported token usage when the harness exposes it. `task usage` aggregates the complete task lifecycle, including retries and Deep stages. Missing provider data remains `unknown` or `partial`; Clew never estimates tokens or silently treats them as zero. Pricing is synced by an external cron via configured JSON endpoints (`pricing.sources`) or an explicit `--url`; every successful sync is an immutable catalog snapshot.
