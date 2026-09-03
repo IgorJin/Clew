@@ -23,7 +23,11 @@ import { APPROVAL_DECISION } from './harness.js';
 import { Observability } from './observability.js';
 import { redactSecrets } from './security.js';
 import { Scheduler } from './scheduler.js';
-import { createSessionSurface, openSessionForRun } from './session-surface.js';
+import {
+  createSessionSurface,
+  openSessionForRun,
+  openWorkspaceInEditor,
+} from './session-surface.js';
 import { GitWorktreeManager } from './workspace.js';
 import { PairedExecutionPort } from './execution-port.js';
 
@@ -56,6 +60,7 @@ const TASK_COMMANDS = new Set([
   'list',
   'message',
   'next-step',
+  'open-changes',
   'result',
   'show',
   'thread',
@@ -202,12 +207,14 @@ export class ClewService {
     config,
     terminalManager = null,
     runnerGateway = null,
+    editorLauncher = null,
   }) {
     this.cwd = resolve(cwd);
     this.store = store;
     this.config = config;
     this.terminalManager = terminalManager;
     this.runnerGateway = runnerGateway;
+    this.editorLauncher = editorLauncher;
   }
 
   supports(args) {
@@ -306,6 +313,7 @@ export class ClewService {
         }),
         review: this.store.latestReview(task.id),
         completion: this.store.getCompletion(task.id),
+        agentSessions: this.store.listAgentSessions(task.id),
       },
       thread: this.store.getTaskThread(task.id, { after: 0, limit: 500 }),
       history: this.history(task.id, []),
@@ -328,6 +336,7 @@ export class ClewService {
   task(subcommand, args) {
     if (subcommand === 'create') return this.createTask(args);
     if (subcommand === 'next-step') return this.nextStep(args[0]);
+    if (subcommand === 'open-changes') return this.openChanges(args[0]);
     if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;
@@ -371,6 +380,28 @@ export class ClewService {
     throw new Error(`unsupported task command: ${subcommand}`);
   }
 
+  openChanges(taskId) {
+    if (!taskId) throw new Error('task id is required');
+    const task = this.store.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const runs = this.store.listRuns(taskId);
+    const workspace =
+      runs
+        .map((run) => run.workspace)
+        .filter((value) => typeof value === 'string' && value)
+        .at(-1) ?? this.cwd;
+    const result = openWorkspaceInEditor({
+      editorBin: this.config.editorBin,
+      workspace,
+      launcher: this.editorLauncher,
+    });
+
+    if (result.state !== 'opened') throw new Error(result.reason || 'could not open changes');
+
+    return { version: 1, taskId, ...result };
+  }
+
   createTask(args) {
     const jsonFile = getOptionValue(args, '--json');
     const legacyFile = getOptionValue(args, '--file');
@@ -389,6 +420,7 @@ export class ClewService {
         description: getOptionValue(args, '--description'),
         goal: getOptionValue(args, '--goal'),
         profile: getOptionValue(args, '--profile', PROFILE_NAME.QUICK),
+        tags: getOptionValues(args, '--tags'),
         risk: getOptionValue(args, '--risk', 'medium'),
         base_ref: getOptionValue(args, '--base', 'HEAD'),
         acceptance: getOptionValues(args, '--accept'),
@@ -402,6 +434,7 @@ export class ClewService {
         'description',
         'goal',
         'profile',
+        'tags',
         'risk',
         'base_ref',
         'acceptance',

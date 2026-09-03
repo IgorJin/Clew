@@ -8,15 +8,18 @@ import {
   CircleHelp,
   GitBranch,
   Inbox,
+  Laptop,
   RefreshCw,
   Send,
   ShieldCheck,
   SquareTerminal,
+  Terminal,
   WifiOff,
   X,
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
-import type { Task, TaskState, ThreadItem } from './types';
+import { rolesForProfile } from './api';
+import type { AgentRole, NextStep, Task, TaskState, ThreadItem } from './types';
 import { TerminalPane } from './TerminalPane';
 
 const stateLabel: Record<TaskState, string> = {
@@ -26,33 +29,59 @@ const stateLabel: Record<TaskState, string> = {
   RECOVERING: 'Recovering',
   EXECUTING: 'Executing',
   VERIFYING: 'Verifying',
-  REVIEWING: 'In review',
-  WAITING_FOR_HUMAN: 'Needs you',
+  REVIEWING: 'Review',
+  WAITING_FOR_HUMAN: 'Waiting',
   READY: 'Ready',
-  COMPLETED: 'Completed',
+  COMPLETED: 'Done',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
   BLOCKED: 'Blocked',
 };
+
+type StatusGroup = 'waiting' | 'error' | 'active' | 'other';
+const statusGroup: Record<TaskState, StatusGroup> = {
+  WAITING_FOR_HUMAN: 'waiting',
+  BLOCKED: 'waiting',
+  FAILED: 'error',
+  CANCELLED: 'error',
+  EXECUTING: 'active',
+  VERIFYING: 'active',
+  REVIEWING: 'active',
+  RECOVERING: 'active',
+  QUEUED: 'active',
+  DRAFT: 'other',
+  PLAN_READY: 'other',
+  READY: 'other',
+  COMPLETED: 'other',
+};
+
 const kindLabel: Record<string, string> = {
-  task_created: 'Task created',
+  task_created: 'Created',
   run_started: 'Run started',
   review_findings: 'Review finding',
-  retry_scheduled: 'Retry scheduled',
+  retry_scheduled: 'Retry',
   review_recorded: 'Review',
   task_ready: 'Ready',
   plan_approval_required: 'Approval required',
   next_step_proposed: 'Next step',
-  step_approved: 'Step approved',
-  codex_session_started: 'Codex session',
-  codex_turn_started: 'Codex turn',
+  step_approved: 'Approved',
+  codex_session_started: 'Session',
+  codex_turn_started: 'Turn',
   worker_tool_started: 'Tool started',
-  worker_tool_completed: 'Tool completed',
+  worker_tool_completed: 'Tool done',
   worker_waiting: 'Worker response',
   worker_turn_failed: 'Worker turn failed',
   worker_turn_interrupted: 'Worker turn interrupted',
-  worker_output: 'Worker output',
+  worker_output: 'Output',
 };
+
+function statusPriority(state: TaskState): number {
+  const group = statusGroup[state];
+  if (group === 'waiting') return 0;
+  if (group === 'error') return 1;
+  if (group === 'active') return 2;
+  return 3;
+}
 
 function Status({ state }: { state: TaskState }) {
   return (
@@ -62,13 +91,14 @@ function Status({ state }: { state: TaskState }) {
     </span>
   );
 }
+
 function Connection({ state }: { state: ConnectionState }) {
-  const labels = {
-    fixture: 'Fixture mode',
+  const labels: Record<ConnectionState, string> = {
+    fixture: 'Fixture',
     connected: 'Connected',
     disconnected: 'Disconnected',
-    reconnecting: 'Reconnecting',
-    incompatible: 'Incompatible daemon',
+    reconnecting: 'Reconnecting…',
+    incompatible: 'Incompatible',
   };
   return (
     <span className={`connection connection-${state}`}>
@@ -77,27 +107,451 @@ function Connection({ state }: { state: ConnectionState }) {
     </span>
   );
 }
+
 function formatTime(value: string) {
   return new Intl.DateTimeFormat('en', { hour: '2-digit', minute: '2-digit' }).format(
     new Date(value),
   );
 }
+
 function iconFor(kind: string) {
-  if (kind.includes('review')) return <ShieldCheck size={16} />;
-  if (kind.includes('run')) return <SquareTerminal size={16} />;
-  if (kind.includes('retry')) return <RefreshCw size={16} />;
-  if (kind.includes('approval')) return <AlertTriangle size={16} />;
-  if (kind.includes('ready')) return <Check size={16} />;
-  return <Activity size={16} />;
+  if (kind.includes('review')) return <ShieldCheck size={13} />;
+  if (kind.includes('run')) return <SquareTerminal size={13} />;
+  if (kind.includes('retry')) return <RefreshCw size={13} />;
+  if (kind.includes('approval')) return <AlertTriangle size={13} />;
+  if (kind.includes('ready')) return <Check size={13} />;
+  return <Activity size={13} />;
+}
+
+function agentIcon(role: AgentRole) {
+  if (role === 'architect') return <GitBranch size={12} />;
+  if (role === 'reviewer') return <ShieldCheck size={12} />;
+  return <Terminal size={12} />;
 }
 
 function taskIdFromLocation() {
   const match = window.location.pathname.match(/^\/tasks\/([^/]+)\/?$/);
-
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function App() {
+function Logo() {
+  return (
+    <div className="brand">
+      <span className="brand-mark">
+        <GitBranch size={14} />
+      </span>
+      <span>clew</span>
+      <span className="brand-slash">/</span>
+      <span className="brand-context">control plane</span>
+    </div>
+  );
+}
+
+export function Thread({ items }: { items: ThreadItem[] }) {
+  const newestCursor = Math.max(0, ...items.map((e) => e.cursor));
+
+  return (
+    <div className="thread">
+      {[...items].reverse().map((entry) => (
+        <div
+          className={`thread-item${entry.cursor === newestCursor ? ' thread-item-new' : ''}`}
+          key={entry.id}
+        >
+          <div className="thread-marker">{iconFor(entry.kind)}</div>
+          <div className="thread-line" />
+          <div className="thread-content">
+            <div className="thread-meta">
+              <span className="thread-kind">
+                {kindLabel[entry.kind] ?? entry.kind.replaceAll('_', ' ')}
+              </span>
+              <time>{formatTime(entry.at)}</time>
+            </div>
+            <p>{entry.summary}</p>
+            <div className="source">
+              <span>{entry.stageId ?? 'task'}</span>
+              {entry.runId && (
+                <>
+                  <span>·</span>
+                  <span>{entry.runId}</span>
+                </>
+              )}
+              <span>·</span>
+              <span>{entry.source.id}</span>
+              {entry.redacted && <span className="redacted">redacted</span>}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Diagnostic({ task }: { task: Task }) {
+  return (
+    <div className="diagnostic">
+      {task.events.length ? (
+        task.events.map((event) => (
+          <div className="diagnostic-row" key={event.seq}>
+            <span className="mono">{event.seq}</span>
+            <strong>{event.type}</strong>
+            <time>{formatTime(event.at)}</time>
+          </div>
+        ))
+      ) : (
+        <div className="empty-inline">
+          <WifiOff size={15} />
+          Diagnostic events are available when connected to a daemon.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stages({ task }: { task: Task }) {
+  return (
+    <section className="panel stages-panel">
+      <div className="panel-head compact">
+        <h3>Stages</h3>
+        <span className="small-muted">{task.stages.length} total</span>
+      </div>
+      {task.stages.length ? (
+        <div className="stages">
+          {task.stages.map((stage) => (
+            <div className="stage" key={stage.id}>
+              <span className={`stage-icon stage-${stage.status.toLowerCase()}`}>
+                {stage.status === 'COMPLETED' ? (
+                  <Check size={12} />
+                ) : stage.status === 'BLOCKED' ? (
+                  <AlertTriangle size={12} />
+                ) : (
+                  <Activity size={12} />
+                )}
+              </span>
+              <div>
+                <strong>{stage.id}</strong>
+                <span>
+                  {stage.kind} · {stage.status.toLowerCase()}
+                </span>
+              </div>
+              <ChevronRight size={13} className="stage-arrow" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-inline">No stages yet.</div>
+      )}
+    </section>
+  );
+}
+
+function Findings({ task }: { task: Task }) {
+  if (!task.findingDetails?.length) return null;
+  return (
+    <section className="panel findings-panel">
+      <div className="panel-head compact">
+        <h3>Findings</h3>
+        <span className="small-muted">{task.findingDetails.length} open</span>
+      </div>
+      <div className="findings">
+        {task.findingDetails.map((finding, i) => (
+          <div className="finding" key={`${finding.criterion ?? 'f'}-${i}`}>
+            <span>{finding.severity ?? 'review'}</span>
+            <strong>{finding.criterion ?? 'Feedback'}</strong>
+            <p>{finding.reason}</p>
+            {finding.target && <code>{finding.target}</code>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentGrid({
+  task,
+  canMutate,
+  act,
+}: {
+  task: Task;
+  canMutate: boolean;
+  act: (args: string[], success: string) => void;
+}) {
+  const roles = task.roles;
+  const getLatestForRole = (role: AgentRole) =>
+    task.runs.find((r) => r.stageId === role || (role === 'worker' && r.stageId === 'worker'));
+  const getAgentSessionForRole = (role: AgentRole) =>
+    task.agentSessions.find((s) => s.role === role);
+
+  return (
+    <div className="agent-grid">
+      {roles.map((role) => {
+        const run = getLatestForRole(role);
+        const agentSession = getAgentSessionForRole(role);
+        const isWorkerRole = role === 'worker';
+        const isRunning = isWorkerRole
+          ? run?.status === 'RUNNING' || task.runStatus === 'RUNNING'
+          : false;
+        const isCompleted = isWorkerRole
+          ? run?.status === 'COMPLETED' || task.runStatus === 'COMPLETED'
+          : false;
+        const hasSession = isWorkerRole ? !!(run?.sessionId || isRunning) : !!agentSession;
+        const statusClass = isRunning ? 'running' : isCompleted ? 'completed' : 'idle';
+
+        return (
+          <div className="agent-card" key={role}>
+            <div className="agent-header">
+              <span className="agent-role">
+                <span className="agent-role-icon">{agentIcon(role)}</span>
+                {role}
+              </span>
+              <span className={`agent-status ${statusClass}`}>
+                {isRunning ? 'running' : isCompleted ? 'done' : hasSession ? 'available' : 'idle'}
+              </span>
+            </div>
+            <div className="agent-meta">
+              {isWorkerRole ? (
+                run ? (
+                  <>
+                    {run.harness} · attempt {run.attempt}
+                    {run.commitSha && <span> · {run.commitSha.slice(0, 7)}</span>}
+                  </>
+                ) : (
+                  <span>No runs</span>
+                )
+              ) : agentSession ? (
+                <>
+                  {agentSession.harness} · session available
+                  {agentSession.workspace && <span> · {agentSession.workspace}</span>}
+                </>
+              ) : (
+                <span>Plan not created yet</span>
+              )}
+            </div>
+            <div className="agent-actions">
+              <button
+                className="button secondary small"
+                disabled={!canMutate || !hasSession}
+                title={hasSession ? `Open ${role} terminal` : `No session available for ${role}`}
+                onClick={() => {
+                  if (isWorkerRole) {
+                    act(
+                      [
+                        'session',
+                        'open',
+                        task.id,
+                        '--stage',
+                        run?.stageId ?? role,
+                        '--role',
+                        role,
+                        '--harness',
+                        run?.harness ?? 'codex',
+                        ...(isRunning ? ['--surface', 'live', '--mode', 'live'] : []),
+                      ],
+                      `${role} terminal opened`,
+                    );
+                  } else {
+                    act(
+                      [
+                        'session',
+                        'open',
+                        task.id,
+                        '--role',
+                        role,
+                        '--harness',
+                        agentSession?.harness ?? 'codex',
+                      ],
+                      `${role} terminal opened`,
+                    );
+                  }
+                }}
+              >
+                <Terminal size={12} />
+                {hasSession
+                  ? isRunning
+                    ? 'Open live terminal'
+                    : `Open ${role} session`
+                  : 'Native session unavailable'}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type CreateTaskInput = {
+  title: string;
+  body: string;
+  profile: 'quick' | 'standard' | 'deep';
+  tags: string;
+};
+
+function autoTitle(body: string): string {
+  const firstLine = body.split('\n')[0].trim();
+
+  return firstLine.slice(0, 120);
+}
+
+function CreateTask({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (input: CreateTaskInput) => Promise<void>;
+}) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [profile, setProfile] = useState<'quick' | 'standard' | 'deep'>('quick');
+  const [tags, setTags] = useState('');
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleBodyInput = (event: Event) => {
+    const value = (event.currentTarget as HTMLTextAreaElement).value;
+    setBody(value);
+    if (
+      !title.trim() ||
+      (title === autoTitle(body.slice(0, value.length - 1)) && value.length > 0)
+    ) {
+      setTitle(autoTitle(value));
+    }
+  };
+
+  const submit = (event: Event) => {
+    event.preventDefault();
+    const cleanTitle = (title.trim() || autoTitle(body)).trim();
+    if (!cleanTitle || !body.trim()) return;
+    void onCreate({
+      title: cleanTitle,
+      body: body.trim(),
+      profile,
+      tags: tags.trim(),
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="create-task" onSubmit={submit}>
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">New task</span>
+            <h2>Create a task</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <label htmlFor="task-body">What should be done?</label>
+        <textarea
+          ref={bodyRef}
+          id="task-body"
+          className="create-task-body"
+          value={body}
+          onInput={handleBodyInput}
+          placeholder="Describe the task, expected behavior, constraints..."
+          required
+        />
+        <label htmlFor="task-title">Title</label>
+        <input
+          id="task-title"
+          value={title}
+          onInput={(event) => setTitle(event.currentTarget.value)}
+          placeholder={autoTitle(body) || 'Short title'}
+          required
+        />
+        <label>Complexity</label>
+        <div className="profile-selector">
+          {(
+            [
+              ['quick', 'Quick'],
+              ['standard', 'Standard'],
+              ['deep', 'Deep'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`profile-chip ${profile === key ? 'selected' : ''}`}
+              onClick={() => setProfile(key)}
+              aria-pressed={profile === key}
+            >
+              <span className="profile-name">{label}</span>
+              <span className="profile-hint">
+                {key === 'quick'
+                  ? 'worker'
+                  : key === 'standard'
+                    ? '+ review'
+                    : 'architect + review'}
+              </span>
+            </button>
+          ))}
+        </div>
+        <label htmlFor="task-tags">Tags</label>
+        <input
+          id="task-tags"
+          value={tags}
+          onInput={(event) => setTags(event.currentTarget.value)}
+          placeholder="comma, separated"
+        />
+        <p className="small-muted">
+          Created as Draft. You'll need to approve the next step before it starts.
+        </p>
+        <div className="modal-actions">
+          <button type="button" className="button secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button primary">
+            Create task
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function StepIndicator({ state }: { state: TaskState }) {
+  const steps: { key: string; label: string }[] = [
+    { key: 'plan', label: 'Plan' },
+    { key: 'execute', label: 'Execute' },
+    { key: 'review', label: 'Review' },
+    { key: 'done', label: 'Done' },
+  ];
+  const stepOf: Record<string, number> = {
+    DRAFT: 0,
+    PLAN_READY: 0,
+    QUEUED: 1,
+    RECOVERING: 1,
+    EXECUTING: 1,
+    VERIFYING: 1,
+    REVIEWING: 2,
+    WAITING_FOR_HUMAN: 2,
+    READY: 3,
+    COMPLETED: 3,
+    FAILED: -1,
+    CANCELLED: -1,
+    BLOCKED: -1,
+  };
+  const active = stepOf[state] ?? 0;
+
+  return (
+    <div className="stepper">
+      {steps.map((step, i) => (
+        <span key={step.key} style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
+          {i > 0 && <span className="step-sep" />}
+          <span
+            className={
+              active < 0 ? 'step' : i < active ? 'step done' : i === active ? 'step active' : 'step'
+            }
+          >
+            <span className="step-dot" />
+            {step.label}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selected, setSelected] = useState(
     () => taskIdFromLocation() ?? sessionStorage.getItem('clew-selected-task') ?? 'CLEW-071',
@@ -107,7 +561,10 @@ function App() {
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [descExpanded, setDescExpanded] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [runRequested, setRunRequested] = useState(false);
   const autoOpenedTerminal = useRef<string | null>(null);
@@ -116,26 +573,26 @@ function App() {
   const refreshTimer = useRef<number | undefined>(undefined);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+
   const selectTask = useCallback((taskId: string) => {
     setSelected(taskId);
     sessionStorage.setItem('clew-selected-task', taskId);
     if (window.location.pathname !== `/tasks/${encodeURIComponent(taskId)}`)
       window.history.pushState({}, '', `/tasks/${encodeURIComponent(taskId)}`);
   }, []);
+
   useEffect(() => {
     const onPopState = () => {
       const taskId = taskIdFromLocation();
-
       if (taskId) {
         setSelected(taskId);
         sessionStorage.setItem('clew-selected-task', taskId);
       }
     };
-
     window.addEventListener('popstate', onPopState);
-
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
   const refresh = useCallback(() => {
     if (refreshInFlight.current) return refreshInFlight.current;
     const operation = loadTasks().then(({ tasks: next, state }) => {
@@ -148,16 +605,16 @@ function App() {
         }
       }
     });
-
     refreshInFlight.current = operation.finally(() => {
       refreshInFlight.current = null;
     });
-
     return refreshInFlight.current;
   }, [selectTask]);
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
   useEffect(() => {
     const scheduleRefresh = () => {
       if (refreshTimer.current !== undefined) return;
@@ -177,22 +634,24 @@ function App() {
         if (state === 'connected') scheduleRefresh();
       },
     );
-
     return () => {
       if (refreshTimer.current !== undefined) window.clearTimeout(refreshTimer.current);
       unsubscribe();
     };
   }, [refresh]);
+
   const task = useMemo(
     () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
     [selected, tasks],
   );
+
   useEffect(() => {
     if (task?.terminalActive && task.runId && autoOpenedTerminal.current !== task.runId) {
       autoOpenedTerminal.current = task.runId;
       setTerminalVisible(true);
     }
   }, [task?.runId, task?.terminalActive]);
+
   useEffect(() => {
     const waitingForTerminal =
       runRequested || (task?.state === 'EXECUTING' && task.runStatus === 'RUNNING');
@@ -200,48 +659,72 @@ function App() {
     if (!waitingForTerminal) return undefined;
     if (task?.terminalActive) {
       setRunRequested(false);
-
       return undefined;
     }
     const timer = window.setInterval(() => void refresh(), 500);
-
     return () => window.clearInterval(timer);
   }, [refresh, runRequested, task?.state, task?.runStatus, task?.terminalActive]);
-  const createTask = async (title: string, description: string) => {
+
+  const sortedTasks = useMemo(() => {
+    const list = statusFilter
+      ? tasks.filter((t) => {
+          if (statusFilter === 'waiting') return statusGroup[t.state] === 'waiting';
+          if (statusFilter === 'error') return statusGroup[t.state] === 'error';
+          if (statusFilter === 'active') return statusGroup[t.state] === 'active';
+          if (statusFilter === 'other') return statusGroup[t.state] === 'other';
+          return true;
+        })
+      : tasks;
+    return [...list].sort((a, b) => statusPriority(a.state) - statusPriority(b.state));
+  }, [tasks, statusFilter]);
+
+  const createTask = async ({ title, body, profile, tags }: CreateTaskInput) => {
     if (!canMutateFor(connection)) {
       setNotice('Actions are disabled while the control plane is disconnected');
       return;
     }
+    const tagList = tags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const args = [
+      'task',
+      'create',
+      '--title',
+      title,
+      '--description',
+      body,
+      '--profile',
+      profile,
+      ...tagList.flatMap((tag) => ['--tags', tag]),
+    ];
     try {
-      const result = await execute([
-        'task',
-        'create',
-        '--title',
-        title,
-        '--description',
-        description,
-      ]);
+      const result = await execute(args);
       if ((result as { fixture?: boolean } | null)?.fixture) {
         const id = `LOCAL-${Date.now()}`;
         setTasks((current) => [
           {
             id,
             title,
-            goal: description,
-            profile: 'quick',
-            state: 'DRAFT',
+            goal: body,
+            profile,
+            tags: tagList,
+            state: 'DRAFT' as TaskState,
             attention: null,
             revision: null,
             attempts: 0,
+            roles: rolesForProfile(profile),
+            runs: [],
             stages: [],
             reviewed: false,
             findings: 0,
+            agentSessions: [],
             thread: {
               version: 1,
               items: [],
               nextCursor: null,
               hasMore: false,
-              redaction: 'public-safe',
+              redaction: 'public-safe' as const,
             },
             events: [],
           },
@@ -251,7 +734,6 @@ function App() {
       } else {
         await refresh();
         const createdId = (result as { id?: string }).id;
-
         if (createdId) selectTask(createdId);
       }
       setCreateOpen(false);
@@ -260,6 +742,7 @@ function App() {
       setNotice(error instanceof Error ? error.message : 'Task creation failed');
     }
   };
+
   if (!task) {
     const unavailable = connection === 'disconnected' || connection === 'incompatible';
     return (
@@ -269,7 +752,7 @@ function App() {
           <Connection state={connection} />
         </header>
         <main className="empty">
-          {unavailable ? <WifiOff size={28} /> : <Inbox size={28} />}
+          {unavailable ? <WifiOff size={24} /> : <Inbox size={24} />}
           <h1>{unavailable ? 'Control plane unavailable' : 'No tasks yet'}</h1>
           <p>
             {connection === 'incompatible'
@@ -280,10 +763,10 @@ function App() {
           </p>
           <div className="empty-actions">
             <button className="button primary" onClick={() => setCreateOpen(true)}>
-              <Check size={15} /> Create task
+              <Check size={14} /> Create task
             </button>
             <button className="button secondary" onClick={() => void refresh()}>
-              <RefreshCw size={15} /> Retry
+              <RefreshCw size={14} /> Retry
             </button>
           </div>
         </main>
@@ -291,13 +774,14 @@ function App() {
       </div>
     );
   }
+
   const canMutate = connection === 'connected' || connection === 'fixture';
   const act = async (args: string[], success: string) => {
     if (!canMutate) {
       setNotice('Actions are disabled while the control plane is disconnected');
-
       return;
     }
+    if (!window.confirm(`Confirm ${args.join(' ')}?`)) return;
     if (args[0] === 'run') setRunRequested(true);
     try {
       const result = await execute(args);
@@ -306,12 +790,16 @@ function App() {
         setTasks((current) =>
           current.map((entry) => {
             if (entry.id !== task.id) return entry;
-            if (args[0] === 'complete') return { ...entry, state: 'COMPLETED' };
-            if (args[0] === 'approve') return { ...entry, state: 'PLAN_READY', attention: null };
-            if (args[0] === 'run') return { ...entry, state: 'EXECUTING' };
-            if (args[0] === 'finish-worker') return { ...entry, state: 'VERIFYING' };
-            if (args[0] === 'retry') return { ...entry, state: 'RECOVERING' };
-            if (args[0] === 'continue') return { ...entry, state: 'RECOVERING', attention: null };
+            if (args[0] === 'complete') return { ...entry, state: 'COMPLETED' as TaskState };
+            if (args[0] === 'approve')
+              return { ...entry, state: 'PLAN_READY' as TaskState, attention: null };
+            if (args[0] === 'run') return { ...entry, state: 'EXECUTING' as TaskState };
+            if (args[0] === 'finish-worker') return { ...entry, state: 'VERIFYING' as TaskState };
+            if (args[0] === 'task' && args[1] === 'approve-step')
+              return { ...entry, state: 'EXECUTING' as TaskState };
+            if (args[0] === 'retry') return { ...entry, state: 'RECOVERING' as TaskState };
+            if (args[0] === 'continue')
+              return { ...entry, state: 'RECOVERING' as TaskState, attention: null };
             if (args[0] === 'task' && args[1] === 'message') {
               const item: ThreadItem = {
                 version: 1,
@@ -340,12 +828,46 @@ function App() {
       setNotice(error instanceof Error ? error.message : 'Action failed');
     }
   };
+
   const canStart = ['DRAFT', 'PLAN_READY', 'QUEUED'].includes(task.state);
   const canContinue =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
   const interactiveWorker =
     task.runStatus === 'RUNNING' && task.terminalActive === true && Boolean(task.runId);
+  const pendingHarnessApproval = task.harnessApprovals?.find((a) => !a.decision);
+
+  const explainNextStep = async () => {
+    try {
+      const result = await execute(['task', 'next-step', task.id]);
+      if ((result as { fixture?: boolean } | null)?.fixture) {
+        setNextStep({
+          taskId: task.id,
+          kind: 'start_worker',
+          currentStep: 'DRAFT',
+          resultingStep: 'EXECUTING',
+          summary: 'Start one read-only worker for this task',
+          inputs: { harness: 'codex', model: 'default', permissionMode: 'read-only' },
+          sideEffects: ['start one local worker process', 'create one run record'],
+          approvalRequired: true,
+          status: 'PENDING',
+        });
+      } else setNextStep(result as NextStep);
+      setNotice('Next step is ready for review');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not explain next step');
+    }
+  };
+
+  const openChanges = async () => {
+    try {
+      await execute(['task', 'open-changes', task.id]);
+      setNotice('Opened in editor');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not open changes');
+    }
+  };
+
   return (
     <div className="app">
       <header className="topbar">
@@ -353,7 +875,7 @@ function App() {
         <div className="topbar-right">
           <Connection state={connection} />
           <button className="icon-button" aria-label="Refresh tasks" onClick={() => void refresh()}>
-            <RefreshCw size={16} />
+            <RefreshCw size={14} />
           </button>
           <span className="avatar">LC</span>
         </div>
@@ -367,14 +889,29 @@ function App() {
             </button>
             <span className="count">{tasks.length}</span>
           </div>
+          <div className="sidebar-filters">
+            {[
+              { key: null, label: 'All' },
+              { key: 'waiting', label: 'Waiting' },
+              { key: 'active', label: 'Active' },
+              { key: 'other', label: 'Other' },
+              { key: 'error', label: 'Failed' },
+            ].map((f) => (
+              <button
+                key={f.key ?? 'all'}
+                className={`filter-chip${statusFilter === f.key ? ' active' : ''}`}
+                onClick={() => setStatusFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           <div className="task-list">
-            {tasks.map((entry) => (
+            {sortedTasks.map((entry) => (
               <button
                 className={`task-row ${entry.id === task.id ? 'selected' : ''}${entry.interactionStatus === 'waiting_for_operator' ? ' task-row-waiting' : ''}`}
                 key={entry.id}
-                onClick={() => {
-                  selectTask(entry.id);
-                }}
+                onClick={() => selectTask(entry.id)}
               >
                 <div className="task-row-top">
                   <span className="task-id">{entry.id}</span>
@@ -388,94 +925,205 @@ function App() {
                 )}
                 {entry.attention && (
                   <span className="attention">
-                    <AlertTriangle size={13} />
+                    <AlertTriangle size={11} />
                     {entry.attention.replaceAll('_', ' ')}
                   </span>
                 )}
                 <span className="task-meta">
-                  {entry.profile} · {entry.attempts ? `${entry.attempts} attempts` : 'not started'}
+                  {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
                 </span>
               </button>
             ))}
           </div>
           <div className="sidebar-footer">
-            <div className="legend">
-              <span className="legend-mark" /> Local control plane
-            </div>
-            <span className="version">v0.4 · protocol 1</span>
+            <span className="version">v0.4</span>
           </div>
         </aside>
         <main className="content">
           <div className="content-inner">
-            <section className="hero">
-              <div>
-                <div className="eyebrow">
-                  Task overview <span>/</span> {task.id}
-                </div>
-                <h1>{task.title}</h1>
-                <p>{task.goal}</p>
+            <section className="task-header">
+              <div className="eyebrow">
+                {task.id}
+                <span className="eyebrow-tag">{task.profile}</span>
               </div>
-              <div className="hero-actions">
-                <button
-                  className="button secondary"
-                  disabled={
-                    !canMutate ||
-                    (!interactiveWorker && !canStart && !canContinue) ||
-                    (!interactiveWorker && canContinue && !message.trim())
-                  }
-                  title={
-                    canContinue && !message.trim()
-                      ? 'Add an operator message before continuing'
-                      : undefined
-                  }
-                  onClick={() => {
-                    if (interactiveWorker)
-                      return void act(
-                        ['finish-worker', task.id, '--run', task.runId!],
-                        'Worker is finishing',
-                      );
-                    if (canContinue)
-                      return void act(
-                        ['continue', task.id, '--message', message],
-                        'Continuation requested',
-                      );
-                    return void act(['run', task.id], 'Task started');
-                  }}
-                >
-                  {interactiveWorker ? <Check size={15} /> : <RefreshCw size={15} />}
-                  {interactiveWorker ? 'Finish worker' : canContinue ? 'Continue' : 'Run task'}
-                </button>
-                <button
-                  className="button primary"
-                  disabled={!canMutate || task.state !== 'READY' || !task.revision}
-                  title={!task.revision ? 'A verified result revision is required' : undefined}
-                  onClick={() =>
-                    act(['complete', task.id, '--revision', task.revision!], 'Task completed')
-                  }
-                >
-                  <Check size={15} /> Complete
-                </button>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'start',
+                  gap: 16,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <h1>{task.title}</h1>
+                </div>
+                <div className="header-actions">
+                  <button
+                    className="button secondary"
+                    disabled={!canMutate}
+                    onClick={() => void openChanges()}
+                  >
+                    <Laptop size={13} /> Open changes
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={
+                      !canMutate ||
+                      (!interactiveWorker && !canStart && !canContinue) ||
+                      (!interactiveWorker && canContinue && !message.trim())
+                    }
+                    title={
+                      canContinue && !message.trim()
+                        ? 'Add an operator message before continuing'
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (interactiveWorker)
+                        return void act(
+                          ['finish-worker', task.id, '--run', task.runId!],
+                          'Worker is finishing',
+                        );
+                      if (canContinue)
+                        return void act(
+                          ['continue', task.id, '--message', message],
+                          'Continuation requested',
+                        );
+                      if (nextStep?.status === 'PENDING')
+                        return void act(
+                          ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
+                          'Start approved',
+                        );
+                      return void explainNextStep();
+                    }}
+                  >
+                    {interactiveWorker ? <Check size={13} /> : <RefreshCw size={13} />}
+                    {interactiveWorker
+                      ? 'Finish worker'
+                      : canContinue
+                        ? 'Continue'
+                        : nextStep?.status === 'PENDING'
+                          ? 'Approve start'
+                          : 'Next step'}
+                  </button>
+                  <button
+                    className="button primary"
+                    disabled={!canMutate || task.state !== 'READY' || !task.revision}
+                    title={!task.revision ? 'A verified revision is required' : undefined}
+                    onClick={() =>
+                      act(['complete', task.id, '--revision', task.revision!], 'Task completed')
+                    }
+                  >
+                    <Check size={13} /> Complete
+                  </button>
+                </div>
+              </div>
+              <button className="description-toggle" onClick={() => setDescExpanded(!descExpanded)}>
+                {descExpanded ? '▾' : '▸'} Description
+              </button>
+              {descExpanded && <p className="description-text">{task.goal}</p>}
+              <StepIndicator state={task.state} />
+              {(task.attention || pendingHarnessApproval) && (
+                <div className="attention-actions">
+                  <span className="attention-label">
+                    <AlertTriangle size={13} />
+                    Attention
+                  </span>
+                  {task.attention === 'PLAN_APPROVAL_REQUIRED' && (
+                    <>
+                      <span className="attention-text">Plan approval required</span>
+                      <button
+                        className="button primary small"
+                        disabled={!canMutate}
+                        onClick={() => act(['approve', task.id], 'Plan approved')}
+                      >
+                        Approve plan
+                      </button>
+                    </>
+                  )}
+                  {task.state === 'WAITING_FOR_HUMAN' &&
+                    task.attention !== 'PLAN_APPROVAL_REQUIRED' && (
+                      <span className="attention-text">Operator input required</span>
+                    )}
+                  {pendingHarnessApproval && (
+                    <>
+                      <span className="attention-text">
+                        Worker approval ·{' '}
+                        <span className="mono">
+                          {String(
+                            pendingHarnessApproval.params.command ?? pendingHarnessApproval.method,
+                          )}
+                        </span>
+                      </span>
+                      <button
+                        className="button primary small"
+                        disabled={!canMutate}
+                        onClick={() =>
+                          act(
+                            ['approve-run', pendingHarnessApproval.id],
+                            'Worker approval accepted',
+                          )
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="button secondary small"
+                        disabled={!canMutate}
+                        onClick={() =>
+                          act(['reject-run', pendingHarnessApproval.id], 'Worker approval rejected')
+                        }
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="metrics">
+                <div className="metric">
+                  <span className="metric-label">Revision</span>
+                  <span className="metric-value">{task.revision ?? '—'}</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Review</span>
+                  <span className="metric-value">
+                    {!task.reviewed
+                      ? 'Pending'
+                      : task.findings
+                        ? `${task.findings} findings`
+                        : 'Passed'}
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Runs</span>
+                  <span className="metric-value">{task.attempts}</span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Profile</span>
+                  <span className="metric-value">{task.profile}</span>
+                </div>
               </div>
             </section>
+
             {notice && (
               <div className="notice">
-                <CircleHelp size={15} />
+                <CircleHelp size={14} />
                 {notice}
                 <button onClick={() => setNotice('')} aria-label="Dismiss">
-                  <X size={14} />
+                  <X size={12} />
                 </button>
               </div>
             )}
+
             {(connection === 'disconnected' || connection === 'incompatible') && (
               <div className="connection-banner" role="alert">
-                <WifiOff size={16} />
+                <WifiOff size={14} />
                 {connection === 'incompatible'
-                  ? 'Daemon contract is incompatible. Last known data remains visible, but actions are disabled.'
-                  : `Daemon connection is unavailable. Showing last known data${
-                      lastUpdatedAt ? ` from ${lastUpdatedAt.toLocaleTimeString()}` : ''
-                    }; actions are disabled.`}
+                  ? 'Daemon contract is incompatible. Actions are disabled.'
+                  : `Daemon connection is unavailable. Showing last known data${lastUpdatedAt ? ` from ${lastUpdatedAt.toLocaleTimeString()}` : ''}; actions are disabled.`}
               </div>
             )}
+
             {task.interactionStatus === 'waiting_for_operator' && (
               <div className="terminal-waiting-banner" role="status">
                 <SquareTerminal size={18} />
@@ -485,45 +1133,34 @@ function App() {
                     The worker returned a response. Continue in the terminal or finish the worker.
                   </p>
                 </div>
-                {task.terminalAvailable && task.runId && (
+                {task.terminalAvailable && task.runId && task.terminalAccess !== 'runner_local' && (
                   <button className="text-button" onClick={() => setTerminalVisible(true)}>
                     Open terminal <ChevronRight size={14} />
                   </button>
                 )}
               </div>
             )}
-            <section className="summary-grid">
-              <div className="summary-card">
-                <span className="card-label">Current state</span>
-                <Status state={task.state} />
-                <span className="card-sub">
-                  {task.attention ? task.attention.replaceAll('_', ' ') : 'No action needed'}
-                </span>
-              </div>
-              <div className="summary-card">
-                <span className="card-label">Result revision</span>
-                <strong className="mono">{task.revision ?? '—'}</strong>
-                <span className="card-sub">
-                  {task.revision ? 'Latest verified revision' : 'No result yet'}
-                </span>
-              </div>
-              <div className="summary-card">
-                <span className="card-label">Review</span>
-                <strong>
-                  {!task.reviewed
-                    ? 'Not reviewed'
-                    : task.findings
-                      ? `${task.findings} finding${task.findings === 1 ? '' : 's'}`
-                      : 'Passed'}
-                </strong>
-                <span className="card-sub">Reviewer decision</span>
-              </div>
-              <div className="summary-card">
-                <span className="card-label">Attempts</span>
-                <strong>{task.attempts}</strong>
-                <span className="card-sub">Automatic corrections</span>
-              </div>
-            </section>
+
+            {nextStep?.status === 'PENDING' && (
+              <section className="next-step" aria-label="Next step">
+                <div>
+                  <span className="eyebrow">Next step</span>
+                  <h2>{nextStep.summary}</h2>
+                  <p>
+                    {nextStep.currentStep} → {nextStep.resultingStep}. Nothing starts until you
+                    approve.
+                  </p>
+                </div>
+                <div className="next-step-details">
+                  <span>Harness: {nextStep.inputs?.harness ?? '—'}</span>
+                  <span>Model: {nextStep.inputs?.model ?? '—'}</span>
+                  <span>Mode: {nextStep.inputs?.permissionMode ?? '—'}</span>
+                </div>
+              </section>
+            )}
+
+            <AgentGrid task={task} canMutate={canMutate} act={act} />
+
             {terminalVisible && task.terminalAvailable && task.runId && (
               <TerminalPane
                 runId={task.runId}
@@ -531,18 +1168,19 @@ function App() {
                 onClose={() => setTerminalVisible(false)}
               />
             )}
+
             <div className="main-grid">
               <section className="panel thread-panel">
                 <div className="panel-head">
                   <div>
-                    <span className="eyebrow">Causal history</span>
-                    <h2>Task Thread</h2>
+                    <span className="eyebrow">Activity</span>
+                    <h2>Thread</h2>
                   </div>
                   <button
                     className={`toggle ${diagnostic ? 'active' : ''}`}
                     onClick={() => setDiagnostic(!diagnostic)}
                   >
-                    {diagnostic ? 'Thread view' : 'Diagnostic events'} <ArrowUpRight size={14} />
+                    {diagnostic ? 'Thread view' : 'Diagnostic'} <ArrowUpRight size={12} />
                   </button>
                 </div>
                 {diagnostic ? <Diagnostic task={task} /> : <Thread items={task.thread.items} />}
@@ -556,36 +1194,11 @@ function App() {
                   </section>
                 )}
               </section>
+
               <aside className="right-rail">
                 <Stages task={task} />
                 <Findings task={task} />
                 <section className="panel task-message-panel">
-                  {task.attention === 'PLAN_APPROVAL_REQUIRED' && (
-                    <div className="attention-box">
-                      <AlertTriangle size={17} />
-                      <div>
-                        <strong>Plan approval required</strong>
-                        <p>Review the proposed stages before execution starts.</p>
-                        <button
-                          className="text-button"
-                          disabled={!canMutate}
-                          onClick={() => act(['approve', task.id], 'Plan approved')}
-                        >
-                          Approve plan <ChevronRight size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {task.state === 'WAITING_FOR_HUMAN' &&
-                    task.attention !== 'PLAN_APPROVAL_REQUIRED' && (
-                      <div className="attention-box">
-                        <AlertTriangle size={17} />
-                        <div>
-                          <strong>Operator input required</strong>
-                          <p>Add feedback below, then continue the task.</p>
-                        </div>
-                      </div>
-                    )}
                   <div className="message-box">
                     <label htmlFor="operator-message">Add a message</label>
                     <textarea
@@ -605,7 +1218,7 @@ function App() {
                         )
                       }
                     >
-                      <Send size={14} /> Add to Thread
+                      <Send size={13} /> Add to Thread
                     </button>
                   </div>
                   <button
@@ -625,12 +1238,12 @@ function App() {
                     }
                     onClick={() => setTerminalVisible(true)}
                   >
-                    <SquareTerminal size={14} />
+                    <SquareTerminal size={13} />
                     {task.terminalAccess === 'runner_local'
-                      ? ' Terminal is on Runner host'
+                      ? 'Terminal is on Runner host'
                       : task.terminalAvailable
-                        ? ' Show live terminal'
-                        : ' Terminal unavailable'}
+                        ? 'Show live terminal'
+                        : 'Terminal unavailable'}
                   </button>
                 </section>
               </aside>
@@ -646,190 +1259,3 @@ function App() {
 function canMutateFor(connection: ConnectionState) {
   return connection === 'connected' || connection === 'fixture';
 }
-
-function CreateTask({
-  onClose,
-  onCreate,
-}: {
-  onClose: () => void;
-  onCreate: (title: string, description: string) => Promise<void>;
-}) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const submit = (event: Event) => {
-    event.preventDefault();
-    if (title.trim() && description.trim()) void onCreate(title.trim(), description.trim());
-  };
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <form className="create-task" onSubmit={submit}>
-        <div className="panel-head compact">
-          <div>
-            <span className="eyebrow">New task</span>
-            <h2>Create a task</h2>
-          </div>
-          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-        <label htmlFor="task-title">Title</label>
-        <input
-          id="task-title"
-          value={title}
-          onInput={(event) => setTitle(event.currentTarget.value)}
-          required
-        />
-        <label htmlFor="task-description">Description</label>
-        <textarea
-          id="task-description"
-          value={description}
-          onInput={(event) => setDescription(event.currentTarget.value)}
-          required
-        />
-        <p className="small-muted">
-          The task is created as Draft. Use Run task when you are ready to start its interactive
-          worker.
-        </p>
-        <div className="modal-actions">
-          <button type="button" className="button secondary" onClick={onClose}>
-            Cancel
-          </button>
-          <button type="submit" className="button primary">
-            Create task
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-function Logo() {
-  return (
-    <div className="brand">
-      <span className="brand-mark">
-        <GitBranch size={17} />
-      </span>
-      <span>clew</span>
-      <span className="brand-slash">/</span>
-      <span className="brand-context">control plane</span>
-    </div>
-  );
-}
-export function Thread({ items }: { items: ThreadItem[] }) {
-  const newestCursor = Math.max(0, ...items.map((entry) => entry.cursor));
-
-  return (
-    <div className="thread">
-      {[...items].reverse().map((entry) => (
-        <div
-          className={`thread-item${entry.cursor === newestCursor ? ' thread-item-new' : ''}`}
-          key={entry.id}
-        >
-          <div className="thread-marker">{iconFor(entry.kind)}</div>
-          <div className="thread-line" />{' '}
-          <div className="thread-content">
-            <div className="thread-meta">
-              <span className="thread-kind">
-                {kindLabel[entry.kind] ?? entry.kind.replaceAll('_', ' ')}
-              </span>
-              <time>{formatTime(entry.at)}</time>
-            </div>
-            <p>{entry.summary}</p>
-            <div className="source">
-              <span>{entry.stageId ?? 'task'}</span>
-              {entry.runId && (
-                <>
-                  <span>·</span>
-                  <span>{entry.runId}</span>
-                </>
-              )}
-              <span>·</span>
-              <span>source {entry.source.id}</span>
-              {entry.redacted && <span className="redacted">redacted</span>}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-function Diagnostic({ task }: { task: Task }) {
-  return (
-    <div className="diagnostic">
-      {task.events.length ? (
-        task.events.map((event) => (
-          <div className="diagnostic-row" key={event.seq}>
-            <span className="mono">{event.seq}</span>
-            <strong>{event.type}</strong>
-            <time>{formatTime(event.at)}</time>
-          </div>
-        ))
-      ) : (
-        <div className="empty-inline">
-          <WifiOff size={17} />
-          Diagnostic events are available when connected to a daemon.
-        </div>
-      )}
-    </div>
-  );
-}
-function Stages({ task }: { task: Task }) {
-  return (
-    <section className="panel stages-panel">
-      <div className="panel-head compact">
-        <h3>Stages</h3>
-        <span className="small-muted">{task.stages.length} total</span>
-      </div>
-      {task.stages.length ? (
-        <div className="stages">
-          {task.stages.map((stage) => (
-            <div className="stage" key={stage.id}>
-              <span className={`stage-icon stage-${stage.status.toLowerCase()}`}>
-                {stage.status === 'COMPLETED' ? (
-                  <Check size={14} />
-                ) : stage.status === 'BLOCKED' ? (
-                  <AlertTriangle size={14} />
-                ) : (
-                  <Activity size={14} />
-                )}
-              </span>
-              <div>
-                <strong>{stage.id}</strong>
-                <span>
-                  {stage.kind} · {stage.status.toLowerCase()}
-                </span>
-              </div>
-              <ChevronRight size={15} className="stage-arrow" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="empty-inline">No stages created yet.</div>
-      )}
-    </section>
-  );
-}
-
-function Findings({ task }: { task: Task }) {
-  if (!task.findingDetails?.length) return null;
-  return (
-    <section className="panel findings-panel">
-      <div className="panel-head compact">
-        <h3>Reviewer findings</h3>
-        <span className="small-muted">{task.findingDetails.length} open</span>
-      </div>
-      <div className="findings">
-        {task.findingDetails.map((finding, index) => (
-          <div className="finding" key={`${finding.criterion ?? 'finding'}-${index}`}>
-            <span>{finding.severity ?? 'review'}</span>
-            <strong>{finding.criterion ?? 'Reviewer feedback'}</strong>
-            <p>{finding.reason}</p>
-            {finding.target && <code>{finding.target}</code>}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-export default App;

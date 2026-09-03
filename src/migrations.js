@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 20;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -399,6 +399,41 @@ const MIGRATIONS = Object.freeze([
           FOREIGN KEY(lease_id, epoch) REFERENCES runner_leases(id, epoch) ON DELETE CASCADE
         );
       `);
+    },
+  },
+  {
+    version: 18,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(tasks)').all();
+
+      if (!columns.some((column) => column.name === 'tags'))
+        db.exec('ALTER TABLE tasks ADD COLUMN tags TEXT DEFAULT NULL');
+    },
+  },
+  {
+    version: 19,
+    apply(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+          id TEXT PRIMARY KEY,
+          task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          role TEXT NOT NULL,
+          harness TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          workspace TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS agent_sessions_task ON agent_sessions(task_id, role);
+      `);
+    },
+  },
+  {
+    // A pre-merge development database may already have recorded version 17
+    // for task tags. Replaying the idempotent runner migration repairs that
+    // version collision without requiring the database to be recreated.
+    version: 20,
+    apply(db) {
+      MIGRATIONS.find((migration) => migration.version === 17).apply(db);
     },
   },
 ]);

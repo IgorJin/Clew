@@ -122,6 +122,9 @@ function printHelp() {
     `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--execution local|paired] [--review-harness fake|codex] [--architect fake|codex]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew doctor [--harness codex|opencode]`,
   );
   console.log('  clew finish-worker TASK [--run RUN-ID]');
+  console.log('  clew task next-step ID');
+  console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
+  console.log('  clew task open-changes ID');
   console.log(
     '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
   );

@@ -13,6 +13,38 @@ export type TaskState =
   | 'CANCELLED'
   | 'BLOCKED';
 
+export type AgentRole = 'architect' | 'worker' | 'reviewer' | 'qa';
+
+export type AgentSession = {
+  id: string;
+  taskId: string;
+  role: string;
+  harness: string;
+  sessionId: string;
+  workspace: string | null;
+  createdAt: string;
+};
+
+export type Run = {
+  id: string;
+  stageId: string;
+  attempt: number;
+  status: string;
+  harness: string;
+  sessionId: string | null;
+  workspace: string | null;
+  commitSha: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  terminalAvailable?: boolean;
+  terminalAccess?: 'controller_local' | 'runner_local' | 'unavailable';
+  terminalActive?: boolean;
+  interactionStatus?: string | null;
+  interactionTurnId?: string | null;
+  lastAgentMessage?: string | null;
+  interactionUpdatedAt?: string | null;
+};
+
 export type ThreadItem = {
   version: 1;
   id: string;
@@ -34,9 +66,13 @@ export type Task = {
   title: string;
   goal: string;
   profile: string;
+  tags: string[];
   state: TaskState;
   attention?: string | null;
   revision?: string | null;
+  roles: AgentRole[];
+  runs: Run[];
+  agentSessions: AgentSession[];
   workerOutput?: string | null;
   workerOutputRunId?: string | null;
   sessionId?: string | null;

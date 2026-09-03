@@ -19,6 +19,11 @@ const api = vi.hoisted(() => ({
       return () => undefined;
     },
   ),
+  rolesForProfile: vi.fn((profile: string) => {
+    if (profile === 'deep') return ['architect', 'worker', 'reviewer'];
+    if (profile === 'standard') return ['worker', 'reviewer'];
+    return ['worker'];
+  }),
 }));
 
 vi.mock('./api', () => api);
@@ -37,6 +42,7 @@ describe('Preact control plane', () => {
   });
 
   it('confirms completion and sends the pinned revision', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /complete/i }));
@@ -46,11 +52,12 @@ describe('Preact control plane', () => {
   });
 
   it('continues READY work with the operator message instead of retrying', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
     const message = await screen.findByRole('textbox', { name: /add a message/i });
 
     fireEvent.input(message, { target: { value: 'Please address the remaining edge case' } });
-    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^continue$/i }));
 
     expect(api.execute).toHaveBeenCalledWith([
       'continue',
@@ -62,6 +69,7 @@ describe('Preact control plane', () => {
   });
 
   it('approves a plan and exposes the durable fixture state', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /parallel cache migration/i }));
     fireEvent.click(screen.getByRole('button', { name: /approve plan/i }));
@@ -70,16 +78,14 @@ describe('Preact control plane', () => {
     expect((await screen.findAllByText('Plan ready')).length).toBeGreaterThan(0);
   });
 
-  it('finishes the interactive worker without exposing duplicate approval controls', async () => {
+  it('exposes a native worker approval while the run is active', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const tasks = structuredClone(fixtureTasks);
     tasks[0] = {
       ...tasks[0],
-      state: 'EXECUTING',
-      attention: null,
+      state: 'WAITING_FOR_HUMAN',
+      attention: 'HUMAN_ACTION_REQUIRED',
       runStatus: 'RUNNING',
-      runId: 'run-1',
-      terminalActive: true,
-      terminalAvailable: true,
       harnessApprovals: [
         {
           id: 'approval-1',
@@ -95,30 +101,29 @@ describe('Preact control plane', () => {
     api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
     render(<App />);
 
-    expect(screen.queryByRole('button', { name: /approve worker command/i })).toBeNull();
-    fireEvent.click(await screen.findByRole('button', { name: /finish worker/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^approve$/i }));
 
-    expect(api.execute).toHaveBeenCalledWith(['finish-worker', 'CLEW-071', '--run', 'run-1']);
+    expect(api.execute).toHaveBeenCalledWith(['approve-run', 'approval-1']);
   });
 
-  it('starts a draft task directly without an explain-next-step gate', async () => {
+  it('finishes an interactive worker', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const tasks = structuredClone(fixtureTasks);
     tasks[0] = {
       ...tasks[0],
-      state: 'DRAFT',
-      revision: null,
-      runStatus: null,
-      runId: null,
-      terminalActive: false,
-      terminalAvailable: false,
+      state: 'EXECUTING',
+      attention: null,
+      runStatus: 'RUNNING',
+      runId: 'run-1',
+      terminalActive: true,
+      terminalAvailable: true,
     };
     api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
     render(<App />);
 
-    expect(screen.queryByText(/explain next step/i)).toBeNull();
-    fireEvent.click(await screen.findByRole('button', { name: /run task/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /finish worker/i }));
 
-    expect(api.execute).toHaveBeenCalledWith(['run', 'CLEW-071']);
+    expect(api.execute).toHaveBeenCalledWith(['finish-worker', 'CLEW-071', '--run', 'run-1']);
   });
 
   it('renders summaries as text instead of arbitrary HTML', () => {
@@ -163,11 +168,15 @@ describe('Preact control plane', () => {
   it('creates a task from the UI without starting it', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /new/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /what should be done/i }), {
+      target: { value: 'List files without changing them' },
+    });
     fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
       target: { value: 'Read-only MVP task' },
     });
-    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
-      target: { value: 'List files without changing them' },
+    fireEvent.click(screen.getByRole('button', { name: /^deep/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /^tags$/i }), {
+      target: { value: 'ui, refactor' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
 
@@ -178,9 +187,47 @@ describe('Preact control plane', () => {
       'Read-only MVP task',
       '--description',
       'List files without changing them',
+      '--profile',
+      'deep',
+      '--tags',
+      'ui',
+      '--tags',
+      'refactor',
     ]);
     expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
     expect(window.location.pathname).toMatch(/^\/tasks\/LOCAL-/);
+  });
+
+  it('opens the live worker terminal before a Codex session id exists', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const runningTasks = structuredClone(fixtureTasks);
+
+    runningTasks[0].state = 'EXECUTING';
+    runningTasks[0].runStatus = 'RUNNING';
+    runningTasks[0].sessionId = null;
+    runningTasks[0].sessionHarness = 'codex';
+    runningTasks[0].sessionStageId = 'worker';
+    api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
+    render(<App />);
+    const open = await screen.findByRole('button', { name: /open live terminal/i });
+
+    expect(open.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(open);
+    expect(api.execute).toHaveBeenCalledWith([
+      'session',
+      'open',
+      'CLEW-071',
+      '--stage',
+      'worker',
+      '--role',
+      'worker',
+      '--harness',
+      'codex',
+      '--surface',
+      'live',
+      '--mode',
+      'live',
+    ]);
   });
 
   it('automatically shows the managed Codex terminal after the worker thread is available', async () => {
@@ -190,18 +237,13 @@ describe('Preact control plane', () => {
     runningTasks[0].runStatus = 'RUNNING';
     runningTasks[0].runId = 'run-live-1';
     runningTasks[0].sessionId = 'thread-live-1';
-    runningTasks[0].sessionHarness = 'codex';
-    runningTasks[0].sessionStageId = 'worker';
     runningTasks[0].terminalAvailable = true;
     runningTasks[0].terminalActive = true;
     api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
     render(<App />);
-    const terminal = await screen.findByRole('region', { name: /live codex terminal/i });
-    const show = screen.getByRole('button', { name: /show live terminal/i });
 
+    const terminal = await screen.findByRole('region', { name: /live codex terminal/i });
     expect(terminal.textContent).toContain('run-live-1');
-    expect(show.hasAttribute('disabled')).toBe(false);
-    expect(api.execute).not.toHaveBeenCalledWith(expect.arrayContaining(['session', 'open']));
   });
 
   it('shows when a completed worker turn is waiting for operator input', async () => {
@@ -210,18 +252,14 @@ describe('Preact control plane', () => {
     waitingTasks[0].state = 'EXECUTING';
     waitingTasks[0].runStatus = 'RUNNING';
     waitingTasks[0].runId = 'run-waiting-1';
-    waitingTasks[0].sessionId = 'thread-waiting-1';
-    waitingTasks[0].sessionHarness = 'codex';
     waitingTasks[0].terminalAvailable = true;
     waitingTasks[0].terminalActive = true;
     waitingTasks[0].interactionStatus = 'waiting_for_operator';
     api.loadTasks.mockResolvedValueOnce({ tasks: waitingTasks, state: 'connected' });
-
     render(<App />);
 
     expect(await screen.findByText('Terminal is waiting for you')).toBeTruthy();
     expect(screen.getByText(/worker returned a response/i)).toBeTruthy();
     expect(screen.getByText('Waiting for operator')).toBeTruthy();
-    expect(screen.queryByText('Operator actions')).toBeNull();
   });
 });

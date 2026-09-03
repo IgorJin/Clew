@@ -71,6 +71,53 @@ export function openMacTerminal({ codexBin, args, workspace, spawnImpl = spawn }
   return child;
 }
 
+export function openWorkspaceInEditor({ editorBin = 'code', workspace, launcher = null } = {}) {
+  let resolved;
+
+  try {
+    resolved = assertWorkspace(workspace);
+  } catch (error) {
+    return { state: 'unavailable', reason: error.message, code: 'WORKSPACE_INVALID' };
+  }
+  if (typeof editorBin !== 'string' || !editorBin.trim() || /[\0\r\n]/.test(editorBin))
+    return { state: 'unavailable', reason: 'editor binary is invalid', code: 'EDITOR_INVALID' };
+
+  const command = editorBin.trim();
+  const args = [resolved];
+
+  try {
+    const child =
+      launcher?.(command, args, {
+        cwd: resolved,
+        shell: false,
+        stdio: 'ignore',
+        detached: true,
+      }) ?? spawn(command, args, { cwd: resolved, stdio: 'ignore', detached: true });
+
+    if (!child)
+      return {
+        state: 'unavailable',
+        reason: 'no editor launcher is available',
+        code: 'EDITOR_UNAVAILABLE',
+      };
+    child.on?.('error', () => {});
+    child.unref?.();
+
+    return {
+      state: 'opened',
+      workspace: resolved,
+      command: [command, ...args],
+      pid: child.pid ?? null,
+    };
+  } catch (error) {
+    return {
+      state: 'unavailable',
+      reason: error instanceof Error ? error.message : 'editor failed to start',
+      code: 'EDITOR_UNAVAILABLE',
+    };
+  }
+}
+
 export class LiveThreadTerminalSurface {
   constructor({ codexBin = 'codex', launcher = null } = {}) {
     this.codexBin = codexBin;
@@ -244,6 +291,28 @@ export async function openSessionForRun(store, request, surface = new NoneSurfac
   const task = store.getTask(request.taskId);
 
   if (!task) return unavailable(request, `task not found: ${request.taskId}`, 'TASK_NOT_FOUND');
+
+  // For architect/reviewer roles, look up stored agent sessions instead of runs
+  if (request.role === 'architect' || request.role === 'reviewer') {
+    const agentSession = store.getAgentSession(request.taskId, request.role);
+
+    if (!agentSession)
+      return unavailable(
+        request,
+        `no stored ${request.role} session found`,
+        'AGENT_SESSION_NOT_FOUND',
+      );
+
+    return surface.open({
+      ...request,
+      runId: null,
+      sessionId: agentSession.session_id,
+      turnId: null,
+      workspace: agentSession.workspace ?? task.contract.workspace ?? process.cwd(),
+      model: request.model ?? task.contract.models?.[request.role] ?? null,
+    });
+  }
+
   const runs = store.listRuns(request.taskId, { stageId: request.stageId ?? null });
   const run = request.runId
     ? runs.find((candidate) => candidate.id === request.runId)

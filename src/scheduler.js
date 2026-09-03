@@ -960,14 +960,28 @@ export class Scheduler {
       });
 
       if (!planning.plan) throw new Error('paired Runner completed without an execution plan');
-      proposedPlan = planning.plan;
+      proposedPlan = planning;
     } else {
       proposedPlan = await this.createArchitectAdapter(architectName).createPlan({
         task: row.contract,
         cwd: this.workspaceManager.projectRoot ?? process.cwd(),
       });
     }
-    const plan = validateExecutionPlan(proposedPlan);
+    const planResult = Array.isArray(proposedPlan?.stages)
+      ? { plan: proposedPlan, sessionId: proposedPlan.sessionId ?? null }
+      : proposedPlan;
+    const plan = validateExecutionPlan(planResult.plan ?? proposedPlan);
+    const architectSessionId = planResult.sessionId ?? null;
+
+    if (architectSessionId && !persistedPlan) {
+      this.store.saveAgentSession({
+        taskId,
+        role: 'architect',
+        harness: architectName,
+        sessionId: architectSessionId,
+        workspace: this.workspaceManager.projectRoot,
+      });
+    }
     const integrationStage = this.getIntegrationStage(plan);
     const planRecord =
       persistedPlan ??

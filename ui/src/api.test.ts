@@ -28,6 +28,7 @@ function installApi({ invalidThread = false, plannedOnly = false } = {}) {
                   title: 'Projection',
                   goal: 'Show the real thread',
                   profile: 'standard',
+                  tags: ['backend'],
                 },
                 plan: plannedOnly
                   ? {
@@ -49,6 +50,7 @@ function installApi({ invalidThread = false, plannedOnly = false } = {}) {
                   ],
                 },
                 completion: null,
+                agentSessions: [],
               },
               thread: {
                 version: 1,

@@ -64,6 +64,6 @@ export class CodexArchitect {
     if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages))
       throw new Error(`Codex architect did not return a structured plan: ${JSON.stringify(plan)}`);
 
-    return plan;
+    return result.sessionId ? { plan, sessionId: result.sessionId } : plan;
   }
 }

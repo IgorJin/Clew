@@ -1,10 +1,41 @@
 import { fixtureTasks } from './fixtures';
-import type { Task, TaskState, ThreadItem } from './types';
+import type { AgentRole, Run, Task, TaskState, ThreadItem } from './types';
 
 export type ConnectionState =
   'fixture' | 'connected' | 'disconnected' | 'reconnecting' | 'incompatible';
 
 type JsonObject = Record<string, unknown>;
+
+const PROFILE_ROLES: Record<string, AgentRole[]> = {
+  quick: ['worker'],
+  standard: ['worker', 'reviewer'],
+  deep: ['architect', 'worker', 'reviewer'],
+};
+
+export function rolesForProfile(profile: string): AgentRole[] {
+  return PROFILE_ROLES[profile] ?? ['worker'];
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function mapRun(value: unknown, index: number): Run {
+  const run = object(value, 'run');
+
+  return {
+    id: typeof run.id === 'string' ? run.id : `run-${index}`,
+    stageId: typeof run.stage_id === 'string' ? run.stage_id : 'worker',
+    attempt: Number(run.attempt ?? 0),
+    status: typeof run.status === 'string' ? run.status : 'UNKNOWN',
+    harness: typeof run.harness === 'string' ? run.harness : 'codex',
+    sessionId: nullableString(run.session_id),
+    workspace: nullableString(run.workspace),
+    commitSha: nullableString(run.commit_sha),
+    startedAt: nullableString(run.started_at),
+    finishedAt: nullableString(run.finished_at),
+  };
+}
 
 class IncompatibleDaemonError extends Error {}
 
@@ -108,7 +139,7 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
   const show = object(showValue, 'task detail');
   const contract = object(show.contract, 'task contract');
   const history = object(historyValue, 'task history');
-  const runs = Array.isArray(show.runs) ? show.runs.map((run) => object(run, 'run')) : [];
+  const runs = Array.isArray(show.runs) ? show.runs.map((run, i) => mapRun(run, i)) : [];
   const planRecord = show.plan ? object(show.plan, 'plan') : null;
   const plan = planRecord?.plan ? object(planRecord.plan, 'execution plan') : null;
   const planStages = Array.isArray(plan?.stages)
@@ -150,7 +181,7 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     : [];
   const latestRevision = [...runs]
     .reverse()
-    .find((run) => run.status === 'COMPLETED' && typeof run.commit_sha === 'string')?.commit_sha;
+    .find((run) => run.status === 'COMPLETED' && run.commitSha)?.commitSha;
   const latestRun = runs.at(-1);
   const state = taskState(show.state);
 
@@ -159,6 +190,9 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     title: string(contract.title, 'task title'),
     goal: string(contract.goal, 'task goal'),
     profile: typeof contract.profile === 'string' ? contract.profile : 'quick',
+    tags: Array.isArray(contract.tags)
+      ? contract.tags.filter((t): t is string => typeof t === 'string')
+      : [],
     state,
     attention:
       state === 'WAITING_FOR_HUMAN'
@@ -169,9 +203,9 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     revision: typeof latestRevision === 'string' ? latestRevision : null,
     workerOutput: typeof show.workerOutput === 'string' ? show.workerOutput : null,
     workerOutputRunId: typeof show.workerOutputRunId === 'string' ? show.workerOutputRunId : null,
-    sessionId: typeof latestRun?.session_id === 'string' ? latestRun.session_id : null,
+    sessionId: typeof latestRun?.sessionId === 'string' ? latestRun.sessionId : null,
     sessionHarness: typeof latestRun?.harness === 'string' ? latestRun.harness : null,
-    sessionStageId: typeof latestRun?.stage_id === 'string' ? latestRun.stage_id : null,
+    sessionStageId: typeof latestRun?.stageId === 'string' ? latestRun.stageId : null,
     sessionWorkspace: typeof latestRun?.workspace === 'string' ? latestRun.workspace : null,
     runId: typeof latestRun?.id === 'string' ? latestRun.id : null,
     runStatus: typeof latestRun?.status === 'string' ? latestRun.status : null,
@@ -207,6 +241,22 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
         })
       : [],
     attempts: runs.length,
+    roles: rolesForProfile(typeof contract.profile === 'string' ? contract.profile : 'quick'),
+    runs,
+    agentSessions: Array.isArray(show.agentSessions)
+      ? show.agentSessions.map((sessionValue) => {
+          const session = object(sessionValue, 'agent session');
+          return {
+            id: string(session.id, 'session id'),
+            taskId: string(session.task_id, 'session task_id'),
+            role: string(session.role, 'session role'),
+            harness: string(session.harness, 'session harness'),
+            sessionId: string(session.session_id, 'session session_id'),
+            workspace: session.workspace ? string(session.workspace, 'session workspace') : null,
+            createdAt: string(session.created_at, 'session created_at'),
+          };
+        })
+      : [],
     stages,
     reviewed: review !== null,
     findings: findingDetails.length,

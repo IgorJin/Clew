@@ -64,10 +64,12 @@ export class Store {
   createTask(contract) {
     return this.runInTransaction(() => {
       const now = new Date().toISOString();
+      const tags =
+        Array.isArray(contract.tags) && contract.tags.length ? JSON.stringify(contract.tags) : null;
 
       this.db
-        .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?)')
-        .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now);
+        .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)')
+        .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now, tags);
       this.appendEvent(contract.id, 'TASK_CREATED', { state: TASK_STATE.DRAFT, contract });
     });
   }
@@ -1754,3 +1756,43 @@ function safeResultProjection(payload) {
     usage: payload.usage ?? null,
   };
 }
+
+// Agent session persistence for architect/reviewer roles
+
+function parseAgentSession(row) {
+  return row;
+}
+
+Store.prototype.saveAgentSession = function saveAgentSession({
+  taskId,
+  role,
+  harness,
+  sessionId,
+  workspace,
+}) {
+  const id = `${taskId}:${role}:${sessionId}`;
+  const now = new Date().toISOString();
+
+  this.db
+    .prepare(
+      'INSERT OR REPLACE INTO agent_sessions (id, task_id, role, harness, session_id, workspace, created_at) VALUES (?,?,?,?,?,?,?)',
+    )
+    .run(id, taskId, role, harness, sessionId, workspace ?? null, now);
+};
+
+Store.prototype.getAgentSession = function getAgentSession(taskId, role) {
+  const row = this.db
+    .prepare(
+      'SELECT * FROM agent_sessions WHERE task_id=? AND role=? ORDER BY created_at DESC LIMIT 1',
+    )
+    .get(taskId, role);
+
+  return row ? parseAgentSession(row) : null;
+};
+
+Store.prototype.listAgentSessions = function listAgentSessions(taskId) {
+  return this.db
+    .prepare('SELECT * FROM agent_sessions WHERE task_id=? ORDER BY created_at DESC')
+    .all(taskId)
+    .map(parseAgentSession);
+};

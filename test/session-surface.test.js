@@ -10,6 +10,7 @@ import {
   PlainTerminalSurface,
   buildCodexResumeArgs,
   openSessionForRun,
+  openWorkspaceInEditor,
 } from '../src/session-surface.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from '../src/runtime.js';
 
@@ -223,5 +224,47 @@ test('unsupported, stale, and missing sessions return structured diagnostics', a
 
   assert.equal(result.code, 'SESSION_ID_MISSING');
   store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('openWorkspaceInEditor launches the configured editor on the workspace', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-editor-'));
+  const calls = [];
+  const result = openWorkspaceInEditor({
+    editorBin: 'code',
+    workspace: dir,
+    launcher: (bin, args, options) => {
+      calls.push({ bin, args, options });
+
+      return { pid: 11 };
+    },
+  });
+
+  assert.equal(result.state, 'opened');
+  assert.equal(result.workspace, dir);
+  assert.deepEqual(calls[0].args, [dir]);
+  assert.equal(calls[0].bin, 'code');
+  assert.equal(calls[0].options.detached, true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('openWorkspaceInEditor rejects missing workspaces and unsafe editor names', () => {
+  const missing = openWorkspaceInEditor({
+    editorBin: 'code',
+    workspace: join(tmpdir(), 'clew-does-not-exist'),
+    launcher: () => ({ pid: 1 }),
+  });
+
+  assert.equal(missing.state, 'unavailable');
+  assert.equal(missing.code, 'WORKSPACE_INVALID');
+  const dir = mkdtempSync(join(tmpdir(), 'clew-editor-bad-'));
+  const unsafe = openWorkspaceInEditor({
+    editorBin: 'code\nrm -rf /',
+    workspace: dir,
+    launcher: () => ({ pid: 1 }),
+  });
+
+  assert.equal(unsafe.state, 'unavailable');
+  assert.equal(unsafe.code, 'EDITOR_INVALID');
   rmSync(dir, { recursive: true, force: true });
 });
