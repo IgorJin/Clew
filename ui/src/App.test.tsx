@@ -51,20 +51,18 @@ describe('Preact control plane', () => {
     expect(await screen.findByText('Task completed')).toBeTruthy();
   });
 
-  it('continues READY work with the operator message instead of retrying', async () => {
+  it('continues READY work without a message panel', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
-    const message = await screen.findByRole('textbox', { name: /add a message/i });
-
-    fireEvent.input(message, { target: { value: 'Please address the remaining edge case' } });
     fireEvent.click(await screen.findByRole('button', { name: /^continue$/i }));
 
     expect(api.execute).toHaveBeenCalledWith([
       'continue',
       'CLEW-071',
       '--message',
-      'Please address the remaining edge case',
+      'Continue task',
     ]);
+    expect(screen.queryByText('Add a message')).toBeNull();
     expect(await screen.findByText('Continuation requested')).toBeTruthy();
   });
 
@@ -198,8 +196,28 @@ describe('Preact control plane', () => {
     expect(window.location.pathname).toMatch(/^\/tasks\/LOCAL-/);
   });
 
+  it('derives a title when the title field is left empty', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /new/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /what should be done/i }), {
+      target: { value: 'Investigate terminal startup' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
+
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'create',
+      '--title',
+      'Investigate terminal startup',
+      '--description',
+      'Investigate terminal startup',
+      '--profile',
+      'quick',
+    ]);
+  });
+
   it('opens the live worker terminal before a Codex session id exists', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const runningTasks = structuredClone(fixtureTasks);
 
     runningTasks[0].state = 'EXECUTING';
@@ -213,6 +231,7 @@ describe('Preact control plane', () => {
 
     expect(open.hasAttribute('disabled')).toBe(false);
     fireEvent.click(open);
+    expect(confirm).not.toHaveBeenCalled();
     expect(api.execute).toHaveBeenCalledWith([
       'session',
       'open',

@@ -43,7 +43,19 @@ function installApi({ invalidThread = false, plannedOnly = false } = {}) {
                     }
                   : null,
                 stages: plannedOnly ? [] : [{ id: 'worker', status: 'COMPLETED' }],
-                runs: [{ status: 'COMPLETED', commit_sha: 'abc123' }],
+                runs: [
+                  {
+                    status: 'COMPLETED',
+                    commit_sha: 'abc123',
+                    terminalAvailable: true,
+                    terminalAccess: 'controller_local',
+                    terminalActive: true,
+                    interactionStatus: 'waiting_for_operator',
+                    interactionTurnId: 'turn-1',
+                    lastAgentMessage: 'Please continue',
+                    interactionUpdatedAt: '2026-08-28T09:43:00.000Z',
+                  },
+                ],
                 review: {
                   findings: [
                     { severity: 'advisory', criterion: 'AC-1', reason: 'Keep the copy concise' },
@@ -90,6 +102,13 @@ describe('control-plane client', () => {
       title: 'Projection',
       revision: 'abc123',
       findings: 1,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      terminalActive: true,
+      interactionStatus: 'waiting_for_operator',
+      interactionTurnId: 'turn-1',
+      lastAgentMessage: 'Please continue',
+      interactionUpdatedAt: '2026-08-28T09:43:00.000Z',
     });
     expect(result.tasks[0].thread.items[0].summary).toBe('Task created: Projection');
     const urls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));

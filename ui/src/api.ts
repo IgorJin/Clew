@@ -34,6 +34,19 @@ function mapRun(value: unknown, index: number): Run {
     commitSha: nullableString(run.commit_sha),
     startedAt: nullableString(run.started_at),
     finishedAt: nullableString(run.finished_at),
+    terminalAvailable: run.terminalAvailable === true,
+    terminalAccess:
+      run.terminalAccess === 'runner_local'
+        ? 'runner_local'
+        : run.terminalAccess === 'controller_local'
+          ? 'controller_local'
+          : 'unavailable',
+    terminalActive: run.terminalActive === true,
+    interactionStatus: typeof run.interactionStatus === 'string' ? run.interactionStatus : null,
+    interactionTurnId: typeof run.interactionTurnId === 'string' ? run.interactionTurnId : null,
+    lastAgentMessage: typeof run.lastAgentMessage === 'string' ? run.lastAgentMessage : null,
+    interactionUpdatedAt:
+      typeof run.interactionUpdatedAt === 'string' ? run.interactionUpdatedAt : null,
   };
 }
 

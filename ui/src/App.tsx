@@ -10,7 +10,6 @@ import {
   Inbox,
   Laptop,
   RefreshCw,
-  Send,
   ShieldCheck,
   SquareTerminal,
   Terminal,
@@ -456,7 +455,6 @@ function CreateTask({
           value={title}
           onInput={(event) => setTitle(event.currentTarget.value)}
           placeholder={autoTitle(body) || 'Short title'}
-          required
         />
         <label>Complexity</label>
         <div className="profile-selector">
@@ -558,7 +556,6 @@ export default function App() {
   );
   const [connection, setConnection] = useState<ConnectionState>('reconnecting');
   const [diagnostic, setDiagnostic] = useState(false);
-  const [message, setMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
@@ -781,7 +778,20 @@ export default function App() {
       setNotice('Actions are disabled while the control plane is disconnected');
       return;
     }
-    if (!window.confirm(`Confirm ${args.join(' ')}?`)) return;
+    const confirmationRequired = new Set([
+      'approve',
+      'approve-run',
+      'complete',
+      'continue',
+      'reject-run',
+      'retry',
+      'run',
+    ]);
+    if (
+      (confirmationRequired.has(args[0]) || (args[0] === 'task' && args[1] === 'approve-step')) &&
+      !window.confirm(`Confirm ${args.join(' ')}?`)
+    )
+      return;
     if (args[0] === 'run') setRunRequested(true);
     try {
       const result = await execute(args);
@@ -800,28 +810,12 @@ export default function App() {
             if (args[0] === 'retry') return { ...entry, state: 'RECOVERING' as TaskState };
             if (args[0] === 'continue')
               return { ...entry, state: 'RECOVERING' as TaskState, attention: null };
-            if (args[0] === 'task' && args[1] === 'message') {
-              const item: ThreadItem = {
-                version: 1,
-                id: `fixture-message-${Date.now()}`,
-                cursor: (entry.thread.items.at(-1)?.cursor ?? 0) + 1,
-                kind: 'operator_message',
-                at: new Date().toISOString(),
-                source: { kind: 'operator', id: 'local-user' },
-                summary: message.trim(),
-              };
-              return {
-                ...entry,
-                thread: { ...entry.thread, items: [...entry.thread.items, item] },
-              };
-            }
             return entry;
           }),
         );
       } else {
         await refresh();
       }
-      if (args[0] === 'continue' || (args[0] === 'task' && args[1] === 'message')) setMessage('');
       setNotice(success);
     } catch (error) {
       if (args[0] === 'run') setRunRequested(false);
@@ -967,16 +961,7 @@ export default function App() {
                   </button>
                   <button
                     className="button secondary"
-                    disabled={
-                      !canMutate ||
-                      (!interactiveWorker && !canStart && !canContinue) ||
-                      (!interactiveWorker && canContinue && !message.trim())
-                    }
-                    title={
-                      canContinue && !message.trim()
-                        ? 'Add an operator message before continuing'
-                        : undefined
-                    }
+                    disabled={!canMutate || (!interactiveWorker && !canStart && !canContinue)}
                     onClick={() => {
                       if (interactiveWorker)
                         return void act(
@@ -985,7 +970,7 @@ export default function App() {
                         );
                       if (canContinue)
                         return void act(
-                          ['continue', task.id, '--message', message],
+                          ['continue', task.id, '--message', 'Continue task'],
                           'Continuation requested',
                         );
                       if (nextStep?.status === 'PENDING')
@@ -1198,54 +1183,6 @@ export default function App() {
               <aside className="right-rail">
                 <Stages task={task} />
                 <Findings task={task} />
-                <section className="panel task-message-panel">
-                  <div className="message-box">
-                    <label htmlFor="operator-message">Add a message</label>
-                    <textarea
-                      id="operator-message"
-                      disabled={!canMutate}
-                      value={message}
-                      onInput={(event) => setMessage(event.currentTarget.value)}
-                      placeholder="Leave context for the next attempt…"
-                    />
-                    <button
-                      className="button secondary full"
-                      disabled={!canMutate || !message.trim()}
-                      onClick={() =>
-                        act(
-                          ['task', 'message', task.id, '--message', message],
-                          'Message added to Thread',
-                        )
-                      }
-                    >
-                      <Send size={13} /> Add to Thread
-                    </button>
-                  </div>
-                  <button
-                    className="text-button"
-                    disabled={
-                      !canMutate ||
-                      !task.terminalAvailable ||
-                      !task.runId ||
-                      task.terminalAccess === 'runner_local'
-                    }
-                    title={
-                      task.terminalAccess === 'runner_local'
-                        ? 'This terminal remains on the Runner host and is not proxied by Controller.'
-                        : task.terminalAvailable
-                          ? 'Show the embedded terminal attached to the active Codex thread.'
-                          : 'The managed Codex terminal is not available for this run'
-                    }
-                    onClick={() => setTerminalVisible(true)}
-                  >
-                    <SquareTerminal size={13} />
-                    {task.terminalAccess === 'runner_local'
-                      ? 'Terminal is on Runner host'
-                      : task.terminalAvailable
-                        ? 'Show live terminal'
-                        : 'Terminal unavailable'}
-                  </button>
-                </section>
               </aside>
             </div>
           </div>
