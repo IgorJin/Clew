@@ -34,6 +34,8 @@ test('persists a task, stage, run, and event history', () => {
     harness: 'fake',
     profile: 'quick',
     policy: { maxAttempts: 3 },
+    baseSha: 'base-run-1',
+    branch: 'ai/T-1-worker',
   });
   store.setRunIdentity('run-1', 'thread-1', 'turn-1');
   assert.throws(
@@ -57,6 +59,13 @@ test('persists a task, stage, run, and event history', () => {
   assert.equal(store.listRuns('T-1')[0].profile, 'quick');
   assert.equal(store.listRuns('T-1')[0].policy.maxAttempts, 3);
   assert.equal(store.listRuns('T-1')[0].runtimeNamespace, null);
+  assert.equal(store.listRuns('T-1')[0].base_sha, 'base-run-1');
+  assert.equal(store.listRuns('T-1')[0].branch, 'ai/T-1-worker');
+  assert.equal(store.listRuns('T-1')[0].provenanceStatus, 'available');
+  assert.throws(
+    () => store.setRunGitProvenance('run-1', { baseSha: 'different', branch: 'other' }),
+    /provenance is immutable/,
+  );
   assert.ok(store.listEvents('T-1').length >= 2);
   store.setStage('T-1', 'worker', 'COMPLETED');
   store.db.prepare("UPDATE tasks SET state='FAILED' WHERE id='T-1'").run();
@@ -205,7 +214,9 @@ test('upgrades a populated v0.2 database without losing task history, completion
     INSERT INTO stages VALUES ('LEGACY-1', 'worker', 'COMPLETED', '[]');
     INSERT INTO plans VALUES ('LEGACY-1', 1, '{"stages":[{"id":"worker","dependsOn":[]}]}', 'APPROVED', '2026-01-01T00:00:00.000Z');
     INSERT INTO runs VALUES ('legacy-run', 'LEGACY-1', 'worker', 1, 'COMPLETED', 'fake', 'legacy-session', 'legacy-turn', 'legacy-worktree', 'abc123', '2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', 'quick', '{"maxAttempts":3}', '"clew-legacy-runtime"');
+    INSERT INTO runs VALUES ('legacy-unavailable', 'LEGACY-1', 'worker', 2, 'FAILED', 'fake', NULL, NULL, NULL, NULL, '2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', 'quick', '{"maxAttempts":3}', '"clew-legacy-runtime-2"');
     INSERT INTO events(task_id, type, payload, at) VALUES ('LEGACY-1', 'TASK_CREATED', '{"legacy":true}', '2026-01-01T00:00:00.000Z');
+    INSERT INTO events(task_id, type, payload, at) VALUES ('LEGACY-1', 'STAGE_RUN_STARTED', '{"id":"legacy-run","baseSha":"legacy-base","branch":"ai/legacy-worker"}', '2026-01-01T00:00:00.000Z');
     INSERT INTO operator_actions VALUES ('legacy-action', 'LEGACY-1', 'VERIFY', 'worker', 1, 'legacy-user', 'legacy evidence', 'abc123', '2026-01-01T00:02:00.000Z');
     INSERT INTO completions VALUES ('LEGACY-1', 'abc123', 'accept', 'legacy completion', 'legacy-user', '2026-01-01T00:03:00.000Z', '{"taskId":"LEGACY-1","revision":"abc123"}');
   `);
@@ -237,6 +248,10 @@ test('upgrades a populated v0.2 database without losing task history, completion
   );
   assert.equal(store.getTask('LEGACY-1').contract.title, 'Legacy');
   assert.equal(store.listRuns('LEGACY-1')[0].session_id, 'legacy-session');
+  assert.equal(store.listRuns('LEGACY-1')[0].base_sha, 'legacy-base');
+  assert.equal(store.listRuns('LEGACY-1')[0].branch, 'ai/legacy-worker');
+  assert.equal(store.listRuns('LEGACY-1')[0].provenanceStatus, 'available');
+  assert.equal(store.getRun('legacy-unavailable').provenanceStatus, 'unavailable');
   assert.equal(store.listEvents('LEGACY-1')[0].type, 'TASK_CREATED');
   assert.equal(store.listOperatorActions('LEGACY-1')[0].actor, 'legacy-user');
   assert.equal(store.getCompletion('LEGACY-1').expected_revision, 'abc123');

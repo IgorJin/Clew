@@ -195,6 +195,7 @@ export class RunnerExecutionPort {
       return {
         status: 'completed',
         revision,
+        ...(workspaceManager ? { baseSha: workspace.baseSha, branch: workspace.branch } : {}),
         summary: boundedText(result.rationale ?? 'Runner execution completed'),
         evidence,
         usage: result.usage ?? undefined,

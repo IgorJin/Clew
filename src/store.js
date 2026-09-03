@@ -260,7 +260,7 @@ export class Store {
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy,runtime_namespace) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy,runtime_namespace,base_sha,branch,provenance_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -276,6 +276,9 @@ export class Store {
         run.profile ?? null,
         run.policy ? JSON.stringify(run.policy) : null,
         run.runtimeNamespace ? JSON.stringify(run.runtimeNamespace) : null,
+        run.baseSha ?? null,
+        run.branch ?? null,
+        run.baseSha && run.branch ? 'available' : 'unavailable',
       );
   }
   registerRunner({
@@ -805,6 +808,24 @@ export class Store {
   }
   setRunIdentity(id, sessionId, turnId = null) {
     this.db.prepare('UPDATE runs SET session_id=?,turn_id=? WHERE id=?').run(sessionId, turnId, id);
+  }
+  setRunGitProvenance(id, { baseSha = null, branch = null } = {}) {
+    if (typeof baseSha !== 'string' || typeof branch !== 'string') return this.getRun(id);
+    const current = this.getRun(id);
+
+    if (!current) throw new Error(`run not found: ${id}`);
+    if (
+      current.provenance_status === 'available' &&
+      (current.base_sha !== baseSha || current.branch !== branch)
+    )
+      throw new Error(`run ${id} Git provenance is immutable`);
+    this.db
+      .prepare(
+        "UPDATE runs SET base_sha=?,branch=?,provenance_status='available' WHERE id=? AND (provenance_status='unavailable' OR provenance_status IS NULL)",
+      )
+      .run(baseSha, branch, id);
+
+    return this.getRun(id);
   }
   finishRun(id, status, commitSha = null) {
     this.db
@@ -1655,6 +1676,8 @@ export class Store {
 function parseRun(run) {
   return {
     ...run,
+    baseSha: run.base_sha ?? null,
+    provenanceStatus: run.provenance_status ?? 'unavailable',
     policy: run.policy ? JSON.parse(run.policy) : null,
     runtimeNamespace: run.runtime_namespace ? JSON.parse(run.runtime_namespace) : null,
   };
@@ -1752,6 +1775,8 @@ function safeResultProjection(payload) {
     status: payload.status,
     summary: payload.summary ?? null,
     revision: payload.revision ?? null,
+    baseSha: payload.baseSha ?? null,
+    branch: payload.branch ?? null,
     evidence: payload.evidence ?? null,
     usage: payload.usage ?? null,
   };

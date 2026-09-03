@@ -170,6 +170,8 @@ const PAYLOAD_ALLOWLIST = Object.freeze({
     'status',
     'summary',
     'revision',
+    'baseSha',
+    'branch',
     'sessionId',
     'turnId',
     'evidence',

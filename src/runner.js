@@ -227,6 +227,8 @@ export class RunnerService extends EventEmitter {
       resultId: randomUUID(),
       status,
       ...(typeof result.revision === 'string' ? { revision: result.revision } : {}),
+      ...(typeof result.baseSha === 'string' ? { baseSha: result.baseSha } : {}),
+      ...(typeof result.branch === 'string' ? { branch: result.branch } : {}),
       ...(typeof result.sessionId === 'string' ? { sessionId: result.sessionId } : {}),
       ...(typeof result.turnId === 'string' ? { turnId: result.turnId } : {}),
       ...(typeof result.summary === 'string' ? { summary: result.summary.slice(0, 4_000) } : {}),

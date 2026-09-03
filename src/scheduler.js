@@ -182,7 +182,12 @@ export class Scheduler {
     const attempt = persistedRun?.attempt ?? this.store.listRuns(taskId).length + 1;
 
     try {
-      if (persistedRun) workspace = { path: persistedRun.workspace, branch: null, baseSha: null };
+      if (persistedRun)
+        workspace = {
+          path: persistedRun.workspace,
+          branch: persistedRun.branch,
+          baseSha: persistedRun.base_sha,
+        };
       else {
         workspace = this.workspaceManager.createWorktree(
           taskId,
@@ -200,6 +205,8 @@ export class Scheduler {
           profile: profile.name,
           policy: profile,
           workspace: workspace.path,
+          branch: workspace.branch,
+          baseSha: workspace.baseSha,
           startedAt,
           runtimeNamespace: createRuntimeNamespace(taskId, runId),
         };
@@ -212,7 +219,11 @@ export class Scheduler {
         persistedRun = createdRun;
         runId = persistedRun.id;
         if (!allocatedHere)
-          workspace = { path: persistedRun.workspace, branch: null, baseSha: null };
+          workspace = {
+            path: persistedRun.workspace,
+            branch: persistedRun.branch,
+            baseSha: persistedRun.base_sha,
+          };
         else
           this.store.appendEvent(taskId, 'STAGE_RUN_STARTED', {
             ...proposedRun,
@@ -756,6 +767,8 @@ export class Scheduler {
       throw new Error(`paired Runner ended ${result.status}`);
     }
     const revision = result.revision ?? `runner-result:${result.resultId}`;
+
+    this.store.setRunGitProvenance(runId, { baseSha: result.baseSha, branch: result.branch });
     const evidence = this.normalizeVerificationEvidence(task, policy, result.evidence ?? []).map(
       (item) => ({ ...item, revision }),
     );
@@ -1555,6 +1568,8 @@ export class Scheduler {
       profile: policy?.name ?? task.profile,
       policy,
       workspace: stageWorkspace.path,
+      branch: stageWorkspace.branch,
+      baseSha: stageWorkspace.baseSha,
       startedAt: new Date().toISOString(),
       runtimeNamespace: createRuntimeNamespace(taskId, runId),
     };

@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 20;
+export const CURRENT_SCHEMA_VERSION = 21;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -8,7 +8,7 @@ const MIGRATIONS = Object.freeze([
         CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, contract TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS stages (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, id TEXT NOT NULL, status TEXT NOT NULL, depends_on TEXT NOT NULL, PRIMARY KEY(task_id,id));
         CREATE TABLE IF NOT EXISTS plans (task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, version INTEGER NOT NULL, plan TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'APPROVED', created_at TEXT NOT NULL, PRIMARY KEY(task_id,version));
-        CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, turn_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT);
+        CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, stage_id TEXT NOT NULL, attempt INTEGER NOT NULL, status TEXT NOT NULL, harness TEXT NOT NULL, session_id TEXT, turn_id TEXT, workspace TEXT, commit_sha TEXT, started_at TEXT, finished_at TEXT, base_sha TEXT, branch TEXT, provenance_status TEXT NOT NULL DEFAULT 'unavailable');
         CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, type TEXT NOT NULL, payload TEXT NOT NULL, at TEXT NOT NULL);
       `);
     },
@@ -434,6 +434,45 @@ const MIGRATIONS = Object.freeze([
     version: 20,
     apply(db) {
       MIGRATIONS.find((migration) => migration.version === 17).apply(db);
+    },
+  },
+  {
+    version: 21,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(runs)').all();
+
+      if (!columns.some((column) => column.name === 'base_sha'))
+        db.exec('ALTER TABLE runs ADD COLUMN base_sha TEXT');
+      if (!columns.some((column) => column.name === 'branch'))
+        db.exec('ALTER TABLE runs ADD COLUMN branch TEXT');
+      if (!columns.some((column) => column.name === 'provenance_status'))
+        db.exec(
+          "ALTER TABLE runs ADD COLUMN provenance_status TEXT NOT NULL DEFAULT 'unavailable'",
+        );
+
+      const runs = db.prepare('SELECT id,task_id FROM runs').all();
+      const events = db.prepare(
+        "SELECT payload FROM events WHERE task_id=? AND type='STAGE_RUN_STARTED' ORDER BY seq",
+      );
+      const update = db.prepare(
+        "UPDATE runs SET base_sha=?,branch=?,provenance_status='available' WHERE id=? AND base_sha IS NULL AND branch IS NULL",
+      );
+
+      for (const run of runs) {
+        const started = events
+          .all(run.task_id)
+          .map((event) => {
+            try {
+              return JSON.parse(event.payload);
+            } catch {
+              return null;
+            }
+          })
+          .find((payload) => payload?.id === run.id || payload?.runId === run.id);
+
+        if (typeof started?.baseSha === 'string' && typeof started?.branch === 'string')
+          update.run(started.baseSha, started.branch, run.id);
+      }
     },
   },
 ]);
