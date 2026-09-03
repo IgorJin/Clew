@@ -31,6 +31,7 @@ import {
 import { GitWorktreeManager } from './workspace.js';
 import { PairedExecutionPort } from './execution-port.js';
 import { createChangeViewerRegistry } from './change-viewer.js';
+import { GitChangeInspectionService } from './change-inspection.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -338,6 +339,8 @@ export class ClewService {
     if (subcommand === 'create') return this.createTask(args);
     if (subcommand === 'next-step') return this.nextStep(args[0]);
     if (subcommand === 'open-changes') return this.openChanges(args[0], args);
+    if (subcommand === 'changes' || subcommand === 'inspect-changes')
+      return new GitChangeInspectionService(this.store).inspect(args[0]);
     if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;

@@ -467,7 +467,10 @@ export class LocalDaemon {
       args[args.indexOf('--surface') + 1] === 'live' &&
       args.includes('--mode') &&
       args[args.indexOf('--mode') + 1] === 'live';
-    const bypassQueue = isLiveInspection || args[0] === 'finish-worker';
+    const bypassQueue =
+      isLiveInspection ||
+      args[0] === 'finish-worker' ||
+      (args[0] === 'task' && ['changes', 'inspect-changes'].includes(args[1]));
 
     return bypassQueue ? this.executeCommand(args) : this.enqueue(args);
   }

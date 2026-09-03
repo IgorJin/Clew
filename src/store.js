@@ -260,7 +260,7 @@ export class Store {
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,started_at,profile,policy,runtime_namespace,base_sha,branch,provenance_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,commit_sha,started_at,finished_at,profile,policy,runtime_namespace,execution_mode,workspace_ref,runner_id,base_sha,branch,provenance_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -272,11 +272,16 @@ export class Store {
         run.sessionId ?? null,
         run.turnId ?? null,
         run.workspace ?? null,
+        run.commitSha ?? run.commit_sha ?? null,
         run.startedAt ?? null,
+        run.finishedAt ?? run.finished_at ?? null,
         run.profile ?? null,
         run.policy ? JSON.stringify(run.policy) : null,
         run.runtimeNamespace ? JSON.stringify(run.runtimeNamespace) : null,
-        run.baseSha ?? null,
+        run.executionMode ?? run.execution_mode ?? 'local',
+        run.workspaceRef ?? run.workspace_ref ?? null,
+        run.runnerId ?? run.runner_id ?? null,
+        run.baseSha ?? run.base_sha ?? null,
         run.branch ?? null,
         run.baseSha && run.branch ? 'available' : 'unavailable',
       );
