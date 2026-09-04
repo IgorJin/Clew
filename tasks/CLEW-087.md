@@ -1,14 +1,14 @@
 ---
 id: CLEW-087
 title: Persist immutable run Git provenance
-status: in_review
+status: done
 release: v0.8
 priority: P0
 size: M
 depends_on: []
 parallel_group: null
 owner: null
-updated: 2026-09-03
+updated: 2026-09-04
 evidence_policy: v1
 ---
 
@@ -48,10 +48,10 @@ Change visibility must be tied to the exact run and execution environment. Exist
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                     | Logical scenarios                                         | Result                              |
-| --------- | ------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------- |
-| AC-1      | Migration, store, scheduler, and Runner protocol tests | all profiles; retries; restarts; paired metadata contract | pass; live paired execution pending |
-| AC-2      | Populated v0.7 migration fixture                       | recoverable and unavailable legacy baseline               | pass                                |
+| Criterion | Automated evidence                                     | Logical scenarios                                         | Result |
+| --------- | ------------------------------------------------------ | --------------------------------------------------------- | ------ |
+| AC-1      | Migration, store, scheduler, and Runner protocol tests | all profiles; retries; restarts; paired metadata contract | pass   |
+| AC-2      | Populated v0.7 migration fixture                       | recoverable and unavailable legacy baseline               | pass   |
 
 ## Verification
 
@@ -60,9 +60,9 @@ Change visibility must be tied to the exact run and execution environment. Exist
 
 ## Review record
 
-- Verdict: pending independent review
-- Reviewer: unassigned
-- Findings: Live paired Runner acceptance is pending because the current sandbox disallows loopback listeners.
+- Verdict: pass
+- Reviewer: Codex release audit, 2026-09-04
+- Findings: Immutability, legacy recovery, retry/restart behavior, and paired metadata were reviewed; installed Controller/Runner acceptance closed the prior loopback evidence gap.
 
 ## Dependencies and parallelization
 
@@ -78,4 +78,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-04. Migration 21, populated v0.7 recovery coverage, local profile/retry/restart tests, Runner protocol tests, and installed paired acceptance preserve immutable baseline and branch provenance or return explicit unavailable state.

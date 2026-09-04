@@ -14,6 +14,10 @@ const npmEnvironment = {
   NPM_CONFIG_CACHE: process.env.NPM_CONFIG_CACHE ?? join(sandbox, 'npm-cache'),
 };
 
+function progress(message) {
+  console.log(`[installed acceptance] ${message}`);
+}
+
 function run(command, args, cwd, options = {}) {
   return execFileSync(command, args, {
     cwd,
@@ -124,6 +128,7 @@ let runnerProcess = null;
 const originalUserConfig = process.env.CLEW_USER_CONFIG;
 
 try {
+  progress('packing artifact');
   const packed = run('npm', ['pack', '--json', '--pack-destination', sandbox], packageRoot, {
     env: npmEnvironment,
   });
@@ -144,6 +149,10 @@ try {
     'package/migrations/010_telemetry_context.sql',
     'package/migrations/011_usage_costs.sql',
     'package/RELEASE-0.6.md',
+    'package/RELEASE-0.8.md',
+    'package/docs/GIT-WORKFLOW.md',
+    'package/docs/adr/0002-diff-viewer.md',
+    'package/migrations/021_run_git_provenance.sql',
     'package/migrations/017_runner_leases.sql',
     'package/src/runner-protocol.js',
     'package/src/runner-store.js',
@@ -156,6 +165,7 @@ try {
     if (listing.includes(forbidden)) throw new Error(`tarball contains forbidden ${forbidden}`);
   }
 
+  progress('installing artifact');
   run('npm', ['init', '-y'], sandbox, { env: npmEnvironment });
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', packageFile], sandbox, {
     env: npmEnvironment,
@@ -188,6 +198,8 @@ try {
   writeFileSync(join(sandbox, 'README.md'), 'installed package acceptance\n');
   run('git', ['add', '.gitignore', 'README.md', 'package.json', 'package-lock.json'], sandbox);
   run('git', ['commit', '-m', 'acceptance fixture'], sandbox);
+  const primaryRevision = run('git', ['rev-parse', 'HEAD'], sandbox).trim();
+
   run(process.execPath, [cli, 'init'], sandbox);
   const installedRoot = join(sandbox, 'node_modules', 'clew');
   const { LocalDaemon } = await import(pathToFileURL(join(installedRoot, 'src', 'daemon.js')).href);
@@ -217,6 +229,8 @@ try {
 
   daemon = new LocalDaemon({ cwd: sandbox, port: 0 });
   let metadata = await daemon.start();
+
+  progress('starting paired Runner');
   const acceptanceConfig = JSON.parse(readFileSync(userConfigPath, 'utf8'));
 
   acceptanceConfig.runner.controllerUrl = metadata.endpoint.replace(/^http/, 'ws') + '/runner/v1';
@@ -304,6 +318,8 @@ try {
       throw new Error(`${profile} installed run ended in ${result.state}`);
   }
 
+  progress('local Quick and Standard passed');
+
   await apiCommand(
     metadata,
     [
@@ -338,6 +354,25 @@ try {
     'READY'
   )
     throw new Error('approved deep installed run did not reach READY');
+  progress('local Deep passed');
+
+  const quickShow = await apiCommand(metadata, ['task', 'show', 'PACK-QUICK'], cookie);
+  const quickRun = quickShow.runs.at(-1);
+  const quickChanges = await apiCommand(metadata, ['task', 'changes', quickRun.id], cookie);
+
+  if (
+    quickChanges.state !== 'available' ||
+    quickChanges.revisions.base !== quickRun.base_sha ||
+    !quickRun.branch
+  )
+    throw new Error('installed local run did not preserve inspectable Git provenance');
+  await apiCommand(
+    metadata,
+    ['complete', 'PACK-QUICK', '--revision', quickRun.commit_sha, '--actor', 'acceptance'],
+    cookie,
+  );
+  if (run('git', ['rev-parse', 'HEAD'], sandbox).trim() !== primaryRevision)
+    throw new Error('installed completion changed the primary checkout');
 
   const continuation = await apiCommand(
     metadata,
@@ -416,6 +451,7 @@ try {
     if (result.state !== 'READY')
       throw new Error(`${profile} installed paired run ended in ${result.state}`);
   }
+  progress('paired profiles passed');
   const pairedSnapshotResponse = await fetch(`${metadata.endpoint}/api/v1/snapshot`, {
     headers: { cookie },
   });
@@ -435,6 +471,11 @@ try {
     )
   )
     throw new Error('installed paired projection did not preserve Runner-local ownership');
+  const pairedRun = pairedDeep.show.runs.at(-1);
+  const pairedChanges = await apiCommand(metadata, ['task', 'changes', pairedRun.id], cookie);
+
+  if (pairedChanges.state !== 'unavailable' || pairedChanges.reason !== 'runner-local-unavailable')
+    throw new Error('installed paired changes did not preserve the Runner-local boundary');
   await stopChild(runnerProcess);
   runnerProcess = null;
   const runnerStatus = JSON.parse(
@@ -459,6 +500,7 @@ try {
   }
 
   await daemon.stop();
+  progress('checking restart persistence');
   daemon = new LocalDaemon({ cwd: sandbox });
   metadata = await daemon.start();
   const restartedTasks = await apiCommand(metadata, ['task', 'list']);

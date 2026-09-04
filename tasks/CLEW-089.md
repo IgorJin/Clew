@@ -1,14 +1,14 @@
 ---
 id: CLEW-089
 title: Add extensible change-viewer adapters
-status: in_review
+status: done
 release: v0.8
 priority: P1
 size: M
 depends_on: [CLEW-087]
 parallel_group: v0.8-change-viewers
 owner: null
-updated: 2026-09-03
+updated: 2026-09-04
 evidence_policy: v1
 ---
 
@@ -51,7 +51,7 @@ Change viewing is separate from merge and push. The adapter contract allows futu
 | Criterion | Automated evidence                                           | Logical scenarios                                           | Result |
 | --------- | ------------------------------------------------------------ | ----------------------------------------------------------- | ------ |
 | AC-1      | `test/change-viewer.test.js`, `test/control-service.test.js` | explicit setting; Cursor-first; VS Code fallback            | pass   |
-| AC-2      | Adapter capability tests                                     | missing worktree; runner-local; unsupported viewer          | pass   |
+| AC-2      | Adapter capability tests                                     | absent worktree; runner-local; unsupported viewer           | pass   |
 | AC-3      | viewer registry tests                                        | complete/open command leaves branches and remotes unchanged | pass   |
 
 ## Verification
@@ -61,9 +61,9 @@ Change viewing is separate from merge and push. The adapter contract allows futu
 
 ## Review record
 
-- Verdict: pending independent review
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: Codex release audit, 2026-09-04
+- Findings: Explicit selection, Cursor-first/VS Code fallback, macOS bundle launch, path copy, missing integration, and primary-checkout safety were reviewed with no blocking findings.
 
 ## Dependencies and parallelization
 
@@ -79,4 +79,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-04. The run-scoped registry and CLI expose structured opened/unavailable results, preserve extension points, and perform no merge, push, or primary-checkout mutation.

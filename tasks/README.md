@@ -73,12 +73,12 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-084](./done/CLEW-084.md) | v0.6    | done       | 082           | v0.6-transport      |
 | [CLEW-085](./done/CLEW-085.md) | v0.6    | done       | 083, 084      | —                   |
 | [CLEW-086](./done/CLEW-086.md) | v0.6    | done       | 082–085       | —                   |
-| [CLEW-087](./CLEW-087.md)      | v0.8    | planned    | —             | —                   |
-| [CLEW-088](./CLEW-088.md)      | v0.8    | planned    | 087           | v0.8-change-data    |
-| [CLEW-089](./CLEW-089.md)      | v0.8    | planned    | 087           | v0.8-change-viewers |
+| [CLEW-087](./CLEW-087.md)      | v0.8    | done       | —             | —                   |
+| [CLEW-088](./CLEW-088.md)      | v0.8    | done       | 087           | v0.8-change-data    |
+| [CLEW-089](./CLEW-089.md)      | v0.8    | done       | 087           | v0.8-change-viewers |
 | [CLEW-090](./CLEW-090.md)      | v0.8    | superseded | 088, 089      | —                   |
-| [CLEW-092](./CLEW-092.md)      | v0.8    | planned    | 088, 089      | —                   |
-| [CLEW-091](./CLEW-091.md)      | v0.8    | planned    | 087–089, 092  | —                   |
+| [CLEW-092](./CLEW-092.md)      | v0.8    | done       | 088, 089      | —                   |
+| [CLEW-091](./CLEW-091.md)      | v0.8    | done       | 087–089, 092  | —                   |
 
 ## Execution waves
 
@@ -94,7 +94,7 @@ Wave 6: CLEW-085 (done)
 Wave 7: CLEW-086 (done)
 Next v0.7: CLEW-080 → CLEW-076 → CLEW-081
 Completed interactive response slice: CLEW-078 → CLEW-079 → CLEW-077
-Next v0.8: CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091; CLEW-090 superseded
+Completed v0.8: CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091; CLEW-090 superseded
 ```
 
 The Wave 2 tasks deliberately own separate primary areas to reduce merge conflicts. Their shared contracts and fixtures must land in `CLEW-068` first.

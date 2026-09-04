@@ -200,6 +200,14 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
 
   return {
     id: string(show.id, 'task id'),
+    // Older daemon payloads did not expose created_at. Keep them usable while
+    // still preferring the immutable creation timestamp for sidebar ordering.
+    createdAt:
+      typeof show.created_at === 'string'
+        ? show.created_at
+        : typeof show.updated_at === 'string'
+          ? show.updated_at
+          : '1970-01-01T00:00:00.000Z',
     title: string(contract.title, 'task title'),
     goal: string(contract.goal, 'task goal'),
     profile: typeof contract.profile === 'string' ? contract.profile : 'quick',

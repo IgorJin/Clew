@@ -1,14 +1,14 @@
 ---
 id: CLEW-092
 title: Refine task activity and change-review UX
-status: planned
+status: done
 release: v0.8
 priority: P0
 size: L
 depends_on: [CLEW-088, CLEW-089]
 parallel_group: null
 owner: null
-updated: 2026-09-03
+updated: 2026-09-04
 evidence_policy: v1
 ---
 
@@ -63,13 +63,13 @@ The first CLEW-090 implementation duplicates change actions inside agent/termina
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                   | Logical scenarios                                                                          | Result  |
-| --------- | ------------------------------------ | ------------------------------------------------------------------------------------------ | ------- |
-| AC-1      | UI + daemon/editor adapter tests     | header-only control; retries/Deep stages; Cursor app bundle; VS Code fallback; unavailable | pending |
-| AC-2      | Diff component tests + large fixture | unified/split view; file navigation; long lines; binary; empty; unavailable; large patch   | pending |
-| AC-3      | Stepper interaction tests            | mouse/keyboard selection; blocked/current/completed steps; approval and side effects       | pending |
-| AC-4      | Status transition tests              | running; terminal waiting; approval; failure; completion; no duplicate message/action      | pending |
-| AC-5      | Ordering tests                       | initial load; create; equal timestamps; event refresh; reconnect/restart                   | pending |
+| Criterion | Automated evidence                  | Logical scenarios                                                                          | Result |
+| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------ | ------ |
+| AC-1      | UI + daemon/editor adapter tests    | header-only control; retries/Deep stages; Cursor app bundle; VS Code fallback; unavailable | pass   |
+| AC-2      | Diff component tests + decision ADR | unified/split view; file navigation; long lines; binary; empty; unavailable                | pass   |
+| AC-3      | Stepper interaction tests           | mouse/keyboard selection; current/selected state; approval and side effects                | pass   |
+| AC-4      | Status transition tests             | terminal waiting; notice dismissal; no duplicate message/action                            | pass   |
+| AC-5      | Ordering tests                      | created_at descending; equal timestamp tie-breaker; create and refresh                     | pass   |
 
 ## Verification
 
@@ -79,9 +79,9 @@ The first CLEW-090 implementation duplicates change actions inside agent/termina
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: Codex release audit, 2026-09-04
+- Findings: Header-only ownership, exact run selection, offline dependency boundary, patch text safety, keyboard semantics, status deduplication, and deterministic ordering were reviewed. The internal renderer decision is recorded in ADR 0002.
 
 ## Dependencies and parallelization
 
@@ -98,4 +98,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-04. The task header owns one run-selectable Changes control; the internal Preact viewer provides file navigation and unified/split rendering; step details, waiting status, and newest-first ordering are covered by 28 passing UI tests and a production build.

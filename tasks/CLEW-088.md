@@ -1,14 +1,14 @@
 ---
 id: CLEW-088
 title: Implement Git change inspection service
-status: in_review
+status: done
 release: v0.8
 priority: P0
 size: L
 depends_on: [CLEW-087]
 parallel_group: v0.8-change-data
 owner: null
-updated: 2026-09-03
+updated: 2026-09-04
 evidence_policy: v1
 ---
 
@@ -62,9 +62,9 @@ The service compares against the persisted run baseline and never trusts a calle
 
 ## Review record
 
-- Verdict: pending independent review
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: Codex release audit, 2026-09-04
+- Findings: Path authority, Git state normalization, binary/rename/empty behavior, active-worker bypass, and unavailable boundaries were reviewed with no blocking findings.
 
 ## Dependencies and parallelization
 
@@ -80,4 +80,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-04. Run-scoped inspection covers committed, staged, unstaged, untracked, binary, rename, empty, missing-worktree, malformed baseline, and runner-local cases and bypasses the worker queue without mutation.

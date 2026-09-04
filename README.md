@@ -2,7 +2,7 @@
 
 Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
 
-This repository contains the `v0.6.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md).
+This repository contains the `v0.8.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md). Agent changes are reviewed from the task header and transferred manually as described in [`docs/GIT-WORKFLOW.md`](./docs/GIT-WORKFLOW.md).
 
 ## Requirements
 

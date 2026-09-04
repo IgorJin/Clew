@@ -4,6 +4,15 @@
 
 No changes yet.
 
+## 0.8.0
+
+- Persisted immutable run Git provenance with safe recovery for legacy v0.7 databases.
+- Added run-scoped read-only inspection for committed, staged, unstaged, untracked, renamed, binary, and empty changes.
+- Added Cursor-first and VS Code fallback viewer adapters, macOS app-bundle launching, and worktree path copying.
+- Moved Changes to one task-header control with explicit run selection and a dependency-free unified/split diff viewer.
+- Added contextual step details, a unified waiting/status notice, and deterministic newest-first task ordering.
+- Documented the manual merge/cherry-pick/PR workflow; completion never merges or pushes automatically.
+
 ## 0.6.0
 
 - Added protocol-v1 contracts for one authenticated Controller/Runner connection with bounded envelopes, compatibility negotiation, TLS enforcement, idempotency, and lease epoch fencing.

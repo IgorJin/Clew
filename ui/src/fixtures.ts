@@ -80,6 +80,7 @@ const standardThread: ThreadItem[] = [
 export const fixtureTasks: Task[] = [
   {
     id: 'CLEW-071',
+    createdAt: '2026-08-28T09:40:00.000Z',
     title: 'Replace auth middleware',
     goal: 'Move the local auth boundary behind a typed adapter.',
     profile: 'standard',
@@ -145,6 +146,7 @@ export const fixtureTasks: Task[] = [
   },
   {
     id: 'ACC-DEEP',
+    createdAt: '2026-08-28T09:55:00.000Z',
     title: 'Parallel cache migration',
     goal: 'Split backend and frontend work, then integrate safely.',
     profile: 'deep',

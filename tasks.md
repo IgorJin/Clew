@@ -4,7 +4,7 @@
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Clew v0.7.0 pairing operations and self-hosted packaging
+**Active target:** Clew v0.7.0 pairing operations and self-hosted packaging; v0.8.0 Agent Change Visibility is complete
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -263,7 +263,7 @@ All six cards are complete. Release evidence includes 174/174 unsandboxed backen
 | CLEW-076 | P1  | L    | Docker packaging and deployment operations | 075, 080      | Docker Controller/UI plus installed local Runner survive pairing, reconnect, upgrade, backup/restore, and clean deployment acceptance without privileged host mounts. |
 | CLEW-081 | P0  | L    | v0.7 self-hosted acceptance and release    | 075, 076, 080 | Migration, pairing, Docker, security, installed-artifact, backup/restore, CI, and publication gates pass for `v0.7.0`.                                                |
 
-## v0.8 plan — Agent Change Visibility
+## v0.8 complete — Agent Change Visibility
 
 | ID       | Pri | Size | Work package                         | Depends on   | Done when                                                                                                                                                                            |
 | -------- | --- | ---- | ------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -283,7 +283,7 @@ Wave 2: CLEW-092 (supersedes CLEW-090)
 Wave 3: CLEW-091
 ```
 
-All v0.8 cards use `updated: 2026-09-03`, `evidence_policy: v1`, and `owner: null`. Worktree results remain manually transferable through merge, cherry-pick, or PR.
+All v0.8 cards use `evidence_policy: v1` and `owner: null`. The release completed on 2026-09-04. Worktree results remain manually transferable through merge, cherry-pick, or PR.
 
 ## Later backlog
 

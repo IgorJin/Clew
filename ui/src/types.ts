@@ -63,6 +63,7 @@ export type ThreadItem = {
 
 export type Task = {
   id: string;
+  createdAt: string;
   title: string;
   goal: string;
   profile: string;

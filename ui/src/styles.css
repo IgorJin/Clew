@@ -491,6 +491,16 @@ h1 {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.step.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .step-dot {
@@ -1750,6 +1760,16 @@ textarea:focus {
   padding: 4px 6px;
   color: var(--text-2);
   border-radius: 4px;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.diff-file:hover,
+.diff-file.selected {
+  background: var(--panel-strong);
 }
 
 .diff-file span {
@@ -1776,11 +1796,36 @@ textarea:focus {
   background: #090b0b;
 }
 
-.diff-content pre {
+.diff-mode-toggle {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: #101313;
+}
+
+.diff-mode-toggle button {
+  padding: 3px 8px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.diff-mode-toggle button.active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--panel-strong);
+}
+
+.diff-lines {
   min-width: max-content;
-  margin: 0;
-  padding: 16px 18px 32px;
-  color: #cbd5ce;
   font:
     11px/1.55 ui-monospace,
     SFMono-Regular,
@@ -1788,6 +1833,60 @@ textarea:focus {
     Consolas,
     monospace;
   tab-size: 2;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 44px minmax(max-content, 1fr);
+  min-height: 18px;
+  padding-right: 18px;
+  color: #cbd5ce;
+}
+
+.diff-split-line {
+  display: grid;
+  grid-template-columns: 44px minmax(max-content, 1fr) 44px minmax(max-content, 1fr);
+  min-height: 18px;
+  color: #cbd5ce;
+}
+
+.diff-split-line code {
+  min-width: 320px;
+  padding-right: 18px;
+  border-right: 1px solid #242a27;
+  white-space: pre;
+}
+
+.diff-line-number {
+  padding-right: 10px;
+  color: #66736b;
+  text-align: right;
+  user-select: none;
+}
+
+.diff-line code {
+  white-space: pre;
+}
+
+.diff-line-addition {
+  background: rgba(50, 180, 100, 0.14);
+  color: #c5f4d1;
+}
+
+.diff-line-deletion {
+  background: rgba(220, 70, 70, 0.14);
+  color: #ffd0d0;
+}
+
+.diff-line-hunk {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  background: rgba(80, 120, 220, 0.12);
+  color: #a9c4ff;
+}
+
+.diff-line-header {
+  color: #aebbb3;
 }
 
 .binary-notice,
@@ -1929,6 +2028,76 @@ textarea:focus {
     monospace;
 }
 
+.step-details {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.step-details h3,
+.step-details p {
+  margin: 0;
+}
+
+.step-details h3 {
+  font-size: 14px;
+}
+
+.step-details p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.step-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 5px 0 0;
+}
+
+.step-detail-grid div:last-child {
+  grid-column: 1 / -1;
+}
+
+.step-detail-grid dt {
+  color: var(--faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.step-detail-grid dd {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.status-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-notice > div {
+  flex: 1;
+}
+
+.status-notice strong,
+.status-notice p {
+  display: block;
+  margin: 0;
+}
+
+.status-notice p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* ── Status ──────────────────────────────────── */
 .status {
   display: inline-flex;
@@ -2035,7 +2204,6 @@ textarea:focus {
   .changes-menu {
     left: 0;
     right: auto;
-    width: 100%;
   }
   .diff-viewer {
     width: 100%;

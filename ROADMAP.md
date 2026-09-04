@@ -352,7 +352,7 @@ Own the v0.6 migration, clean Docker deployment, pairing/revocation, upgrade, ba
 5. No privileged host mount, Docker socket, repository root, or harness credential is required by Controller.
 6. One-Runner scope remains explicit; multi-Runner scheduling stays deferred.
 
-## v0.8 — Agent Change Visibility
+## v0.8 — Agent Change Visibility (completed 2026-09-04)
 
 **Outcome:** Operators can inspect exactly what each agent changed in its persisted worktree, open that worktree in an editor, or review a run-scoped unified diff without implicit merge or push behavior.
 
@@ -374,7 +374,7 @@ Superseded by CLEW-092 after workflow review rejected per-agent placement in fav
 
 ### [CLEW-092](./tasks/CLEW-092.md) — Refine task activity and change-review UX
 
-Consolidate Changes in the task header, adopt a proven open-source diff surface, move next-step details into the selectable stepper, remove duplicate waiting notices, fix editor launching, and restore newest-first task ordering.
+Consolidate Changes in the task header, use the ADR-selected dependency-free diff surface, move next-step details into the selectable stepper, remove duplicate waiting notices, fix editor launching, and restore newest-first task ordering.
 
 ### [CLEW-091](./tasks/CLEW-091.md) — v0.8 acceptance and release
 

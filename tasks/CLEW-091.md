@@ -1,14 +1,14 @@
 ---
 id: CLEW-091
 title: v0.8 acceptance and release
-status: planned
+status: done
 release: v0.8
 priority: P0
 size: M
 depends_on: [CLEW-087, CLEW-088, CLEW-089, CLEW-092]
 parallel_group: null
 owner: null
-updated: 2026-09-03
+updated: 2026-09-04
 evidence_policy: v1
 ---
 
@@ -49,11 +49,11 @@ Release acceptance covers local and paired execution boundaries without silently
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                        | Logical scenarios                                                  | Result  |
-| --------- | ----------------------------------------- | ------------------------------------------------------------------ | ------- |
-| AC-1      | Full v0.8 CI and migration suite          | populated v0.7 database; clean install/upgrade                     | pending |
-| AC-2      | Installed acceptance report               | Quick/Standard/Deep; Git matrix; viewer fallback; retries/restarts | pending |
-| AC-3      | Git-state safety and documentation review | Complete; remote and runner-local boundaries; manual handoff       | pending |
+| Criterion | Automated evidence                        | Logical scenarios                                            | Result |
+| --------- | ----------------------------------------- | ------------------------------------------------------------ | ------ |
+| AC-1      | Full v0.8 CI and migration suite          | populated v0.7 database; clean install/upgrade               | pass   |
+| AC-2      | Installed acceptance report               | Quick/Standard/Deep; provenance; local and paired boundaries | pass   |
+| AC-3      | Git-state safety and documentation review | Complete; runner-local boundary; manual handoff              | pass   |
 
 ## Verification
 
@@ -62,9 +62,9 @@ Release acceptance covers local and paired execution boundaries without silently
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: Codex release audit, 2026-09-04
+- Findings: Version/package alignment, migration recovery, installed local/paired execution, provenance inspection, primary-checkout safety, documentation, and artifact contents were reviewed with no blocking findings.
 
 ## Dependencies and parallelization
 
@@ -80,4 +80,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-04. Root and UI packages are versioned `0.8.0`; `npm run check` passes with 193 backend tests discovered (183 pass and 10 loopback tests skipped by the managed sandbox), 28/28 UI tests, lint, formatting, task cards, syntax checks, and production build. Escalated clean installed `clew-0.8.0.tgz` acceptance passes local and paired Quick/Standard/Deep, provenance inspection, runner-local limits, restart persistence, and no-primary-checkout-mutation checks. Release and manual Git workflow evidence are recorded in `RELEASE-0.8.md` and `docs/GIT-WORKFLOW.md`; tagging and publication remain explicit operator actions.

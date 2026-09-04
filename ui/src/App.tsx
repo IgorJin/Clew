@@ -78,14 +78,6 @@ const kindLabel: Record<string, string> = {
   worker_output: 'Output',
 };
 
-function statusPriority(state: TaskState): number {
-  const group = statusGroup[state];
-  if (group === 'waiting') return 0;
-  if (group === 'error') return 1;
-  if (group === 'active') return 2;
-  return 3;
-}
-
 function Status({ state }: { state: TaskState }) {
   return (
     <span className={`status status-${state.toLowerCase()}`}>
@@ -306,6 +298,13 @@ function changeUnavailableLabel(reason?: string) {
   return 'Changes are unavailable for this run.';
 }
 
+function patchForFile(patch: string, path: string | null) {
+  if (!path) return patch;
+  const sections = patch.split(/(?=^diff --git )/m).filter(Boolean);
+
+  return sections.find((section) => section.includes(` b/${path}`)) ?? patch;
+}
+
 function ChangeActions({
   run,
   changes,
@@ -408,6 +407,15 @@ function DiffViewer({
   onClose: () => void;
 }) {
   const result = changes?.result;
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'unified' | 'split'>('unified');
+
+  useEffect(() => {
+    if (result?.state !== 'available') return;
+    setSelectedPath((current) =>
+      current && result.files.includes(current) ? current : (result.files[0] ?? null),
+    );
+  }, [result]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -459,15 +467,66 @@ function DiffViewer({
           <div className="diff-layout">
             <aside className="diff-files" aria-label="Changed files">
               {result.statuses.map((file) => (
-                <div className="diff-file" key={`${file.status}:${file.path}`}>
+                <button
+                  className={`diff-file${selectedPath === file.path ? ' selected' : ''}`}
+                  key={`${file.status}:${file.path}`}
+                  type="button"
+                  aria-pressed={selectedPath === file.path}
+                  onClick={() => setSelectedPath(file.path)}
+                >
                   <span>{file.status.trim() || 'M'}</span>
                   <code title={file.path}>{file.path}</code>
-                </div>
+                </button>
               ))}
             </aside>
             <div className="diff-content">
               {result.binary && <div className="binary-notice">Includes binary changes</div>}
-              <pre>{result.patch}</pre>
+              <div className="diff-mode-toggle" aria-label="Diff layout">
+                <button
+                  type="button"
+                  className={viewMode === 'unified' ? 'active' : ''}
+                  aria-pressed={viewMode === 'unified'}
+                  onClick={() => setViewMode('unified')}
+                >
+                  Unified
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === 'split' ? 'active' : ''}
+                  aria-pressed={viewMode === 'split'}
+                  onClick={() => setViewMode('split')}
+                >
+                  Split
+                </button>
+              </div>
+              <div className="diff-lines" role="region" aria-label="Unified diff">
+                {patchForFile(result.patch, selectedPath)
+                  .split('\n')
+                  .map((line, index) => {
+                    const kind = line.startsWith('@@')
+                      ? 'hunk'
+                      : line.startsWith('+++') || line.startsWith('---')
+                        ? 'header'
+                        : line.startsWith('+')
+                          ? 'addition'
+                          : line.startsWith('-')
+                            ? 'deletion'
+                            : 'context';
+                    return viewMode === 'unified' ? (
+                      <div className={`diff-line diff-line-${kind}`} key={`${index}:${line}`}>
+                        <span className="diff-line-number">{index + 1}</span>
+                        <code>{line || ' '}</code>
+                      </div>
+                    ) : (
+                      <div className={`diff-split-line diff-line-${kind}`} key={`${index}:${line}`}>
+                        <span className="diff-line-number">{index + 1}</span>
+                        <code>{kind === 'addition' ? ' ' : line || ' '}</code>
+                        <span className="diff-line-number">{index + 1}</span>
+                        <code>{kind === 'deletion' ? ' ' : line || ' '}</code>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           </div>
         ) : (
@@ -484,22 +543,12 @@ function AgentGrid({
   act,
   expandedAgent,
   onToggleExpand,
-  changesByRun,
-  onOpenEditor,
-  onViewDiff,
-  onCopyPath,
-  onRefreshChanges,
 }: {
   task: Task;
   canMutate: boolean;
   act: (args: string[], success: string) => void;
   expandedAgent: string | null;
   onToggleExpand: (agent: string) => void;
-  changesByRun: Record<string, ChangeLoad>;
-  onOpenEditor: (run: Run) => void;
-  onViewDiff: (run: Run) => void;
-  onCopyPath: (run: Run) => void;
-  onRefreshChanges: (run: Run) => void;
 }) {
   const cards = task.roles.flatMap<AgentCard>((role) => {
     if (role !== 'worker')
@@ -651,15 +700,6 @@ function AgentGrid({
                 <Terminal size={12} />
                 Open externally
               </button>
-              <ChangeActions
-                run={run}
-                changes={run ? changesByRun[run.id] : undefined}
-                disabled={!canMutate}
-                onOpenEditor={() => run && onOpenEditor(run)}
-                onViewDiff={() => run && onViewDiff(run)}
-                onCopyPath={() => run && onCopyPath(run)}
-                onRefresh={() => run && onRefreshChanges(run)}
-              />
             </div>
             {expanded && terminalId && (
               <TerminalPane
@@ -811,14 +851,15 @@ function CreateTask({
   );
 }
 
-function StepIndicator({ state }: { state: TaskState }) {
-  const steps: { key: string; label: string }[] = [
-    { key: 'plan', label: 'Plan' },
-    { key: 'execute', label: 'Execute' },
-    { key: 'review', label: 'Review' },
-    { key: 'done', label: 'Done' },
-  ];
-  const stepOf: Record<string, number> = {
+const WORKFLOW_STEPS = [
+  { key: 'plan', label: 'Plan' },
+  { key: 'execute', label: 'Execute' },
+  { key: 'review', label: 'Review' },
+  { key: 'done', label: 'Done' },
+] as const;
+
+function workflowStepIndex(state: TaskState) {
+  const stepOf: Record<TaskState, number> = {
     DRAFT: 0,
     PLAN_READY: 0,
     QUEUED: 1,
@@ -833,21 +874,36 @@ function StepIndicator({ state }: { state: TaskState }) {
     CANCELLED: -1,
     BLOCKED: -1,
   };
-  const active = stepOf[state] ?? 0;
+
+  return stepOf[state] ?? 0;
+}
+
+function StepIndicator({
+  state,
+  selected,
+  onSelect,
+}: {
+  state: TaskState;
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  const active = workflowStepIndex(state);
 
   return (
     <div className="stepper">
-      {steps.map((step, i) => (
+      {WORKFLOW_STEPS.map((step, i) => (
         <span key={step.key} style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
           {i > 0 && <span className="step-sep" />}
-          <span
-            className={
-              active < 0 ? 'step' : i < active ? 'step done' : i === active ? 'step active' : 'step'
-            }
+          <button
+            type="button"
+            onClick={() => onSelect(step.key)}
+            aria-current={i === active ? 'step' : undefined}
+            aria-pressed={selected === step.key}
+            className={`${active < 0 ? 'step' : i < active ? 'step done' : i === active ? 'step active' : 'step'}${selected === step.key ? ' selected' : ''}`}
           >
             <span className="step-dot" />
             {step.label}
-          </span>
+          </button>
         </span>
       ))}
     </div>
@@ -864,12 +920,14 @@ export default function App() {
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
+  const [selectedStep, setSelectedStep] = useState('plan');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [descExpanded, setDescExpanded] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [changesByRun, setChangesByRun] = useState<Record<string, ChangeLoad>>({});
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
+  const [selectedChangeRunId, setSelectedChangeRunId] = useState<string | null>(null);
   const [runRequested, setRunRequested] = useState(false);
   const autoOpenedTerminal = useRef<string | null>(null);
   const changeRequestSequence = useRef<Record<string, number>>({});
@@ -949,6 +1007,15 @@ export default function App() {
     () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
     [selected, tasks],
   );
+
+  useEffect(() => {
+    setSelectedChangeRunId((current) => {
+      if (current && task?.runs.some((run) => run.id === current)) return current;
+      return task?.runId && task.runs.some((run) => run.id === task.runId)
+        ? task.runId
+        : (task?.runs.at(-1)?.id ?? null);
+    });
+  }, [task?.id, task?.runId]);
 
   const refreshRunChanges = useCallback(async (runId: string) => {
     const sequence = (changeRequestSequence.current[runId] ?? 0) + 1;
@@ -1054,7 +1121,9 @@ export default function App() {
           return true;
         })
       : tasks;
-    return [...list].sort((a, b) => statusPriority(a.state) - statusPriority(b.state));
+    return [...list].sort(
+      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
+    );
   }, [tasks, statusFilter]);
 
   const createTask = async ({ title, body, profile, tags }: CreateTaskInput) => {
@@ -1084,6 +1153,7 @@ export default function App() {
         setTasks((current) => [
           {
             id,
+            createdAt: new Date().toISOString(),
             title,
             goal: body,
             profile,
@@ -1235,24 +1305,6 @@ export default function App() {
     }
   };
 
-  const openChanges = async () => {
-    try {
-      const result = (await execute(['task', 'open-changes', task.id])) as {
-        fixture?: boolean;
-        state?: string;
-        reason?: string;
-      };
-
-      setNotice(
-        result?.state === 'unavailable'
-          ? changeUnavailableLabel(result.reason)
-          : 'Opened in editor',
-      );
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not open changes');
-    }
-  };
-
   const runViewerAction = async (run: Run, viewer?: 'cursor' | 'vscode' | 'worktree-path') => {
     try {
       const result = (await execute([
@@ -1277,6 +1329,65 @@ export default function App() {
   };
 
   const diffRun = task.runs.find((run) => run.id === diffRunId);
+  const latestTaskRun = task.runs.at(-1);
+  const changeRun = task.runs.find((run) => run.id === selectedChangeRunId) ?? latestTaskRun;
+  const selectedWorkflowIndex = WORKFLOW_STEPS.findIndex((step) => step.key === selectedStep);
+  const currentWorkflowIndex = workflowStepIndex(task.state);
+  const selectedStepStatus =
+    currentWorkflowIndex < 0
+      ? task.state.toLowerCase().replaceAll('_', ' ')
+      : selectedWorkflowIndex < currentWorkflowIndex
+        ? 'completed'
+        : selectedWorkflowIndex === currentWorkflowIndex
+          ? 'current'
+          : 'pending';
+  const stepDetail =
+    selectedStep === 'plan'
+      ? {
+          explanation: 'Define the execution stages and approve the plan before work starts.',
+          prerequisites: 'A valid task contract.',
+          action:
+            task.attention === 'PLAN_APPROVAL_REQUIRED'
+              ? 'Approve the proposed plan'
+              : 'No action required',
+          approval: task.attention === 'PLAN_APPROVAL_REQUIRED' ? 'Required' : 'Not required',
+          sideEffects: 'Persists the approved execution plan; does not modify the repository.',
+        }
+      : selectedStep === 'execute'
+        ? {
+            explanation:
+              nextStep?.summary ?? 'Run the selected profile in isolated agent worktrees.',
+            prerequisites: 'Approved plan and an available execution environment.',
+            action:
+              nextStep?.status === 'PENDING'
+                ? 'Approve start'
+                : task.state === 'EXECUTING'
+                  ? 'Continue in the active terminal'
+                  : 'Inspect the next-step state',
+            approval: nextStep?.approvalRequired ? 'Required' : 'Depends on the task state',
+            sideEffects:
+              nextStep?.sideEffects?.join('; ') ??
+              'Creates run records and isolated worktrees; never merges or pushes automatically.',
+          }
+        : selectedStep === 'review'
+          ? {
+              explanation:
+                'Inspect worker evidence, revisions, findings, and requested corrections.',
+              prerequisites: 'At least one completed worker run.',
+              action: task.findings ? 'Resolve review findings' : 'Inspect review evidence',
+              approval:
+                task.state === 'WAITING_FOR_HUMAN' ? 'Operator action required' : 'Not required',
+              sideEffects: 'Records review evidence or schedules a bounded retry.',
+            }
+          : {
+              explanation: 'Accept the verified revision and finish the task lifecycle.',
+              prerequisites: 'READY state and a verified revision.',
+              action: task.state === 'READY' ? 'Complete task' : 'No action available',
+              approval:
+                task.state === 'READY' ? 'Explicit operator action required' : 'Not available',
+              sideEffects:
+                'Records completion only; does not merge, push, or alter the primary checkout.',
+            };
 
   return (
     <div className="app">
@@ -1368,13 +1479,31 @@ export default function App() {
                   <h1>{task.title}</h1>
                 </div>
                 <div className="header-actions">
-                  <button
-                    className="button secondary"
+                  {task.runs.length > 1 && (
+                    <label className="change-run-select">
+                      <span className="sr-only">Select change run</span>
+                      <select
+                        aria-label="Select change run"
+                        value={changeRun?.id ?? ''}
+                        onChange={(event) => setSelectedChangeRunId(event.currentTarget.value)}
+                      >
+                        {task.runs.map((run) => (
+                          <option value={run.id} key={run.id}>
+                            {run.stageId} · attempt {run.attempt}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <ChangeActions
+                    run={changeRun}
+                    changes={changeRun ? changesByRun[changeRun.id] : undefined}
                     disabled={!canMutate}
-                    onClick={() => void openChanges()}
-                  >
-                    <Laptop size={13} /> Open changes
-                  </button>
+                    onOpenEditor={() => changeRun && void runViewerAction(changeRun)}
+                    onViewDiff={() => changeRun && viewRunDiff(changeRun)}
+                    onCopyPath={() => changeRun && void runViewerAction(changeRun, 'worktree-path')}
+                    onRefresh={() => changeRun && void refreshRunChanges(changeRun.id)}
+                  />
                   <button
                     className="button secondary"
                     disabled={!canMutate || (!interactiveWorker && !canStart && !canContinue)}
@@ -1422,7 +1551,60 @@ export default function App() {
                 {descExpanded ? '▾' : '▸'} Description
               </button>
               {descExpanded && <p className="description-text">{task.goal}</p>}
-              <StepIndicator state={task.state} />
+              <StepIndicator
+                state={task.state}
+                selected={selectedStep}
+                onSelect={(key) => {
+                  setSelectedStep(key);
+                  if (key === 'execute' && !nextStep) void explainNextStep();
+                }}
+              />
+              <section className="step-details" aria-label={`${selectedStep} step details`}>
+                <span className="eyebrow">Selected step</span>
+                <h3>
+                  {selectedStep === 'plan'
+                    ? 'Plan'
+                    : selectedStep === 'execute'
+                      ? 'Execute'
+                      : selectedStep === 'review'
+                        ? 'Review'
+                        : 'Done'}
+                </h3>
+                <p>{stepDetail.explanation}</p>
+                <dl className="step-detail-grid">
+                  <div>
+                    <dt>Status</dt>
+                    <dd>{selectedStepStatus}</dd>
+                  </div>
+                  <div>
+                    <dt>Prerequisites</dt>
+                    <dd>{stepDetail.prerequisites}</dd>
+                  </div>
+                  <div>
+                    <dt>Available action</dt>
+                    <dd>{stepDetail.action}</dd>
+                  </div>
+                  <div>
+                    <dt>Approval</dt>
+                    <dd>{stepDetail.approval}</dd>
+                  </div>
+                  <div>
+                    <dt>Side effects</dt>
+                    <dd>{stepDetail.sideEffects}</dd>
+                  </div>
+                </dl>
+                {selectedStep === 'execute' && nextStep && (
+                  <div className="next-step-details">
+                    <span>
+                      {nextStep.currentStep} → {nextStep.resultingStep ?? '—'}
+                    </span>
+                    <span>
+                      Harness: {nextStep.inputs?.harness ?? '—'} · Model:{' '}
+                      {nextStep.inputs?.model ?? '—'}
+                    </span>
+                  </div>
+                )}
+              </section>
               {(task.attention || pendingHarnessApproval) && (
                 <div className="attention-actions">
                   <span className="attention-label">
@@ -1506,13 +1688,41 @@ export default function App() {
               </div>
             </section>
 
-            {notice && (
-              <div className="notice">
-                <CircleHelp size={14} />
-                {notice}
-                <button onClick={() => setNotice('')} aria-label="Dismiss">
-                  <X size={12} />
-                </button>
+            {(notice || task.interactionStatus === 'waiting_for_operator') && (
+              <div
+                className="notice status-notice"
+                role={task.interactionStatus === 'waiting_for_operator' ? 'status' : undefined}
+              >
+                {task.interactionStatus === 'waiting_for_operator' ? (
+                  <SquareTerminal size={18} />
+                ) : (
+                  <CircleHelp size={14} />
+                )}
+                <div>
+                  <strong>
+                    {task.interactionStatus === 'waiting_for_operator'
+                      ? 'Terminal is waiting for you'
+                      : notice}
+                  </strong>
+                  {task.interactionStatus === 'waiting_for_operator' && (
+                    <p>
+                      The worker returned a response. Continue in the terminal or finish the worker.
+                    </p>
+                  )}
+                </div>
+                {task.interactionStatus !== 'waiting_for_operator' && (
+                  <button onClick={() => setNotice('')} aria-label="Dismiss">
+                    <X size={12} />
+                  </button>
+                )}
+                {task.interactionStatus === 'waiting_for_operator' &&
+                  task.terminalAvailable &&
+                  task.runId &&
+                  task.terminalAccess !== 'runner_local' && (
+                    <button className="text-button" onClick={() => setExpandedAgent('worker')}>
+                      Open terminal <ChevronRight size={14} />
+                    </button>
+                  )}
               </div>
             )}
 
@@ -1525,50 +1735,6 @@ export default function App() {
               </div>
             )}
 
-            {task.interactionStatus === 'waiting_for_operator' && (
-              <div className="terminal-waiting-banner" role="status">
-                <SquareTerminal size={18} />
-                <div>
-                  <strong>Terminal is waiting for you</strong>
-                  <p>
-                    The worker returned a response. Continue in the terminal or finish the worker.
-                  </p>
-                </div>
-                {task.terminalAvailable && task.runId && task.terminalAccess !== 'runner_local' && (
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      const run = task.runs.find((candidate) => candidate.id === task.runId);
-
-                      setExpandedAgent(
-                        run && run.stageId !== 'worker' ? `worker:${run.stageId}` : 'worker',
-                      );
-                    }}
-                  >
-                    Open terminal <ChevronRight size={14} />
-                  </button>
-                )}
-              </div>
-            )}
-
-            {nextStep?.status === 'PENDING' && (
-              <section className="next-step" aria-label="Next step">
-                <div>
-                  <span className="eyebrow">Next step</span>
-                  <h2>{nextStep.summary}</h2>
-                  <p>
-                    {nextStep.currentStep} → {nextStep.resultingStep}. Nothing starts until you
-                    approve.
-                  </p>
-                </div>
-                <div className="next-step-details">
-                  <span>Harness: {nextStep.inputs?.harness ?? '—'}</span>
-                  <span>Model: {nextStep.inputs?.model ?? '—'}</span>
-                  <span>Mode: {nextStep.inputs?.permissionMode ?? '—'}</span>
-                </div>
-              </section>
-            )}
-
             <AgentGrid
               task={task}
               canMutate={canMutate}
@@ -1577,11 +1743,6 @@ export default function App() {
               onToggleExpand={(agent) =>
                 setExpandedAgent((current) => (current === agent ? null : agent))
               }
-              changesByRun={changesByRun}
-              onOpenEditor={(run) => void runViewerAction(run)}
-              onViewDiff={viewRunDiff}
-              onCopyPath={(run) => void runViewerAction(run, 'worktree-path')}
-              onRefreshChanges={(run) => void refreshRunChanges(run.id)}
             />
 
             <div className="main-grid">

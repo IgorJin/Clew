@@ -313,11 +313,54 @@ describe('Preact control plane', () => {
     waitingTasks[0].terminalActive = true;
     waitingTasks[0].interactionStatus = 'waiting_for_operator';
     api.loadTasks.mockResolvedValueOnce({ tasks: waitingTasks, state: 'connected' });
-    render(<App />);
+    const { container } = render(<App />);
 
     expect(await screen.findByText('Terminal is waiting for you')).toBeTruthy();
     expect(screen.getByText(/worker returned a response/i)).toBeTruthy();
     expect(screen.getByText('Waiting for operator')).toBeTruthy();
+    expect(container.querySelectorAll('.status-notice')).toHaveLength(1);
+    expect(container.querySelector('.terminal-waiting-banner')).toBeNull();
+  });
+
+  it('keeps Changes only in the task header', async () => {
+    api.execute.mockImplementation(async (args: string[]) =>
+      args[0] === 'task' && args[1] === 'changes' ? availableChanges(args[2]) : { fixture: true },
+    );
+    const { container } = render(<App />);
+
+    await screen.findByRole('button', { name: 'Changes +4 −2' });
+    expect(container.querySelectorAll('.changes-control')).toHaveLength(1);
+    expect(container.querySelector('.agent-card .changes-control')).toBeNull();
+  });
+
+  it('selects workflow steps and exposes contextual state, prerequisites, action and effects', async () => {
+    render(<App />);
+    const review = await screen.findByRole('button', { name: 'Review' });
+
+    fireEvent.click(review);
+    const details = screen.getByRole('region', { name: 'review step details' });
+
+    expect(review.getAttribute('aria-pressed')).toBe('true');
+    expect(within(details).getByText('Status')).toBeTruthy();
+    expect(within(details).getByText('Prerequisites')).toBeTruthy();
+    expect(within(details).getByText('Available action')).toBeTruthy();
+    expect(within(details).getByText('Approval')).toBeTruthy();
+    expect(within(details).getByText('Side effects')).toBeTruthy();
+  });
+
+  it('orders sidebar tasks newest first with a stable id tie-breaker', async () => {
+    const tasks = structuredClone(fixtureTasks);
+    tasks[0].createdAt = '2026-09-01T10:00:00.000Z';
+    tasks[1].createdAt = '2026-09-01T10:00:00.000Z';
+    tasks[0].id = 'CLEW-A';
+    tasks[1].id = 'CLEW-Z';
+    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    const { container } = render(<App />);
+
+    await screen.findByText('CLEW-Z');
+    expect(
+      [...container.querySelectorAll('.task-row .task-id')].map((node) => node.textContent),
+    ).toEqual(['CLEW-Z', 'CLEW-A']);
   });
 
   it('shows run-scoped counts and opens the selected run in the editor', async () => {
@@ -377,6 +420,39 @@ describe('Preact control plane', () => {
     expect(await screen.findByText(/no changes relative to the run baseline/i)).toBeTruthy();
   });
 
+  it('navigates files and switches the readable diff to split layout', async () => {
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] !== 'task' || args[1] !== 'changes') return { fixture: true };
+      return {
+        ...availableChanges(args[2]),
+        summary: { files: 2, additions: 2, deletions: 1 },
+        files: ['src/first.ts', 'src/second.ts'],
+        statuses: [
+          { path: 'src/first.ts', status: 'M ' },
+          { path: 'src/second.ts', status: 'M ' },
+        ],
+        patch:
+          'diff --git a/src/first.ts b/src/first.ts\n-old first\n+new first\n' +
+          'diff --git a/src/second.ts b/src/second.ts\n+new second',
+      };
+    });
+    const { container } = render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /change actions for worker/i }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
+    const dialog = await screen.findByRole('dialog', { name: /changes for worker/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /src\/second\.ts/ }));
+
+    expect(within(dialog).getByRole('region', { name: 'Unified diff' }).textContent).toContain(
+      'new second',
+    );
+    expect(within(dialog).getByRole('region', { name: 'Unified diff' }).textContent).not.toContain(
+      'new first',
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Split' }));
+    expect(container.querySelectorAll('.diff-split-line').length).toBeGreaterThan(0);
+  });
+
   it('uses the latest retry for each Deep stage and exposes unavailable Runner state', async () => {
     const tasks = structuredClone(fixtureTasks);
 
@@ -415,14 +491,10 @@ describe('Preact control plane', () => {
     });
     render(<App />);
 
-    const backendCard = (await screen.findByText('worker · backend')).closest(
-      '.agent-card',
-    ) as HTMLElement;
-    const frontendCard = screen
-      .getByText('worker · frontend')
-      .closest('.agent-card') as HTMLElement;
-
-    fireEvent.click(await within(backendCard).findByRole('button', { name: 'Changes +9 −0' }));
+    const runSelect = await screen.findByRole('combobox', { name: 'Select change run' });
+    fireEvent.change(runSelect, { target: { value: 'backend-2' } });
+    await waitFor(() => expect((runSelect as HTMLSelectElement).value).toBe('backend-2'));
+    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
     expect(api.execute).toHaveBeenCalledWith([
       'task',
       'open-changes',
@@ -430,9 +502,8 @@ describe('Preact control plane', () => {
       '--run',
       'backend-2',
     ]);
-    expect(
-      await within(frontendCard).findByRole('button', { name: 'Changes unavailable' }),
-    ).toBeTruthy();
+    fireEvent.change(runSelect, { target: { value: 'frontend-1' } });
+    expect(await screen.findByRole('button', { name: 'Changes unavailable' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /change actions for frontend/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
     expect(await screen.findByText(/available only on the runner host/i)).toBeTruthy();
