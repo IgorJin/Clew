@@ -14,6 +14,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   worktreeRoot: '.clew/worktrees',
   models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
   pricing: Object.freeze({ sources: [] }),
+  integration: Object.freeze({
+    enabled: true,
+    targetBranch: 'main',
+    strategy: 'squash',
+    cleanup: true,
+  }),
   observability: Object.freeze({
     enabled: false,
     serviceName: 'clew',
@@ -89,7 +95,19 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
       ...(userConfig.pricing ?? {}),
       ...(projectConfig.pricing ?? {}),
     },
+    integration: {
+      ...DEFAULT_CONFIG.integration,
+      ...(userConfig.integration ?? {}),
+      ...(projectConfig.integration ?? {}),
+    },
   };
+
+  if (!['squash', 'merge', 'pr', 'human'].includes(merged.integration.strategy))
+    throw new Error('integration.strategy must be squash, merge, pr, or human');
+  if (typeof merged.integration.targetBranch !== 'string' || !merged.integration.targetBranch)
+    throw new Error('integration.targetBranch is required');
+  if (typeof merged.integration.cleanup !== 'boolean')
+    throw new Error('integration.cleanup must be boolean');
 
   return {
     ...merged,

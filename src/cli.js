@@ -37,6 +37,9 @@ const packageVersion = JSON.parse(
 ).version;
 const TERMINAL_TASK_STATES = Object.freeze([
   TASK_STATE.READY,
+  TASK_STATE.READY_TO_FINISH,
+  TASK_STATE.MERGED,
+  TASK_STATE.RELEASED,
   TASK_STATE.COMPLETED,
   TASK_STATE.FAILED,
   TASK_STATE.CANCELLED,
@@ -127,6 +130,10 @@ function printHelp() {
   console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
   console.log('  clew task open-changes ID [--run RUN-ID] [--viewer cursor|vscode|worktree-path]');
   console.log('  clew task changes RUN-ID');
+  console.log('  clew task finalization TASK');
+  console.log('  clew task integrate TASK [--strategy squash|merge|pr|human] [--message TEXT]');
+  console.log('  clew task mark-merged TASK --revision SHA --evidence TEXT');
+  console.log('  clew task mark-released TASK --evidence TEXT');
   console.log(
     '  clew complete TASK --revision SHA [--actor ACTOR] [--review-override] [--note TEXT]',
   );

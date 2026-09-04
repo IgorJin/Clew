@@ -88,6 +88,33 @@ export const fixtureTasks: Task[] = [
     state: 'READY',
     attention: null,
     revision: 'a91c4e2',
+    finalization: {
+      version: 1,
+      taskId: 'CLEW-071',
+      runId: 'run-2',
+      state: 'READY',
+      ready: true,
+      checks: [
+        {
+          id: 'verification',
+          label: 'Verification passed',
+          passed: true,
+          blocking: true,
+          detail: '1 check',
+        },
+      ],
+      blockingReasons: [],
+      availableActions: ['review_changes', 'complete'],
+      recommendedAction: 'complete',
+      git: {
+        enabled: false,
+        targetBranch: 'main',
+        strategy: 'squash',
+        cleanup: true,
+        dirty: false,
+        conflicts: null,
+      },
+    },
     attempts: 2,
     roles: ['worker', 'reviewer'],
     runs: [

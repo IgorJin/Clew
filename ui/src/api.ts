@@ -1,5 +1,13 @@
 import { fixtureTasks } from './fixtures';
-import type { AgentRole, Run, Task, TaskAnalysis, TaskState, ThreadItem } from './types';
+import type {
+  AgentRole,
+  FinalizationReport,
+  Run,
+  Task,
+  TaskAnalysis,
+  TaskState,
+  ThreadItem,
+} from './types';
 
 export type ConnectionState =
   'fixture' | 'connected' | 'disconnected' | 'reconnecting' | 'incompatible';
@@ -109,6 +117,9 @@ function taskState(value: unknown): TaskState {
     'REVIEWING',
     'WAITING_FOR_HUMAN',
     'READY',
+    'READY_TO_FINISH',
+    'MERGED',
+    'RELEASED',
     'COMPLETED',
     'FAILED',
     'CANCELLED',
@@ -117,6 +128,59 @@ function taskState(value: unknown): TaskState {
   if (!states.includes(value as TaskState))
     throw new IncompatibleDaemonError('task state is unsupported');
   return value as TaskState;
+}
+
+function mapFinalization(value: unknown): FinalizationReport | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const report = value as JsonObject;
+
+  if (report.version !== 1 || typeof report.ready !== 'boolean' || !Array.isArray(report.checks))
+    throw new IncompatibleDaemonError('finalization report is unsupported');
+  const state = taskState(report.state);
+  const checks = report.checks.map((value) => {
+    const item = object(value, 'finalization check');
+
+    return {
+      id: string(item.id, 'finalization check id'),
+      label: string(item.label, 'finalization check label'),
+      passed: item.passed === true,
+      blocking: item.blocking === true,
+      detail: nullableString(item.detail),
+    };
+  });
+  const git =
+    report.git && typeof report.git === 'object' ? object(report.git, 'finalization git') : null;
+
+  return {
+    version: 1,
+    taskId: string(report.taskId, 'finalization task id'),
+    runId: nullableString(report.runId),
+    state,
+    ready: report.ready,
+    checks,
+    blockingReasons: Array.isArray(report.blockingReasons)
+      ? report.blockingReasons.filter((item): item is string => typeof item === 'string')
+      : [],
+    availableActions: Array.isArray(report.availableActions)
+      ? report.availableActions.filter((item): item is string => typeof item === 'string')
+      : [],
+    recommendedAction: nullableString(report.recommendedAction),
+    ...(git
+      ? {
+          git: {
+            enabled: git.enabled === true,
+            targetBranch: string(git.targetBranch, 'integration target branch'),
+            strategy: string(git.strategy, 'integration strategy'),
+            cleanup: git.cleanup === true,
+            dirty: git.dirty === true,
+            conflicts: typeof git.conflicts === 'boolean' ? git.conflicts : null,
+            targetClean: typeof git.targetClean === 'boolean' ? git.targetClean : null,
+            targetCheckedOut:
+              typeof git.targetCheckedOut === 'boolean' ? git.targetCheckedOut : null,
+          },
+        }
+      : {}),
+  };
 }
 
 function threadPage(value: unknown): Task['thread'] {
@@ -252,6 +316,7 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
       show.architecture && typeof show.architecture === 'object'
         ? (show.architecture as Task['architecture'])
         : null,
+    finalization: mapFinalization(show.finalization),
     tags: Array.isArray(contract.tags)
       ? contract.tags.filter((t): t is string => typeof t === 'string')
       : [],

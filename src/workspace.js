@@ -19,11 +19,13 @@ export class IntegrationConflictError extends Error {
 }
 
 export class GitWorktreeManager {
-  constructor(root, projectRoot = process.cwd()) {
+  constructor(root, projectRoot = process.cwd(), { createRoot = true } = {}) {
     this.root = resolve(root);
     this.projectRoot = resolve(projectRoot);
-    mkdirSync(this.root, { recursive: true });
-    this.root = realpathSync(this.root);
+    if (createRoot) {
+      mkdirSync(this.root, { recursive: true });
+      this.root = realpathSync(this.root);
+    }
   }
   createWorktree(taskId, stageId, baseRef = 'HEAD', attempt = 1) {
     const suffix = attempt > 1 ? `-attempt-${attempt}` : '';
@@ -112,6 +114,80 @@ export class GitWorktreeManager {
     }
 
     return { integrated, skipped, revision: runGitCommand(['rev-parse', 'HEAD'], path) };
+  }
+  inspectIntegration(sourceRevision, targetBranch = 'main') {
+    try {
+      const currentBranch = runGitCommand(['branch', '--show-current'], this.projectRoot);
+      const targetRevision = runGitCommand(['rev-parse', targetBranch], this.projectRoot);
+      const source = runGitCommand(['rev-parse', sourceRevision], this.projectRoot);
+      const dirty = Boolean(runGitCommand(['status', '--porcelain'], this.projectRoot));
+      const base = runGitCommand(['merge-base', targetRevision, source], this.projectRoot);
+      const mergePreview = runGitCommand(
+        ['merge-tree', base, targetRevision, source],
+        this.projectRoot,
+      );
+      const conflicts = /<<<<<<<|>>>>>>>/.test(mergePreview);
+
+      return {
+        available: true,
+        currentBranch,
+        targetBranch,
+        targetRevision,
+        sourceRevision: source,
+        targetClean: !dirty,
+        targetCheckedOut: currentBranch === targetBranch,
+        conflicts,
+      };
+    } catch (error) {
+      return {
+        available: false,
+        targetBranch,
+        reason: error.stderr?.trim() || error.message,
+        targetClean: false,
+        targetCheckedOut: false,
+        conflicts: null,
+      };
+    }
+  }
+  integrateRevision(
+    sourceRevision,
+    { targetBranch = 'main', strategy = 'squash', message = 'Integrate Clew task' } = {},
+  ) {
+    const inspection = this.inspectIntegration(sourceRevision, targetBranch);
+
+    if (!inspection.available) throw new Error(`integration unavailable: ${inspection.reason}`);
+    if (!inspection.targetCheckedOut)
+      throw new Error(`target branch ${targetBranch} must be checked out in the primary checkout`);
+    if (!inspection.targetClean)
+      throw new Error('primary checkout must be clean before integration');
+    if (inspection.conflicts)
+      throw new IntegrationConflictError(sourceRevision, `conflict with ${targetBranch}`);
+    try {
+      runGitCommand(
+        strategy === 'merge'
+          ? ['merge', '--no-ff', sourceRevision, '-m', message]
+          : ['merge', '--squash', sourceRevision],
+        this.projectRoot,
+      );
+      if (strategy === 'squash' && runGitCommand(['status', '--porcelain'], this.projectRoot))
+        runGitCommand(['commit', '-m', message], this.projectRoot);
+    } catch (error) {
+      try {
+        if (strategy === 'merge') runGitCommand(['merge', '--abort'], this.projectRoot);
+        else runGitCommand(['reset', '--merge', 'HEAD'], this.projectRoot);
+      } catch {
+        // Keep the original integration failure.
+      }
+      throw new IntegrationConflictError(sourceRevision, error.stderr || error.message);
+    }
+
+    return {
+      strategy,
+      targetBranch,
+      sourceRevision,
+      revision: runGitCommand(['rev-parse', 'HEAD'], this.projectRoot),
+      alreadyIntegrated: inspection.targetRevision === sourceRevision,
+    };
   }
   removeWorktree(path, { force = false } = {}) {
     const target = resolve(path);

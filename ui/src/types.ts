@@ -8,6 +8,9 @@ export type TaskState =
   | 'REVIEWING'
   | 'WAITING_FOR_HUMAN'
   | 'READY'
+  | 'READY_TO_FINISH'
+  | 'MERGED'
+  | 'RELEASED'
   | 'COMPLETED'
   | 'FAILED'
   | 'CANCELLED'
@@ -69,6 +72,7 @@ export type Task = {
   profile: string;
   analysis?: TaskAnalysis | null;
   architecture?: ArchitectureResult | null;
+  finalization?: FinalizationReport | null;
   tags: string[];
   state: TaskState;
   attention?: string | null;
@@ -119,6 +123,34 @@ export type Task = {
     redaction: 'public-safe';
   };
   events: { seq: number; type: string; at: string; payload: Record<string, unknown> }[];
+};
+
+export type FinalizationReport = {
+  version: number;
+  taskId: string;
+  runId?: string | null;
+  state: TaskState;
+  ready: boolean;
+  checks: Array<{
+    id: string;
+    label: string;
+    passed: boolean;
+    blocking: boolean;
+    detail: string | null;
+  }>;
+  blockingReasons: string[];
+  availableActions: string[];
+  recommendedAction: string | null;
+  git?: {
+    enabled: boolean;
+    targetBranch: string;
+    strategy: string;
+    cleanup: boolean;
+    dirty: boolean;
+    conflicts: boolean | null;
+    targetClean?: boolean | null;
+    targetCheckedOut?: boolean | null;
+  };
 };
 
 export type ArchitectureResult = {

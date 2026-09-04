@@ -30,6 +30,7 @@ import { PairedExecutionPort } from './execution-port.js';
 import { createChangeViewerRegistry } from './change-viewer.js';
 import { GitChangeInspectionService } from './change-inspection.js';
 import { analyzeTask } from './task-analysis.js';
+import { buildFinalizationReport } from './finalization.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -61,6 +62,10 @@ const TASK_COMMANDS = new Set([
   'create',
   'history',
   'inspect-changes',
+  'finalization',
+  'integrate',
+  'mark-merged',
+  'mark-released',
   'list',
   'message',
   'next-step',
@@ -328,6 +333,7 @@ export class ClewService {
         agentSessions: this.store.listAgentSessions(task.id),
         analysis: analyzeTask(task.contract),
         architecture: architectureEvent?.payload?.architecture ?? null,
+        finalization: this.finalization(taskId),
       },
       thread: this.store.getTaskThread(task.id, { after: 0, limit: 500 }),
       history: this.history(task.id, []),
@@ -353,6 +359,10 @@ export class ClewService {
     if (subcommand === 'open-changes') return this.openChanges(args[0], args);
     if (subcommand === 'changes' || subcommand === 'inspect-changes')
       return new GitChangeInspectionService(this.store).inspect(args[0]);
+    if (subcommand === 'finalization') return this.finalization(args[0]);
+    if (subcommand === 'integrate') return this.integrateTask(args[0], args);
+    if (subcommand === 'mark-merged') return this.markTaskMerged(args[0], args);
+    if (subcommand === 'mark-released') return this.markTaskReleased(args[0], args);
     if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;
@@ -415,6 +425,176 @@ export class ClewService {
     if (subcommand === 'usage') return this.usage(args[0], args);
 
     throw new Error(`unsupported task command: ${subcommand}`);
+  }
+
+  finalization(taskId) {
+    if (!taskId) throw new Error('task id is required');
+    const task = this.store.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const manifest = this.store.getResultManifest(taskId);
+    const run = [...this.store.listRuns(taskId)]
+      .reverse()
+      .find((item) => item.status === RUN_STATUS.COMPLETED && item.workspace && item.commit_sha);
+    const changes = run
+      ? new GitChangeInspectionService(this.store).inspect(run.id)
+      : { version: 1, state: 'unavailable', reason: 'completed-run-unavailable', dirty: false };
+    const policy = {
+      ...(this.config.integration ?? {}),
+      ...(task.contract.integration ?? {}),
+      enabled:
+        this.config.integration?.enabled !== false && task.contract.integration?.enabled === true,
+    };
+    const integration =
+      policy.enabled && manifest.revision
+        ? new GitWorktreeManager(resolve(this.cwd, this.config.worktreeRoot), this.cwd, {
+            createRoot: false,
+          }).inspectIntegration(manifest.revision, policy.targetBranch)
+        : null;
+
+    return buildFinalizationReport({
+      task,
+      manifest,
+      run,
+      changes,
+      integration,
+      policy,
+    });
+  }
+
+  integrateTask(taskId, args) {
+    const report = this.finalization(taskId);
+
+    if (!report.git.enabled) throw new Error(`task ${taskId} does not use Git integration`);
+    if (!report.ready && report.git.conflicts === true)
+      return this.recordIntegrationAttention(taskId, report, new Error('merge conflict detected'));
+    if (!report.ready)
+      throw new Error(`task ${taskId} is not ready: ${report.blockingReasons.join('; ')}`);
+    const strategy = getOptionValue(args, '--strategy', report.git.strategy);
+    const message = getOptionValue(args, '--message', `Integrate ${taskId}`);
+    const actor = getOptionValue(args, '--actor', process.env.USER || 'local-user');
+
+    if (!['squash', 'merge', 'pr', 'human'].includes(strategy))
+      throw new Error('--strategy must be squash, merge, pr, or human');
+    if (strategy === 'pr' || strategy === 'human') {
+      this.store.setTaskState(taskId, TASK_STATE.WAITING_FOR_HUMAN);
+      this.store.appendEvent(taskId, 'INTEGRATION_HANDOFF_REQUIRED', {
+        strategy,
+        actor,
+        revision: report.revision,
+        targetBranch: report.git.targetBranch,
+      });
+
+      return { taskId, state: TASK_STATE.WAITING_FOR_HUMAN, strategy, action: 'mark-merged' };
+    }
+    const manager = new GitWorktreeManager(resolve(this.cwd, this.config.worktreeRoot), this.cwd);
+    const sourceRevision = report.git.dirty
+      ? manager.commitWorktreeChanges(report.workspace, message)
+      : report.revision;
+
+    if (report.git.dirty) this.store.finishRun(report.runId, RUN_STATUS.COMPLETED, sourceRevision);
+    let result;
+
+    try {
+      result = manager.integrateRevision(sourceRevision, {
+        targetBranch: report.git.targetBranch,
+        strategy,
+        message,
+      });
+    } catch (error) {
+      return this.recordIntegrationAttention(taskId, report, error, sourceRevision);
+    }
+    this.store.setTaskState(taskId, TASK_STATE.MERGED);
+    this.store.appendEvent(taskId, 'INTEGRATION_COMPLETED', { ...result, actor });
+    let cleanup = { removed: false };
+
+    if (report.git.cleanup) {
+      try {
+        manager.removeWorktree(report.workspace);
+        cleanup = { removed: true, workspace: report.workspace };
+        this.store.appendEvent(taskId, 'WORKTREE_CLEANED', cleanup);
+      } catch (error) {
+        cleanup = { removed: false, workspace: report.workspace, reason: error.message };
+        this.store.appendEvent(taskId, 'WORKTREE_CLEANUP_FAILED', cleanup);
+      }
+    }
+
+    return { taskId, state: TASK_STATE.MERGED, ...result, cleanup };
+  }
+
+  recordIntegrationAttention(taskId, report, error, sourceRevision = report.revision) {
+    const stageId = 'integration-finalize';
+    const runId = `run_${randomUUID()}`;
+    const attempt = this.store.listRuns(taskId, { stageId }).length + 1;
+
+    this.store.addStage(taskId, stageId, [], 'FAILED');
+    this.store.createRun({
+      id: runId,
+      taskId,
+      stageId,
+      attempt,
+      status: RUN_STATUS.FAILED,
+      harness: 'git',
+      workspace: this.cwd,
+      commitSha: sourceRevision,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      profile: 'integration',
+      policy: { strategy: report.git.strategy, targetBranch: report.git.targetBranch },
+    });
+    this.store.setTaskState(taskId, TASK_STATE.WAITING_FOR_HUMAN);
+    this.store.appendEvent(taskId, 'INTEGRATION_CONFLICT', {
+      runId,
+      stageId,
+      revision: sourceRevision,
+      targetBranch: report.git.targetBranch,
+      reason: error.message,
+    });
+
+    return {
+      taskId,
+      state: TASK_STATE.WAITING_FOR_HUMAN,
+      runId,
+      conflict: true,
+      reason: error.message,
+    };
+  }
+
+  markTaskMerged(taskId, args) {
+    const task = this.store.getTask(taskId);
+    const revision = getOptionValue(args, '--revision');
+    const evidence = getOptionValue(args, '--evidence');
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (task.state !== TASK_STATE.WAITING_FOR_HUMAN)
+      throw new Error(`task ${taskId} is not waiting for integration`);
+    const handoff = this.store
+      .listEvents(taskId)
+      .some((event) =>
+        ['INTEGRATION_HANDOFF_REQUIRED', 'INTEGRATION_CONFLICT'].includes(event.type),
+      );
+
+    if (!handoff) throw new Error(`task ${taskId} has no pending integration handoff`);
+    if (!revision || !evidence) throw new Error('--revision and --evidence are required');
+    this.store.setTaskState(taskId, TASK_STATE.READY_TO_FINISH);
+    this.store.setTaskState(taskId, TASK_STATE.MERGED);
+    this.store.appendEvent(taskId, 'EXTERNAL_INTEGRATION_CONFIRMED', { revision, evidence });
+
+    return { taskId, state: TASK_STATE.MERGED, revision, evidence };
+  }
+
+  markTaskReleased(taskId, args) {
+    const task = this.store.getTask(taskId);
+    const evidence = getOptionValue(args, '--evidence');
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (task.state !== TASK_STATE.MERGED)
+      throw new Error(`task ${taskId} must be MERGED before release`);
+    if (!evidence) throw new Error('--evidence is required');
+    this.store.setTaskState(taskId, TASK_STATE.RELEASED);
+    this.store.appendEvent(taskId, 'RELEASE_CONFIRMED', { evidence });
+
+    return { taskId, state: TASK_STATE.RELEASED, evidence };
   }
 
   openChanges(taskId, args = []) {
@@ -483,6 +663,15 @@ export class ClewService {
         base_ref: getOptionValue(args, '--base', 'HEAD'),
         acceptance: getOptionValues(args, '--accept'),
         verification: getOptionValues(args, '--verify').map((command) => ({ command, args: [] })),
+        integration: {
+          enabled: args.includes('--git'),
+          ...(getOptionValue(args, '--integration-strategy')
+            ? { strategy: getOptionValue(args, '--integration-strategy') }
+            : {}),
+          ...(getOptionValue(args, '--target-branch')
+            ? { targetBranch: getOptionValue(args, '--target-branch') }
+            : {}),
+        },
       };
 
     if (jsonFile) {
@@ -497,6 +686,7 @@ export class ClewService {
         'base_ref',
         'acceptance',
         'verification',
+        'integration',
       ]);
       const unknown = Object.keys(input).filter((key) => !allowed.has(key));
 
@@ -854,8 +1044,10 @@ export class ClewService {
     const refreshedTask = this.store.getTask(taskId);
     const reviewOverride = args.includes('--review-override');
 
+    if (refreshedTask.contract.integration?.enabled === true)
+      throw new Error(`task ${taskId} requires Git integration instead of completion`);
     if (
-      refreshedTask.state !== TASK_STATE.READY &&
+      ![TASK_STATE.READY, TASK_STATE.READY_TO_FINISH].includes(refreshedTask.state) &&
       !(reviewOverride && refreshedTask.state === TASK_STATE.WAITING_FOR_HUMAN)
     )
       throw new Error(`task ${taskId} must be READY before completion`);

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/finalization-report.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "taskId",
+    "runId",
+    "state",
+    "ready",
+    "checks",
+    "blockingReasons",
+    "availableActions",
+    "recommendedAction",
+    "git",
+    "revision",
+    "workspace"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "runId": { "type": ["string", "null"] },
+    "state": { "type": "string", "minLength": 1 },
+    "ready": { "type": "boolean" },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "passed", "blocking", "detail"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "label": { "type": "string", "minLength": 1 },
+          "passed": { "type": "boolean" },
+          "blocking": { "type": "boolean" },
+          "detail": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "blockingReasons": { "type": "array", "items": { "type": "string" } },
+    "availableActions": { "type": "array", "items": { "type": "string" } },
+    "recommendedAction": { "type": ["string", "null"] },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "targetBranch",
+        "strategy",
+        "cleanup",
+        "dirty",
+        "conflicts",
+        "targetClean",
+        "targetCheckedOut"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "targetBranch": { "type": "string", "minLength": 1 },
+        "strategy": { "enum": ["squash", "merge", "pr", "human"] },
+        "cleanup": { "type": "boolean" },
+        "dirty": { "type": "boolean" },
+        "conflicts": { "type": ["boolean", "null"] },
+        "targetClean": { "type": ["boolean", "null"] },
+        "targetCheckedOut": { "type": ["boolean", "null"] }
+      }
+    },
+    "revision": { "type": ["string", "null"] },
+    "workspace": { "type": ["string", "null"] }
+  }
+}

@@ -19,7 +19,8 @@ test('creates, inspects, and removes an isolated worktree', () => {
     runGitCommand(['config', 'user.email', 'test@example.com'], root);
     runGitCommand(['config', 'user.name', 'Clew Test'], root);
     writeFileSync(join(root, 'README.md'), 'fixture\n');
-    runGitCommand(['add', 'README.md'], root);
+    writeFileSync(join(root, '.gitignore'), 'worktrees/\n');
+    runGitCommand(['add', 'README.md', '.gitignore'], root);
     runGitCommand(['commit', '-m', 'fixture'], root);
     const manager = new GitWorktreeManager(worktrees, root);
     const workspace = manager.createWorktree('T-3', 'worker');
@@ -147,6 +148,99 @@ test('reports integration conflicts and aborts the cherry-pick', () => {
       IntegrationConflictError,
     );
     assert.equal(runGitCommand(['status', '--porcelain'], integration.path), '');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('preflights and squash-integrates a task revision into the checked out target', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clew-finalize-squash-'));
+  const worktrees = join(root, 'worktrees');
+
+  try {
+    runGitCommand(['init', '-b', 'main'], root);
+    runGitCommand(['config', 'user.email', 'test@example.com'], root);
+    runGitCommand(['config', 'user.name', 'Clew Test'], root);
+    writeFileSync(join(root, 'README.md'), 'fixture\n');
+    writeFileSync(join(root, '.gitignore'), 'worktrees/\n');
+    runGitCommand(['add', 'README.md', '.gitignore'], root);
+    runGitCommand(['commit', '-m', 'fixture'], root);
+    const manager = new GitWorktreeManager(worktrees, root);
+    const source = manager.createWorktree('T-FINAL', 'worker');
+
+    writeFileSync(join(source.path, 'result.txt'), 'done\n');
+    const sourceRevision = manager.commitWorktreeChanges(source.path, 'worker result');
+    const preflight = manager.inspectIntegration(sourceRevision, 'main');
+
+    assert.equal(preflight.available, true);
+    assert.equal(preflight.targetClean, true);
+    assert.equal(preflight.conflicts, false);
+    const result = manager.integrateRevision(sourceRevision, {
+      targetBranch: 'main',
+      strategy: 'squash',
+      message: 'integrate task',
+    });
+
+    assert.equal(result.targetBranch, 'main');
+    assert.equal(readFileSync(join(root, 'result.txt'), 'utf8'), 'done\n');
+    assert.equal(runGitCommand(['log', '-1', '--pretty=%s'], root).trim(), 'integrate task');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('refuses integration while the primary checkout is dirty', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clew-finalize-dirty-target-'));
+  const worktrees = join(root, 'worktrees');
+
+  try {
+    runGitCommand(['init', '-b', 'main'], root);
+    runGitCommand(['config', 'user.email', 'test@example.com'], root);
+    runGitCommand(['config', 'user.name', 'Clew Test'], root);
+    writeFileSync(join(root, 'README.md'), 'fixture\n');
+    writeFileSync(join(root, '.gitignore'), 'worktrees/\n');
+    runGitCommand(['add', 'README.md', '.gitignore'], root);
+    runGitCommand(['commit', '-m', 'fixture'], root);
+    const manager = new GitWorktreeManager(worktrees, root);
+    const source = manager.createWorktree('T-DIRTY-TARGET', 'worker');
+
+    writeFileSync(join(source.path, 'result.txt'), 'done\n');
+    const sourceRevision = manager.commitWorktreeChanges(source.path, 'worker result');
+
+    writeFileSync(join(root, 'README.md'), 'dirty\n');
+    assert.equal(manager.inspectIntegration(sourceRevision).targetClean, false);
+    assert.throws(() => manager.integrateRevision(sourceRevision), /must be clean/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('detects finalization conflicts without mutating the target branch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'clew-finalize-conflict-'));
+  const worktrees = join(root, 'worktrees');
+
+  try {
+    runGitCommand(['init', '-b', 'main'], root);
+    runGitCommand(['config', 'user.email', 'test@example.com'], root);
+    runGitCommand(['config', 'user.name', 'Clew Test'], root);
+    writeFileSync(join(root, '.gitignore'), 'worktrees/\n');
+    writeFileSync(join(root, 'shared.txt'), 'base\n');
+    runGitCommand(['add', '.gitignore', 'shared.txt'], root);
+    runGitCommand(['commit', '-m', 'fixture'], root);
+    const manager = new GitWorktreeManager(worktrees, root);
+    const source = manager.createWorktree('T-FINAL-CONFLICT', 'worker');
+
+    writeFileSync(join(source.path, 'shared.txt'), 'source\n');
+    const sourceRevision = manager.commitWorktreeChanges(source.path, 'source');
+
+    writeFileSync(join(root, 'shared.txt'), 'target\n');
+    runGitCommand(['add', 'shared.txt'], root);
+    runGitCommand(['commit', '-m', 'target'], root);
+
+    assert.equal(manager.inspectIntegration(sourceRevision).conflicts, true);
+    assert.throws(() => manager.integrateRevision(sourceRevision), IntegrationConflictError);
+    assert.equal(readFileSync(join(root, 'shared.txt'), 'utf8'), 'target\n');
+    assert.equal(runGitCommand(['status', '--porcelain'], root), '');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

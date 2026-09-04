@@ -67,14 +67,53 @@ describe('Preact control plane', () => {
     api.subscribeToEvents.mockClear();
   });
 
-  it('confirms completion and sends the pinned revision', async () => {
+  it('opens the finalization gate and completes the pinned revision', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /complete/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /complete task/i }));
 
     expect(api.execute).toHaveBeenCalledWith(['complete', 'CLEW-071', '--revision', 'a91c4e2']);
     expect(await screen.findByText('Task completed')).toBeTruthy();
+  });
+
+  it('uses the finalization gate for Git integration', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const gitTask = structuredClone(fixtureTasks[0]);
+
+    gitTask.state = 'READY_TO_FINISH';
+    gitTask.finalization = {
+      ...gitTask.finalization!,
+      state: 'READY_TO_FINISH',
+      ready: true,
+      availableActions: ['review_changes', 'integrate'],
+      recommendedAction: 'integrate',
+      git: {
+        enabled: true,
+        targetBranch: 'main',
+        strategy: 'squash',
+        cleanup: true,
+        dirty: false,
+        conflicts: false,
+      },
+    };
+    api.loadTasks.mockResolvedValue({ tasks: [gitTask], state: 'fixture' });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
+    expect(await screen.findByRole('dialog', { name: /finish work/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^integrate$/i }));
+
+    expect(api.execute).toHaveBeenCalledWith([
+      'task',
+      'integrate',
+      'CLEW-071',
+      '--strategy',
+      'squash',
+      '--message',
+      'Integrate CLEW-071',
+    ]);
   });
 
   it('continues READY work without a message panel', async () => {
@@ -180,7 +219,7 @@ describe('Preact control plane', () => {
       return () => undefined;
     });
     render(<App />);
-    const complete = await screen.findByRole('button', { name: /complete/i });
+    const complete = await screen.findByRole('button', { name: /finish work/i });
 
     expect(complete.hasAttribute('disabled')).toBe(false);
     reportState?.('disconnected');

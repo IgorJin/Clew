@@ -25,7 +25,33 @@ test('validates and normalizes a task contract', () => {
 
   assert.equal(task.acceptance[0].id, 'AC-1');
   assert.equal(task.risk, 'medium');
+  assert.deepEqual(task.integration, { enabled: false });
   assert.equal('authorization' in task, false);
+});
+test('validates opt-in Git integration policy and lifecycle transitions', () => {
+  const task = validateTaskContract({
+    id: 'GIT-142',
+    title: 'Integrate',
+    goal: 'Merge safely',
+    profile: 'standard',
+    acceptance: ['merged'],
+    integration: { enabled: true, strategy: 'squash', targetBranch: 'main', cleanup: false },
+  });
+
+  assert.deepEqual(task.integration, {
+    enabled: true,
+    strategy: 'squash',
+    targetBranch: 'main',
+    cleanup: false,
+  });
+  assert.doesNotThrow(() =>
+    assertValidTaskTransition(TASK_STATE.READY_TO_FINISH, TASK_STATE.MERGED),
+  );
+  assert.doesNotThrow(() => assertValidTaskTransition(TASK_STATE.MERGED, TASK_STATE.RELEASED));
+  assert.throws(
+    () => validateTaskContract({ ...task, integration: { enabled: true, strategy: 'force' } }),
+    /integration.strategy/,
+  );
 });
 test('preserves normalized task tags', () => {
   const task = validateTaskContract({

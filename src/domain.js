@@ -10,6 +10,9 @@ export const TASK_STATE = Object.freeze({
   REVIEWING: 'REVIEWING',
   WAITING_FOR_HUMAN: 'WAITING_FOR_HUMAN',
   READY: 'READY',
+  READY_TO_FINISH: 'READY_TO_FINISH',
+  MERGED: 'MERGED',
+  RELEASED: 'RELEASED',
   COMPLETED: 'COMPLETED',
   FAILED: 'FAILED',
   CANCELLED: 'CANCELLED',
@@ -94,6 +97,13 @@ export const OPERATOR_ACTION = Object.freeze({
 
 export const COMPLETION_DECISION = Object.freeze({
   ACCEPT: 'accept',
+});
+
+export const INTEGRATION_STRATEGY = Object.freeze({
+  SQUASH: 'squash',
+  MERGE: 'merge',
+  PR: 'pr',
+  HUMAN: 'human',
 });
 
 export function validateRetryRequest(request) {
@@ -199,12 +209,14 @@ const transitions = {
     TASK_STATE.RECOVERING,
     TASK_STATE.REVIEWING,
     TASK_STATE.READY,
+    TASK_STATE.READY_TO_FINISH,
     TASK_STATE.FAILED,
     TASK_STATE.WAITING_FOR_HUMAN,
   ],
   [TASK_STATE.REVIEWING]: [
     TASK_STATE.RECOVERING,
     TASK_STATE.READY,
+    TASK_STATE.READY_TO_FINISH,
     TASK_STATE.COMPLETED,
     TASK_STATE.FAILED,
     TASK_STATE.WAITING_FOR_HUMAN,
@@ -214,16 +226,29 @@ const transitions = {
     TASK_STATE.QUEUED,
     TASK_STATE.PLAN_READY,
     TASK_STATE.READY,
+    TASK_STATE.READY_TO_FINISH,
     TASK_STATE.COMPLETED,
     TASK_STATE.CANCELLED,
     TASK_STATE.FAILED,
   ],
   [TASK_STATE.READY]: [
     TASK_STATE.COMPLETED,
+    TASK_STATE.READY_TO_FINISH,
+    TASK_STATE.WAITING_FOR_HUMAN,
     TASK_STATE.QUEUED,
     TASK_STATE.VERIFYING,
     TASK_STATE.CANCELLED,
   ],
+  [TASK_STATE.READY_TO_FINISH]: [
+    TASK_STATE.MERGED,
+    TASK_STATE.COMPLETED,
+    TASK_STATE.QUEUED,
+    TASK_STATE.VERIFYING,
+    TASK_STATE.CANCELLED,
+    TASK_STATE.WAITING_FOR_HUMAN,
+  ],
+  [TASK_STATE.MERGED]: [TASK_STATE.RELEASED],
+  [TASK_STATE.RELEASED]: [],
   [TASK_STATE.COMPLETED]: [],
   [TASK_STATE.FAILED]: [
     TASK_STATE.PLAN_READY,
@@ -299,6 +324,21 @@ export function validateTaskContract(contract) {
   )
     throw new Error('task.tags must be an array of strings between 1 and 32 characters');
   if (tags.length > 8) throw new Error('task.tags must contain at most 8 tags');
+  const integration = contract.integration ?? { enabled: false };
+
+  if (!integration || typeof integration !== 'object')
+    throw new Error('task.integration must be an object');
+  if (integration.enabled !== undefined && typeof integration.enabled !== 'boolean')
+    throw new Error('task.integration.enabled must be boolean');
+  if (
+    integration.strategy !== undefined &&
+    !Object.values(INTEGRATION_STRATEGY).includes(integration.strategy)
+  )
+    throw new Error('task.integration.strategy must be squash, merge, pr, or human');
+  if (integration.targetBranch !== undefined && !isSafeGitRef(integration.targetBranch))
+    throw new Error('task.integration.targetBranch must be a safe Git ref');
+  if (integration.cleanup !== undefined && typeof integration.cleanup !== 'boolean')
+    throw new Error('task.integration.cleanup must be boolean');
 
   return {
     id: contract.id,
@@ -315,6 +355,12 @@ export function validateTaskContract(contract) {
         ? { id: `AC-${acceptanceIndex + 1}`, criterion: acceptanceItem }
         : acceptanceItem,
     ),
+    integration: {
+      enabled: integration.enabled === true,
+      ...(integration.strategy ? { strategy: integration.strategy } : {}),
+      ...(integration.targetBranch ? { targetBranch: integration.targetBranch } : {}),
+      ...(integration.cleanup !== undefined ? { cleanup: integration.cleanup } : {}),
+    },
   };
 }
 

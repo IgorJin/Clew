@@ -50,6 +50,34 @@ test('runs a quick task with a fake workspace and records evidence', async () =>
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('Git-enabled tasks stop at READY_TO_FINISH', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-finalize-'));
+  const store = new Store(join(dir, 'state.sqlite'));
+  const workspaceManager = {
+    createWorktree: () => ({ path: dir, branch: 'test', baseSha: 'abc' }),
+    getWorktreeStatus: () => ({ path: dir, sha: 'abc', dirty: false }),
+  };
+
+  store.createTask({
+    id: 'T-GIT-FINAL',
+    title: 'Run and integrate',
+    goal: 'Run and integrate',
+    profile: 'quick',
+    acceptance: [{ id: 'AC-1', criterion: 'works' }],
+    integration: { enabled: true },
+  });
+  const result = await new Scheduler(store, workspaceManager).runTask(
+    'T-GIT-FINAL',
+    'quick',
+    'fake',
+  );
+
+  assert.equal(result.state, 'READY_TO_FINISH');
+  assert.ok(store.listEvents('T-GIT-FINAL').some((event) => event.type === 'TASK_READY_TO_FINISH'));
+  store.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('quick Codex tasks receive the run identity and live endpoint required by the TUI worker', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-scheduler-live-terminal-'));
   const store = new Store(join(dir, 'state.sqlite'));

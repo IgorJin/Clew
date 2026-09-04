@@ -14,6 +14,10 @@ import {
   HARNESS_NAME,
   EXECUTION_MODE,
 } from './domain.js';
+
+function readyStateForTask(contract) {
+  return contract?.integration?.enabled === true ? TASK_STATE.READY_TO_FINISH : TASK_STATE.READY;
+}
 import {
   APPROVAL_DECISION,
   FakeHarness,
@@ -367,7 +371,10 @@ export class Scheduler {
       this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
       const needsReview = profile.review || options.correctionOnly;
 
-      this.store.setTaskState(taskId, needsReview ? TASK_STATE.REVIEWING : TASK_STATE.READY);
+      this.store.setTaskState(
+        taskId,
+        needsReview ? TASK_STATE.REVIEWING : readyStateForTask(row.contract),
+      );
       let review = null;
 
       if (needsReview) {
@@ -395,7 +402,7 @@ export class Scheduler {
         if (!persistedReview)
           this.store.appendEvent(taskId, 'REVIEW_RECORDED', { ...review, runId, stageId });
         if (review.verdict === REVIEW_VERDICT.PASS)
-          this.store.setTaskState(taskId, TASK_STATE.READY);
+          this.store.setTaskState(taskId, readyStateForTask(row.contract));
         else {
           const reviewAttempt = options.reviewAttempt ?? attempt;
           const requiresHuman = review.verdict === REVIEW_VERDICT.NEEDS_HUMAN;
@@ -562,7 +569,10 @@ export class Scheduler {
     }
 
     this.store.setTaskState(taskId, TASK_STATE.VERIFYING);
-    this.store.setTaskState(taskId, needsReview ? TASK_STATE.REVIEWING : TASK_STATE.READY);
+    this.store.setTaskState(
+      taskId,
+      needsReview ? TASK_STATE.REVIEWING : readyStateForTask(row.contract),
+    );
 
     if (needsReview) {
       let review = stageResult.review;
@@ -583,7 +593,8 @@ export class Scheduler {
         runId: stageResult.runId,
         stageId,
       });
-      if (review.verdict === REVIEW_VERDICT.PASS) this.store.setTaskState(taskId, TASK_STATE.READY);
+      if (review.verdict === REVIEW_VERDICT.PASS)
+        this.store.setTaskState(taskId, readyStateForTask(row.contract));
       else {
         const reviewAttempt = options.reviewAttempt ?? stageResult.attempt;
         const requiresHuman = review.verdict === REVIEW_VERDICT.NEEDS_HUMAN;
@@ -1169,7 +1180,8 @@ export class Scheduler {
       runId: integrationResult.runId,
       stageId: integrationStage.id,
     });
-    if (review.verdict === REVIEW_VERDICT.PASS) this.store.setTaskState(taskId, TASK_STATE.READY);
+    if (review.verdict === REVIEW_VERDICT.PASS)
+      this.store.setTaskState(taskId, readyStateForTask(row.contract));
     else if (review.verdict === REVIEW_VERDICT.NEEDS_HUMAN) {
       this.store.setTaskState(taskId, TASK_STATE.WAITING_FOR_HUMAN);
       this.store.appendEvent(taskId, 'CHANGES_REQUESTED', { findings: review.findings });

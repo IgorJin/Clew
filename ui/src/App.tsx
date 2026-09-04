@@ -35,6 +35,9 @@ const stateLabel: Record<TaskState, string> = {
   REVIEWING: 'Review',
   WAITING_FOR_HUMAN: 'Waiting',
   READY: 'Ready',
+  READY_TO_FINISH: 'Ready to finish',
+  MERGED: 'Merged',
+  RELEASED: 'Released',
   COMPLETED: 'Done',
   FAILED: 'Failed',
   CANCELLED: 'Cancelled',
@@ -55,6 +58,9 @@ const statusGroup: Record<TaskState, StatusGroup> = {
   DRAFT: 'other',
   PLAN_READY: 'other',
   READY: 'other',
+  READY_TO_FINISH: 'other',
+  MERGED: 'other',
+  RELEASED: 'other',
   COMPLETED: 'other',
 };
 
@@ -811,6 +817,148 @@ function CreateTask({
   );
 }
 
+function FinalizationGate({
+  task,
+  onClose,
+  onAction,
+}: {
+  task: Task;
+  onClose: () => void;
+  onAction: (args: string[], success: string) => Promise<boolean>;
+}) {
+  const report = task.finalization;
+  const [message, setMessage] = useState(`Integrate ${task.id}`);
+  const [evidence, setEvidence] = useState('');
+  const [strategy, setStrategy] = useState(report?.git?.strategy ?? 'squash');
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    closeButton.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+      if (event.key === 'Tab') {
+        const focusable = [
+          ...(dialog.current?.querySelectorAll<HTMLElement>(
+            'button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ) ?? []),
+        ];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable.at(-1);
+
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+
+  if (!report) return null;
+  const finish = async () => {
+    let result = false;
+
+    if (task.state === 'MERGED')
+      result = await onAction(
+        ['task', 'mark-released', task.id, '--evidence', evidence],
+        'Task marked released',
+      );
+    else if (report.git?.enabled)
+      result = await onAction(
+        ['task', 'integrate', task.id, '--strategy', strategy, '--message', message],
+        strategy === 'pr' || strategy === 'human' ? 'Integration handed off' : 'Task merged',
+      );
+    else if (task.revision)
+      result = await onAction(['complete', task.id, '--revision', task.revision], 'Task completed');
+    if (result) onClose();
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <section
+        ref={dialog}
+        className="create-task finalization-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="finalization-title"
+      >
+        <span className="eyebrow">Finalization gate</span>
+        <h2 id="finalization-title">Finish work</h2>
+        <div className="finalization-checks">
+          {report.checks.map((item) => (
+            <div
+              className={`finalization-check ${item.passed ? 'passed' : item.blocking ? 'blocked' : 'warning'}`}
+              key={item.id}
+            >
+              <span>{item.passed ? '✓' : item.blocking ? '!' : '○'}</span>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{item.detail}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+        {report.git?.enabled && task.state !== 'MERGED' && (
+          <>
+            <label>
+              Integration strategy
+              <select value={strategy} onChange={(event) => setStrategy(event.currentTarget.value)}>
+                <option value="squash">Squash merge</option>
+                <option value="merge">Merge commit</option>
+                <option value="pr">Create PR / handoff</option>
+                <option value="human">Human merge</option>
+              </select>
+            </label>
+            <label>
+              Commit message
+              <input value={message} onChange={(event) => setMessage(event.currentTarget.value)} />
+            </label>
+          </>
+        )}
+        {task.state === 'MERGED' && (
+          <label>
+            Deployment evidence
+            <input
+              value={evidence}
+              onChange={(event) => setEvidence(event.currentTarget.value)}
+              placeholder="CI run, release URL, or note"
+            />
+          </label>
+        )}
+        {report.blockingReasons.length > 0 && (
+          <p className="attention">{report.blockingReasons.join(' · ')}</p>
+        )}
+        <div className="modal-actions">
+          <button ref={closeButton} className="button secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="button primary"
+            disabled={task.state === 'MERGED' ? !evidence : !report.ready}
+            onClick={() => void finish()}
+          >
+            {task.state === 'MERGED'
+              ? 'Mark released'
+              : report.git?.enabled
+                ? 'Integrate'
+                : 'Complete task'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 const WORKFLOW_STEPS = [
   { key: 'plan', label: 'Plan' },
   { key: 'execute', label: 'Execute' },
@@ -829,6 +977,9 @@ function workflowStepIndex(state: TaskState) {
     REVIEWING: 2,
     WAITING_FOR_HUMAN: 2,
     READY: 3,
+    READY_TO_FINISH: 3,
+    MERGED: 3,
+    RELEASED: 3,
     COMPLETED: 3,
     FAILED: -1,
     CANCELLED: -1,
@@ -879,6 +1030,7 @@ export default function App() {
   const [diagnostic, setDiagnostic] = useState(false);
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [finishOpen, setFinishOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState('plan');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -1188,7 +1340,7 @@ export default function App() {
   const act = async (args: string[], success: string) => {
     if (!canMutate) {
       setNotice('Actions are disabled while the control plane is disconnected');
-      return;
+      return false;
     }
     const confirmationRequired = new Set([
       'approve',
@@ -1200,10 +1352,12 @@ export default function App() {
       'run',
     ]);
     if (
-      (confirmationRequired.has(args[0]) || (args[0] === 'task' && args[1] === 'approve-step')) &&
+      (confirmationRequired.has(args[0]) ||
+        (args[0] === 'task' &&
+          ['approve-step', 'integrate', 'mark-merged', 'mark-released'].includes(args[1]))) &&
       !window.confirm(`Confirm ${args.join(' ')}?`)
     )
-      return;
+      return false;
     if (args[0] === 'run') setRunRequested(true);
     try {
       const result = await execute(args);
@@ -1229,9 +1383,12 @@ export default function App() {
         await refresh();
       }
       setNotice(success);
+      await refresh();
+      return true;
     } catch (error) {
       if (args[0] === 'run') setRunRequested(false);
       setNotice(error instanceof Error ? error.message : 'Action failed');
+      return false;
     }
   };
 
@@ -1505,13 +1662,14 @@ export default function App() {
                   </button>
                   <button
                     className="button primary"
-                    disabled={!canMutate || task.state !== 'READY' || !task.revision}
-                    title={!task.revision ? 'A verified revision is required' : undefined}
-                    onClick={() =>
-                      act(['complete', task.id, '--revision', task.revision!], 'Task completed')
+                    disabled={
+                      !canMutate ||
+                      !['READY', 'READY_TO_FINISH', 'MERGED'].includes(task.state) ||
+                      !task.finalization
                     }
+                    onClick={() => setFinishOpen(true)}
                   >
-                    <Check size={13} /> Complete
+                    <Check size={13} /> {task.state === 'MERGED' ? 'Mark released' : 'Finish work'}
                   </button>
                 </div>
               </div>
@@ -1547,6 +1705,27 @@ export default function App() {
                       ? `Start ${nextStep.inputs?.profile ?? task.analysis.recommendation.profile}`
                       : recommendedActionLabel}
                   </button>
+                </section>
+              )}
+              {task.finalization && task.state !== 'DRAFT' && (
+                <section className="task-recommendation" aria-label="Finalization gate">
+                  <div>
+                    <span className="eyebrow">Finalization gate</span>
+                    <h3>{task.finalization.ready ? 'Ready to finish' : 'Attention required'}</h3>
+                    <p>
+                      {task.finalization.ready
+                        ? 'Verification, review, and workspace checks are complete.'
+                        : task.finalization.blockingReasons.join(' · ') ||
+                          'Inspect the checks before finishing.'}
+                    </p>
+                  </div>
+                  <div className="recommendation-meta">
+                    {task.finalization.checks.map((item) => (
+                      <span key={item.id}>
+                        {item.passed ? '✓' : '○'} {item.label}
+                      </span>
+                    ))}
+                  </div>
                 </section>
               )}
               <StepIndicator
@@ -1786,6 +1965,9 @@ export default function App() {
         />
       )}
       {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
+      {finishOpen && task.finalization && (
+        <FinalizationGate task={task} onClose={() => setFinishOpen(false)} onAction={act} />
+      )}
     </div>
   );
 }

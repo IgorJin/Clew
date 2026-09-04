@@ -89,6 +89,13 @@ export class Store {
 
       this.db.prepare('UPDATE tasks SET state=?,updated_at=? WHERE id=?').run(state, now, id);
       this.appendEvent(id, 'TASK_STATE_CHANGED', { state });
+      const lifecycleEvent = {
+        [TASK_STATE.READY_TO_FINISH]: 'TASK_READY_TO_FINISH',
+        [TASK_STATE.MERGED]: 'TASK_MERGED',
+        [TASK_STATE.RELEASED]: 'TASK_RELEASED',
+      }[state];
+
+      if (lifecycleEvent) this.appendEvent(id, lifecycleEvent, { state, at: now });
     });
   }
   requestInterrupt(taskId, actor = 'local-user') {
@@ -1395,10 +1402,12 @@ export class Store {
 
       if (!task) throw new Error(`task not found: ${normalized.taskId}`);
       if (
-        task.state !== TASK_STATE.READY &&
+        ![TASK_STATE.READY, TASK_STATE.READY_TO_FINISH].includes(task.state) &&
         !(task.state === TASK_STATE.WAITING_FOR_HUMAN && normalized.reviewOverride)
       )
         throw new Error(`task ${task.id} must be READY before completion`);
+      if (task.contract.integration?.enabled === true)
+        throw new Error(`task ${task.id} requires Git integration instead of completion`);
       const currentResult = this.getResultManifest(task.id);
 
       if (currentResult.revision !== normalized.expectedRevision)
@@ -1504,7 +1513,7 @@ export class Store {
       reusable: evaluated.some((item) => item.trust.reusable),
     };
 
-    if (task?.state === TASK_STATE.READY && !result.reusable) {
+    if ([TASK_STATE.READY, TASK_STATE.READY_TO_FINISH].includes(task?.state) && !result.reusable) {
       this.runInTransaction(() => {
         this.setTaskState(taskId, TASK_STATE.VERIFYING);
         this.appendEvent(taskId, 'READY_INVALIDATED', {
@@ -1636,7 +1645,12 @@ export class Store {
         task.state === TASK_STATE.VERIFYING &&
         normalizedEvidence.some((item) => item.result === 'passed')
       )
-        this.setTaskState(taskId, TASK_STATE.READY);
+        this.setTaskState(
+          taskId,
+          task.contract.integration?.enabled === true
+            ? TASK_STATE.READY_TO_FINISH
+            : TASK_STATE.READY,
+        );
 
       return report;
     });

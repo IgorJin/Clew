@@ -1738,6 +1738,44 @@ textarea:focus {
   border-radius: 8px;
 }
 
+.finalization-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+
+.finalization-checks {
+  display: grid;
+  gap: 6px;
+}
+
+.finalization-check {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.finalization-check.passed > span {
+  color: var(--green);
+}
+.finalization-check.blocked > span {
+  color: var(--red);
+}
+.finalization-check.warning > span {
+  color: var(--amber);
+}
+.finalization-check strong,
+.finalization-check small {
+  display: block;
+}
+.finalization-check small {
+  margin-top: 2px;
+  color: var(--muted);
+}
+
 .diff-backdrop {
   z-index: 12;
 }
@@ -2219,7 +2257,21 @@ textarea:focus {
     display: block;
   }
   .header-actions {
+    position: fixed;
+    z-index: 8;
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
     margin-top: 12px;
+    padding: 10px;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    overflow-x: auto;
+  }
+  .content-inner {
+    padding-bottom: 96px;
   }
   .header-actions .button {
     flex: 1;
@@ -2256,5 +2308,16 @@ textarea:focus {
   }
   .right-rail {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
