@@ -1,3 +1,5 @@
+import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
+
 export const PLAN_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
@@ -46,13 +48,18 @@ export class CodexArchitect {
     this.harness = harness;
   }
 
-  async createPlan({ task, cwd }) {
+  async createPlan({ task, executionBrief = null, cwd }) {
+    executionBrief ??= prepareExecutionBrief({
+      task,
+      role: EXECUTION_ROLE.ARCHITECT,
+      stageId: 'architect',
+      assignmentGoal:
+        'Produce an implementation DAG. Every stage must feed one terminal integration stage with kind=integration.',
+      readOnly: true,
+    });
     const result = await this.harness.run({
-      task: {
-        ...task,
-        title: `Architecture plan: ${task.title}`,
-        goal: `${task.goal}\n\nProduce an implementation DAG. Every stage must feed one terminal integration stage with kind=integration. Do not modify files.`,
-      },
+      task,
+      executionBrief,
       cwd,
       model: process.env.CLEW_ARCHITECT_MODEL,
       readOnly: true,

@@ -136,7 +136,7 @@ Stable identifiers include, where available:
 
 ## 6. Task contract
 
-A normalized contract requires `id`, `title`, `goal`, `profile`, and at least one acceptance criterion. It materializes `risk` and `base_ref` defaults before persistence.
+A normalized contract requires `id`, `title`, `goal`, `profile`, and at least one acceptance criterion. It materializes `risk` and `base_ref` defaults before persistence. New intake defaults `profile` to `auto`; explicit `quick`, `standard`, and `deep` values remain durable operator overrides.
 
 ```yaml
 id: AUTH-142
@@ -156,6 +156,26 @@ verification:
 ```
 
 Acceptance IDs are stable references for worker reports and reviewer findings. Clew currently records their coverage but does not implement a general acceptance-policy or QA engine.
+
+### 6.1 Run preparation and Execution Briefs
+
+The Task contract remains the durable statement of intent. Before each Worker, Reviewer, Architect, integration, or QA execution, Clew prepares a versioned `ExecutionBrief` containing the immutable Task snapshot plus run-specific assignment, role, Stage, attempt, prior review findings, bounded evidence context, required verification, and write permission.
+
+Stage goals and retry feedback do not alter the Task goal. Native harness adapters compile their own prompts from the same validated brief. A compiled prompt is an adapter-local value: it is not persisted as Task truth and is never transported between Controller and Runner.
+
+In paired execution, Controller may transport the bounded Execution Brief in a lease offer. The Runner validates the brief and compiles the native prompt locally, preserving the repository and credential boundary.
+
+### 6.2 Task Analysis and readiness
+
+Clew derives a versioned Task Analysis without changing lifecycle state. The analysis contains a suggested Task kind, a 0–100 readiness score with unresolved checks, and an explainable recommended action and execution profile. `READY` remains exclusively the post-execution handoff state; pre-run readiness is represented by `readiness.readyToStart`.
+
+When the Task profile is `auto`, Scheduler resolves Quick, Standard, or Deep from the current analysis before allocating a Run. The resolved profile is persisted on the Run. An explicit profile always overrides the recommendation.
+
+### 6.3 Architecture Result and Prompt Inspector
+
+Deep planning persists an `ArchitectureResult` alongside the versioned execution plan. It is a durable, inspectable summary of the task goal, selected stages/components, risks, alternatives, and verification intent; it is an artifact for review and UI presentation, not a replacement for the Task contract.
+
+Operators can inspect the latest architecture artifact with `clew task architecture TASK` and the exact bounded context prepared for a run with `clew task brief TASK [--run RUN-ID]`. These views never expose compiled harness prompts, credentials, hidden reasoning, or host-local paths.
 
 ## 7. Execution profiles
 

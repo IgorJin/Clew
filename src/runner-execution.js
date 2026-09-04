@@ -127,7 +127,11 @@ export class RunnerExecutionPort {
     this.active.set(key, { operation, harness: harnessName });
     try {
       if (operation === 'plan') {
-        const plan = await this.createArchitect(harnessName).createPlan({ task, cwd: projectRoot });
+        const plan = await this.createArchitect(harnessName).createPlan({
+          task,
+          executionBrief: requirements.executionBrief,
+          cwd: projectRoot,
+        });
 
         return {
           status: 'completed',
@@ -163,6 +167,7 @@ export class RunnerExecutionPort {
       const harness = this.createHarness(harnessName);
       const result = await harness.run({
         task,
+        executionBrief: requirements.executionBrief,
         stageId: offer.stageId,
         runId: offer.runId,
         cwd: workspace.path,

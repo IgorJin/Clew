@@ -1,4 +1,5 @@
 import { FINDING_SEVERITY, REVIEW_VERDICT, validateReviewResult } from './domain.js';
+import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
 
 export class FakeReviewer {
   async review({ task, evidence, revision }) {
@@ -33,12 +34,18 @@ export class CodexReviewer {
   }
 
   async review({ task, evidence, revision, cwd }) {
+    const executionBrief = prepareExecutionBrief({
+      task,
+      role: EXECUTION_ROLE.REVIEWER,
+      stageId: 'review',
+      assignmentGoal: `Review revision ${revision} against the Task Contract`,
+      evidence,
+      revision,
+      readOnly: true,
+    });
     const result = await this.harness.run({
-      task: {
-        ...task,
-        title: `Review: ${task.title}`,
-        goal: `${task.goal}\n\nReview revision ${revision}. Evidence: ${JSON.stringify(evidence)}`,
-      },
+      task,
+      executionBrief,
       cwd,
       model: process.env.CLEW_REVIEW_MODEL,
       readOnly: true,

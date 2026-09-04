@@ -29,6 +29,7 @@ import { GitWorktreeManager } from './workspace.js';
 import { PairedExecutionPort } from './execution-port.js';
 import { createChangeViewerRegistry } from './change-viewer.js';
 import { GitChangeInspectionService } from './change-inspection.js';
+import { analyzeTask } from './task-analysis.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -54,6 +55,8 @@ const SERVICE_COMMANDS = new Set([
 ]);
 const TASK_COMMANDS = new Set([
   'approve-step',
+  'architecture',
+  'brief',
   'changes',
   'create',
   'history',
@@ -276,6 +279,10 @@ export class ClewService {
     }
 
     const runs = this.store.listRuns(task.id);
+    const architectureEvent = this.store
+      .listEvents(task.id)
+      .filter((event) => event.type === 'ARCHITECTURE_RESULT_RECORDED')
+      .at(-1);
 
     return {
       show: {
@@ -319,6 +326,8 @@ export class ClewService {
         review: this.store.latestReview(task.id),
         completion: this.store.getCompletion(task.id),
         agentSessions: this.store.listAgentSessions(task.id),
+        analysis: analyzeTask(task.contract),
+        architecture: architectureEvent?.payload?.architecture ?? null,
       },
       thread: this.store.getTaskThread(task.id, { after: 0, limit: 500 }),
       history: this.history(task.id, []),
@@ -347,6 +356,27 @@ export class ClewService {
     if (subcommand === 'approve-step') return this.approveStep(args[0], args);
     if (subcommand === 'list') return this.store.listTasks();
     if (subcommand === 'show') return this.taskSnapshot(args[0]).show;
+    if (subcommand === 'architecture') {
+      return { taskId: args[0], architecture: this.taskSnapshot(args[0]).show.architecture };
+    }
+    if (subcommand === 'brief') {
+      const taskId = args[0];
+
+      if (!taskId) throw new Error('task id is required');
+      const requestedRun = getOptionValue(args, '--run', null);
+      const briefs = this.store
+        .listEvents(taskId)
+        .filter((event) => event.type === 'EXECUTION_BRIEF_PREPARED')
+        .map((event) => event.payload)
+        .filter((payload) => !requestedRun || payload.runId === requestedRun);
+      const latest = briefs.at(-1);
+
+      return {
+        taskId,
+        runId: requestedRun ?? latest?.runId ?? null,
+        executionBrief: latest?.executionBrief ?? null,
+      };
+    }
     if (subcommand === 'thread') {
       const taskId = args[0];
 
@@ -447,7 +477,7 @@ export class ClewService {
         title: getOptionValue(args, '--title'),
         description: getOptionValue(args, '--description'),
         goal: getOptionValue(args, '--goal'),
-        profile: getOptionValue(args, '--profile', PROFILE_NAME.QUICK),
+        profile: getOptionValue(args, '--profile', PROFILE_NAME.AUTO),
         tags: getOptionValues(args, '--tags'),
         risk: getOptionValue(args, '--risk', 'medium'),
         base_ref: getOptionValue(args, '--base', 'HEAD'),
@@ -485,7 +515,7 @@ export class ClewService {
       id: getOptionValue(args, '--id', input.id) || createTaskId(),
       description: description.trim(),
       goal: description.trim(),
-      profile: input.profile ?? PROFILE_NAME.QUICK,
+      profile: input.profile ?? PROFILE_NAME.AUTO,
       risk: input.risk ?? 'medium',
       base_ref: input.base_ref ?? 'HEAD',
       acceptance:
@@ -507,6 +537,7 @@ export class ClewService {
 
     if (!task) throw new Error(`task not found: ${taskId}`);
     const pending = this.store.latestWorkflowAction(taskId, 'start_worker');
+    const analysis = analyzeTask(task.contract);
 
     if (pending?.status === 'PENDING') return pending;
     if (task.state !== TASK_STATE.DRAFT)
@@ -520,14 +551,16 @@ export class ClewService {
     const descriptor = {
       currentStep: TASK_STATE.DRAFT,
       resultingStep: TASK_STATE.EXECUTING,
-      summary: 'Start one read-only worker for this task',
+      summary: `${analysis.recommendation.action === 'investigate' ? 'Investigate before implementation' : analysis.recommendation.action === 'plan' ? 'Plan before implementation' : analysis.recommendation.action === 'shape' ? 'Shape the task before implementation' : 'Start implementation'} with the ${analysis.recommendation.profile} profile`,
       inputs: {
         harness: 'codex',
         permissionMode: 'read-only',
+        profile: analysis.recommendation.profile,
         ...(this.config.models?.worker ? { model: this.config.models.worker } : {}),
       },
       sideEffects: ['start one local worker process', 'create one run record'],
       approvalRequired: true,
+      analysis,
     };
 
     return this.store.createWorkflowAction({
@@ -557,6 +590,9 @@ export class ClewService {
 
     this.store.setTaskState(taskId, TASK_STATE.QUEUED);
     const runArgs = args.includes('--harness') ? args : [...args, '--harness', 'codex'];
+
+    if (!args.includes('--profile') && action.inputs?.profile)
+      runArgs.push('--profile', action.inputs.profile);
 
     if (!args.includes('--worker-model') && action.inputs?.model)
       runArgs.push('--worker-model', action.inputs.model);
@@ -695,7 +731,8 @@ export class ClewService {
     const previousRuns = this.store.listRuns(taskId, { stageId });
     const maxAttempts =
       previousRuns.at(-1)?.policy?.maxAttempts ??
-      resolveProfile(getOptionValue(args, '--profile', task.contract.profile)).maxAttempts;
+      resolveProfile(getOptionValue(args, '--profile', task.contract.profile), task.contract)
+        .maxAttempts;
 
     if (previousRuns.length >= maxAttempts)
       throw new Error(

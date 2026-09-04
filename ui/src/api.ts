@@ -1,5 +1,5 @@
 import { fixtureTasks } from './fixtures';
-import type { AgentRole, Run, Task, TaskState, ThreadItem } from './types';
+import type { AgentRole, Run, Task, TaskAnalysis, TaskState, ThreadItem } from './types';
 
 export type ConnectionState =
   'fixture' | 'connected' | 'disconnected' | 'reconnecting' | 'incompatible';
@@ -61,6 +61,41 @@ function object(value: unknown, name: string): JsonObject {
 function string(value: unknown, name: string): string {
   if (typeof value !== 'string' || !value) throw new IncompatibleDaemonError(`${name} is invalid`);
   return value;
+}
+
+function mapTaskAnalysis(value: unknown): TaskAnalysis | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const analysis = value as JsonObject;
+  const kind = object(analysis.kind, 'task analysis kind');
+  const readiness = object(analysis.readiness, 'task readiness');
+  const recommendation = object(analysis.recommendation, 'task recommendation');
+  const action = string(recommendation.action, 'recommended action');
+  const profile = string(recommendation.profile, 'recommended profile');
+
+  if (!['shape', 'investigate', 'plan', 'start'].includes(action)) return null;
+  if (!['quick', 'standard', 'deep'].includes(profile)) return null;
+
+  return {
+    version: 1,
+    kind: {
+      value: string(kind.value, 'task kind'),
+      confidence: Number(kind.confidence ?? 0),
+    },
+    readiness: {
+      score: Number(readiness.score ?? 0),
+      readyToStart: readiness.readyToStart === true,
+      unresolved: Array.isArray(readiness.unresolved)
+        ? readiness.unresolved.filter((item): item is string => typeof item === 'string')
+        : [],
+    },
+    recommendation: {
+      action: action as TaskAnalysis['recommendation']['action'],
+      profile: profile as TaskAnalysis['recommendation']['profile'],
+      reasons: Array.isArray(recommendation.reasons)
+        ? recommendation.reasons.filter((item): item is string => typeof item === 'string')
+        : [],
+    },
+  };
 }
 
 function taskState(value: unknown): TaskState {
@@ -197,6 +232,7 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     .find((run) => run.status === 'COMPLETED' && run.commitSha)?.commitSha;
   const latestRun = runs.at(-1);
   const state = taskState(show.state);
+  const analysis = mapTaskAnalysis(show.analysis);
 
   return {
     id: string(show.id, 'task id'),
@@ -211,6 +247,11 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
     title: string(contract.title, 'task title'),
     goal: string(contract.goal, 'task goal'),
     profile: typeof contract.profile === 'string' ? contract.profile : 'quick',
+    analysis,
+    architecture:
+      show.architecture && typeof show.architecture === 'object'
+        ? (show.architecture as Task['architecture'])
+        : null,
     tags: Array.isArray(contract.tags)
       ? contract.tags.filter((t): t is string => typeof t === 'string')
       : [],
@@ -262,7 +303,10 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
         })
       : [],
     attempts: runs.length,
-    roles: rolesForProfile(typeof contract.profile === 'string' ? contract.profile : 'quick'),
+    roles: rolesForProfile(
+      analysis?.recommendation.profile ??
+        (typeof contract.profile === 'string' ? contract.profile : 'quick'),
+    ),
     runs,
     agentSessions: Array.isArray(show.agentSessions)
       ? show.agentSessions.map((sessionValue) => {

@@ -99,6 +99,9 @@ test('MVP exposes one durable next step and requires an explicit approval', asyn
     assert.equal(first.status, 'PENDING');
     assert.equal(first.approvalRequired, true);
     assert.equal(first.inputs.harness, 'codex');
+    assert.equal(first.inputs.profile, 'standard');
+    assert.equal(first.analysis.readiness.score, 70);
+    assert.equal(first.analysis.recommendation.action, 'shape');
     assert.equal(first.inputs.model, undefined);
     assert.equal(store.getTask('MVP-1').state, 'DRAFT');
     assert.equal(store.listRuns('MVP-1').length, 0);

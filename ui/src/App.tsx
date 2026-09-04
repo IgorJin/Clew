@@ -726,8 +726,6 @@ function AgentGrid({
 type CreateTaskInput = {
   title: string;
   body: string;
-  profile: 'quick' | 'standard' | 'deep';
-  tags: string;
 };
 
 function autoTitle(body: string): string {
@@ -745,8 +743,6 @@ function CreateTask({
 }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [profile, setProfile] = useState<'quick' | 'standard' | 'deep'>('quick');
-  const [tags, setTags] = useState('');
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const handleBodyInput = (event: Event) => {
@@ -767,8 +763,6 @@ function CreateTask({
     void onCreate({
       title: cleanTitle,
       body: body.trim(),
-      profile,
-      tags: tags.trim(),
     });
   };
 
@@ -801,42 +795,8 @@ function CreateTask({
           onInput={(event) => setTitle(event.currentTarget.value)}
           placeholder={autoTitle(body) || 'Short title'}
         />
-        <label>Complexity</label>
-        <div className="profile-selector">
-          {(
-            [
-              ['quick', 'Quick'],
-              ['standard', 'Standard'],
-              ['deep', 'Deep'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`profile-chip ${profile === key ? 'selected' : ''}`}
-              onClick={() => setProfile(key)}
-              aria-pressed={profile === key}
-            >
-              <span className="profile-name">{label}</span>
-              <span className="profile-hint">
-                {key === 'quick'
-                  ? 'worker'
-                  : key === 'standard'
-                    ? '+ review'
-                    : 'architect + review'}
-              </span>
-            </button>
-          ))}
-        </div>
-        <label htmlFor="task-tags">Tags</label>
-        <input
-          id="task-tags"
-          value={tags}
-          onInput={(event) => setTags(event.currentTarget.value)}
-          placeholder="comma, separated"
-        />
         <p className="small-muted">
-          Created as Draft. You'll need to approve the next step before it starts.
+          Clew will analyze readiness and recommend an execution profile after creation.
         </p>
         <div className="modal-actions">
           <button type="button" className="button secondary" onClick={onClose}>
@@ -1126,26 +1086,12 @@ export default function App() {
     );
   }, [tasks, statusFilter]);
 
-  const createTask = async ({ title, body, profile, tags }: CreateTaskInput) => {
+  const createTask = async ({ title, body }: CreateTaskInput) => {
     if (!canMutateFor(connection)) {
       setNotice('Actions are disabled while the control plane is disconnected');
       return;
     }
-    const tagList = tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
-    const args = [
-      'task',
-      'create',
-      '--title',
-      title,
-      '--description',
-      body,
-      '--profile',
-      profile,
-      ...tagList.flatMap((tag) => ['--tags', tag]),
-    ];
+    const args = ['task', 'create', '--title', title, '--description', body, '--profile', 'auto'];
     try {
       const result = await execute(args);
       if ((result as { fixture?: boolean } | null)?.fixture) {
@@ -1156,13 +1102,27 @@ export default function App() {
             createdAt: new Date().toISOString(),
             title,
             goal: body,
-            profile,
-            tags: tagList,
+            profile: 'auto',
+            tags: [],
+            analysis: {
+              version: 1,
+              kind: { value: 'feature', confidence: 0.62 },
+              readiness: {
+                score: 50,
+                readyToStart: false,
+                unresolved: ['Acceptance criteria are distinct and testable'],
+              },
+              recommendation: {
+                action: 'shape' as const,
+                profile: 'standard' as const,
+                reasons: ['1 readiness check(s) unresolved'],
+              },
+            },
             state: 'DRAFT' as TaskState,
             attention: null,
             revision: null,
             attempts: 0,
-            roles: rolesForProfile(profile),
+            roles: rolesForProfile('standard'),
             runs: [],
             stages: [],
             reviewed: false,
@@ -1282,6 +1242,14 @@ export default function App() {
   const interactiveWorker =
     task.runStatus === 'RUNNING' && task.terminalActive === true && Boolean(task.runId);
   const pendingHarnessApproval = task.harnessApprovals?.find((a) => !a.decision);
+  const recommendedActionLabel = task.analysis
+    ? {
+        shape: 'Shape task',
+        investigate: 'Investigate',
+        plan: 'Plan',
+        start: 'Start',
+      }[task.analysis.recommendation.action]
+    : 'Analyze task';
 
   const explainNextStep = async () => {
     try {
@@ -1551,6 +1519,36 @@ export default function App() {
                 {descExpanded ? '▾' : '▸'} Description
               </button>
               {descExpanded && <p className="description-text">{task.goal}</p>}
+              {task.state === 'DRAFT' && task.analysis && (
+                <section className="task-recommendation" aria-label="Recommended next action">
+                  <div>
+                    <span className="eyebrow">Recommended next action</span>
+                    <h3>{recommendedActionLabel}</h3>
+                    <p>{task.analysis.recommendation.reasons.join(' · ')}</p>
+                  </div>
+                  <div className="recommendation-meta">
+                    <span>{task.analysis.kind.value}</span>
+                    <span>Readiness {task.analysis.readiness.score}%</span>
+                    <span>{task.analysis.recommendation.profile}</span>
+                  </div>
+                  <button
+                    className="button primary small"
+                    disabled={!canMutate}
+                    onClick={() => {
+                      if (nextStep?.status === 'PENDING')
+                        void act(
+                          ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
+                          'Recommended action started',
+                        );
+                      else void explainNextStep();
+                    }}
+                  >
+                    {nextStep?.status === 'PENDING'
+                      ? `Start ${nextStep.inputs?.profile ?? task.analysis.recommendation.profile}`
+                      : recommendedActionLabel}
+                  </button>
+                </section>
+              )}
               <StepIndicator
                 state={task.state}
                 selected={selectedStep}

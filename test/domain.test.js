@@ -27,6 +27,18 @@ test('validates and normalizes a task contract', () => {
   assert.equal(task.risk, 'medium');
   assert.equal('authorization' in task, false);
 });
+test('preserves normalized task tags', () => {
+  const task = validateTaskContract({
+    id: 'T-TAGS',
+    title: 'Tags',
+    goal: 'Preserve tags',
+    profile: 'quick',
+    tags: [' backend ', 'security'],
+    acceptance: ['tags survive normalization'],
+  });
+
+  assert.deepEqual(task.tags, ['backend', 'security']);
+});
 test('rejects unsupported task risk levels', () => {
   assert.throws(
     () =>
@@ -46,6 +58,19 @@ test('resolves native product defaults and Deep verification policy', () => {
   assert.equal(resolveProfile('standard').reviewHarness, 'codex');
   assert.equal(resolveProfile('deep').architectHarness, 'codex');
   assert.equal(resolveProfile('deep').verification, 'broad');
+  assert.equal(
+    resolveProfile('auto', {
+      title: 'Small copy change',
+      goal: 'Update one label',
+      acceptance: [{ id: 'AC-1', criterion: 'The new label is visible' }],
+      risk: 'low',
+      base_ref: 'main',
+    }).name,
+    'quick',
+  );
+});
+test('rejects unknown execution profiles instead of falling through to Deep', () => {
+  assert.throws(() => resolveProfile('typo-profile'), /unsupported execution profile/);
 });
 test('rejects invalid transitions', () => {
   assert.throws(

@@ -5,6 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 import { extractUsage } from './usage.js';
 import { CodexTurnMonitor } from './codex-turn-monitor.js';
+import { compileHarnessPrompt, ensureExecutionBrief } from './execution-brief.js';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -127,12 +128,8 @@ function waitForUnixSocket(path, child, timeoutMs, signal) {
   });
 }
 
-function interactivePrompt(task) {
-  return `Task: ${task.title}\n\nAcceptance:\n${task.acceptance
-    .map((criterion) => `- ${criterion.id}: ${criterion.criterion}`)
-    .join(
-      '\n',
-    )}\n\nWork interactively in this terminal. If the requirements are ambiguous, ask the operator before changing files. Ask for approval when required, then run relevant verification commands before finishing.`;
+function interactivePrompt(executionBrief) {
+  return `${compileHarnessPrompt(executionBrief, { harness: 'codex' })}\n\nWork interactively in this terminal. Ask for approval when required.`;
 }
 
 function agentMessageText(item) {
@@ -464,6 +461,7 @@ export class CodexHarness {
 
   async run({
     task,
+    executionBrief = null,
     stageId = 'worker',
     runId = null,
     cwd,
@@ -476,9 +474,13 @@ export class CodexHarness {
     resumeSessionId = null,
     liveEndpoint = null,
   }) {
+    const brief = ensureExecutionBrief({ executionBrief, task, stageId, runId, readOnly });
+
+    task = brief.task;
     if (this.terminalManager?.waitForFinish && runId && liveEndpoint)
       return this.runInteractive({
         task,
+        executionBrief: brief,
         stageId,
         runId,
         cwd,
@@ -823,11 +825,7 @@ export class CodexHarness {
         input: [
           {
             type: 'text',
-            text: `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.${
-              readOnly
-                ? '\n\nRead-only operation: inspect and report only. Do not create, edit, delete, or commit files.'
-                : '\n\nImplement the requested changes in this workspace. Do not modify files outside it.'
-            }`,
+            text: compileHarnessPrompt(brief, { harness: 'codex' }),
           },
         ],
       });
@@ -919,6 +917,7 @@ export class CodexHarness {
 
   async runInteractive({
     task,
+    executionBrief,
     stageId,
     runId,
     cwd,
@@ -946,7 +945,7 @@ export class CodexHarness {
 
     try {
       await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal);
-      const prompt = interactivePrompt(task);
+      const prompt = interactivePrompt(executionBrief);
       const commonArgs = [
         '--remote',
         liveEndpoint,
@@ -1075,6 +1074,9 @@ export class OpenCodeHarness {
   }
   async run({
     task,
+    executionBrief = null,
+    stageId = 'worker',
+    runId = null,
     cwd,
     onEvent,
     signal,
@@ -1083,6 +1085,9 @@ export class OpenCodeHarness {
     resumeSessionId = null,
     onApproval = () => APPROVAL_DECISION.DECLINE,
   }) {
+    const brief = ensureExecutionBrief({ executionBrief, task, stageId, runId, readOnly });
+
+    task = brief.task;
     if (signal?.aborted) throw new HarnessInterruptedError('OpenCode');
     const sessionResponse = resumeSessionId
       ? null
@@ -1126,7 +1131,7 @@ export class OpenCodeHarness {
 
       if (eventResponse.ok && eventResponse.body?.getReader)
         return await this.runStreamingTurn({
-          task,
+          executionBrief: brief,
           cwd,
           sessionId,
           eventResponse,
@@ -1134,7 +1139,6 @@ export class OpenCodeHarness {
           onEvent,
           onApproval,
           model,
-          readOnly,
         });
       const response = await this.fetch(
         `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/message`,
@@ -1142,7 +1146,7 @@ export class OpenCodeHarness {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
+            parts: [{ type: 'text', text: this.buildPrompt(brief) }],
             ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
           }),
           signal: controller.signal,
@@ -1187,14 +1191,13 @@ export class OpenCodeHarness {
     }
   }
   async runStreamingTurn({
-    task,
+    executionBrief,
     sessionId,
     eventResponse,
     controller,
     onEvent,
     onApproval,
     model = null,
-    readOnly = false,
   }) {
     const promptResponse = await this.fetch(
       `${this.baseUrl}/session/${encodeURIComponent(sessionId)}/prompt_async`,
@@ -1202,7 +1205,7 @@ export class OpenCodeHarness {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          parts: [{ type: 'text', text: this.buildPrompt(task, readOnly) }],
+          parts: [{ type: 'text', text: this.buildPrompt(executionBrief) }],
           ...(openCodeModel(model) ? { model: openCodeModel(model) } : {}),
         }),
         signal: controller.signal,
@@ -1385,12 +1388,8 @@ export class OpenCodeHarness {
         output: part.state?.output,
       }));
   }
-  buildPrompt(task, readOnly = false) {
-    const policy = readOnly
-      ? '\n\nREAD-ONLY POLICY: inspect and report only. Do not create, edit, delete, or commit files. Do not run commands that mutate state.'
-      : '';
-
-    return `${task.title}\n\nGoal: ${task.goal}\n\nAcceptance:\n${task.acceptance.map((criterion) => `- ${criterion.id}: ${criterion.criterion}`).join('\n')}\n\nBefore completing, run at least one command that verifies the acceptance criteria.${policy}`;
+  buildPrompt(executionBrief) {
+    return compileHarnessPrompt(executionBrief, { harness: 'opencode' });
   }
   async requestJson(path, { method = 'GET', body } = {}) {
     const response = await this.fetch(`${this.baseUrl}${path}`, {

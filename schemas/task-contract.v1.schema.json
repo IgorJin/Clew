@@ -23,7 +23,7 @@
       }
     },
     "risk": { "enum": ["low", "medium", "high"] },
-    "profile": { "enum": ["quick", "standard", "deep"] },
+    "profile": { "enum": ["auto", "quick", "standard", "deep"] },
     "tags": {
       "type": "array",
       "items": { "type": "string", "minLength": 1, "maxLength": 32 },

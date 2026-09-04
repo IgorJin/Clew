@@ -198,10 +198,6 @@ describe('Preact control plane', () => {
     fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
       target: { value: 'Read-only MVP task' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /^deep/i }));
-    fireEvent.input(screen.getByRole('textbox', { name: /^tags$/i }), {
-      target: { value: 'ui, refactor' },
-    });
     fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
 
     expect(api.execute).toHaveBeenCalledWith([
@@ -212,11 +208,7 @@ describe('Preact control plane', () => {
       '--description',
       'List files without changing them',
       '--profile',
-      'deep',
-      '--tags',
-      'ui',
-      '--tags',
-      'refactor',
+      'auto',
     ]);
     expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
     expect(window.location.pathname).toMatch(/^\/tasks\/LOCAL-/);
@@ -238,7 +230,7 @@ describe('Preact control plane', () => {
       '--description',
       'Investigate terminal startup',
       '--profile',
-      'quick',
+      'auto',
     ]);
   });
 

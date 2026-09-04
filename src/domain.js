@@ -1,3 +1,5 @@
+import { analyzeTask } from './task-analysis.js';
+
 export const TASK_STATE = Object.freeze({
   DRAFT: 'DRAFT',
   PLAN_READY: 'PLAN_READY',
@@ -66,6 +68,7 @@ export const RISK_LEVEL = Object.freeze({
 });
 
 export const PROFILE_NAME = Object.freeze({
+  AUTO: 'auto',
   QUICK: 'quick',
   STANDARD: 'standard',
   DEEP: 'deep',
@@ -264,7 +267,7 @@ export function validateTaskContract(contract) {
     ids.add(item.id);
   }
   if (!Object.values(PROFILE_NAME).includes(contract.profile))
-    throw new Error('task.profile must be quick, standard, or deep');
+    throw new Error('task.profile must be auto, quick, standard, or deep');
   const risk = contract.risk ?? RISK_LEVEL.MEDIUM;
 
   if (!Object.values(RISK_LEVEL).includes(risk))
@@ -288,6 +291,14 @@ export function validateTaskContract(contract) {
 
     return { command: value.command, args: value.args ?? [] };
   });
+  const tags = contract.tags ?? [];
+
+  if (
+    !Array.isArray(tags) ||
+    tags.some((tag) => typeof tag !== 'string' || !tag.trim() || tag.trim().length > 32)
+  )
+    throw new Error('task.tags must be an array of strings between 1 and 32 characters');
+  if (tags.length > 8) throw new Error('task.tags must contain at most 8 tags');
 
   return {
     id: contract.id,
@@ -297,6 +308,7 @@ export function validateTaskContract(contract) {
     profile: contract.profile,
     risk,
     base_ref: baseRef,
+    ...(tags.length ? { tags: tags.map((tag) => tag.trim()) } : {}),
     ...(normalizedVerification.length ? { verification: normalizedVerification } : {}),
     acceptance: acceptance.map((acceptanceItem, acceptanceIndex) =>
       typeof acceptanceItem === 'string'
@@ -306,7 +318,9 @@ export function validateTaskContract(contract) {
   };
 }
 
-export function resolveProfile(profileName) {
+export function resolveProfile(profileName, task = null) {
+  if (profileName === PROFILE_NAME.AUTO)
+    return resolveProfile(task ? analyzeTask(task).recommendation.profile : PROFILE_NAME.STANDARD);
   const common = { maxAttempts: 3, verification: 'targeted' };
 
   if (profileName === PROFILE_NAME.QUICK)
@@ -330,6 +344,8 @@ export function resolveProfile(profileName) {
       architecture: false,
       maxWorkers: 1,
     };
+  if (profileName !== PROFILE_NAME.DEEP)
+    throw new Error(`unsupported execution profile: ${profileName}`);
 
   return {
     ...common,

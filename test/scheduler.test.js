@@ -394,7 +394,12 @@ test('resumes the worker session with structured review feedback', async () => {
 
   assert.equal(result.state, 'READY');
   assert.equal(calls[1].resumeSessionId, 'worker-session');
-  assert.match(calls[1].task.goal, /Add the missing edge case/);
+  assert.equal(calls[1].task.goal, 'Implement carefully');
+  assert.equal(
+    calls[1].executionBrief.context.reviewFindings[0].reason,
+    'Add the missing edge case',
+  );
+  assert.equal(calls[1].executionBrief.task.goal, 'Implement carefully');
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -1183,6 +1188,9 @@ test('normalizes a native reviewer output behind the reviewer boundary', async (
 
   assert.equal(result.verdict, 'pass');
   assert.equal(request.cwd, '/review-worktree');
+  assert.equal(request.task.goal, 'Review');
+  assert.equal(request.executionBrief.role, 'reviewer');
+  assert.equal(request.executionBrief.context.revision, 'abc');
   assert.equal(request.readOnly, true);
   assert.equal(request.outputSchema.additionalProperties, false);
   assert.equal(request.outputSchema.properties.findings.items.additionalProperties, false);

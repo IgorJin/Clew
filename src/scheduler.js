@@ -27,6 +27,8 @@ import { FakeArchitect, CodexArchitect } from './architect.js';
 import { verificationEnvironment } from './trust.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 import { RUNNER_MESSAGE_KIND, createRunnerEnvelope } from './runner-protocol.js';
+import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
+import { createArchitectureResult } from './architecture-result.js';
 
 export class Scheduler {
   constructor(
@@ -104,7 +106,7 @@ export class Scheduler {
     const row = this.store.getTask(taskId);
 
     if (!row) throw new Error(`task not found: ${taskId}`);
-    const resolvedProfile = resolveProfile(requestedProfile || row.contract.profile);
+    const resolvedProfile = resolveProfile(requestedProfile || row.contract.profile, row.contract);
     const harnessName = requestedHarness || resolvedProfile.harness;
     const profile = { ...resolvedProfile, harness: harnessName };
 
@@ -249,12 +251,23 @@ export class Scheduler {
         evidence = completedReport.evidence;
         revision = completedReport.revision;
       } else {
-        const workerTask = this.withRetryFeedback(row.contract, retryFeedback);
+        const executionBrief = prepareExecutionBrief({
+          task: row.contract,
+          role: EXECUTION_ROLE.WORKER,
+          stageId,
+          runId,
+          attempt,
+          assignmentGoal: row.contract.goal,
+          reviewFindings: retryFeedback,
+          readOnly: options.readOnly === true,
+        });
 
+        this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
         result = await this.runHarnessWithSessionFallback(
           harness,
           {
-            task: workerTask,
+            task: row.contract,
+            executionBrief,
             stageId,
             runId,
             cwd: workspace.path,
@@ -526,13 +539,14 @@ export class Scheduler {
 
     try {
       stageResult = await this.executePairedStage({
-        task: this.withRetryFeedback(row.contract, retryFeedback),
+        task: row.contract,
         stage: { id: stageId, goal: row.contract.goal, kind: 'worker' },
         harnessName,
         policy: profile,
         signal,
         resumeSessionId,
         readOnly: options.readOnly === true,
+        reviewFindings: retryFeedback,
         review: needsReview,
         reviewHarness:
           requestedReviewHarness ??
@@ -638,6 +652,7 @@ export class Scheduler {
     reviewHarness = null,
     operation = 'execute',
     dependencyRevisions = [],
+    reviewFindings = [],
     workspaceMappingId = null,
   }) {
     const taskId = task.id;
@@ -652,8 +667,25 @@ export class Scheduler {
     const leaseId = randomUUID();
     const attempt =
       this.store.listRuns(taskId).filter((run) => run.stage_id === stage.id).length + 1;
+    const executionBrief = prepareExecutionBrief({
+      task,
+      role:
+        operation === 'plan'
+          ? EXECUTION_ROLE.ARCHITECT
+          : Object.values(EXECUTION_ROLE).includes(stage.kind)
+            ? stage.kind
+            : EXECUTION_ROLE.WORKER,
+      stageId: stage.id,
+      runId,
+      attempt,
+      assignmentGoal: stage.goal ?? task.goal,
+      reviewFindings,
+      dependencyRevisions,
+      readOnly,
+    });
     const requirements = {
-      task: { ...task, title: stage.goal ?? task.title },
+      task,
+      executionBrief,
       operation,
       readOnly,
       review,
@@ -662,6 +694,8 @@ export class Scheduler {
       model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
       dependencyRevisions,
     };
+
+    this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
     const run = {
       id: runId,
       taskId,
@@ -854,18 +888,6 @@ export class Scheduler {
     return requestedSessionId ?? latestRun?.session_id ?? null;
   }
 
-  withRetryFeedback(task, findings = []) {
-    if (!findings.length) return task;
-    const feedback = findings
-      .map((finding) => `- [${finding.severity}] ${finding.criterion}: ${finding.reason}`)
-      .join('\n');
-
-    return {
-      ...task,
-      goal: `${task.goal}\n\nReview feedback to address in this attempt:\n${feedback}`,
-    };
-  }
-
   async runHarnessWithSessionFallback(harness, options, taskId, runId) {
     try {
       return await harness.run(options);
@@ -1014,6 +1036,22 @@ export class Scheduler {
       version: planRecord.version,
       plan,
     });
+    const architectureRecorded = this.store
+      .listEvents(taskId)
+      .some(
+        (event) =>
+          event.type === 'ARCHITECTURE_RESULT_RECORDED' &&
+          event.payload?.version === planRecord.version,
+      );
+
+    if (!architectureRecorded) {
+      const architecture = createArchitectureResult({ task: row.contract, plan });
+
+      this.store.appendEvent(taskId, 'ARCHITECTURE_RESULT_RECORDED', {
+        version: planRecord.version,
+        architecture,
+      });
+    }
     if (planRecord.status !== PLAN_STATUS.APPROVED) {
       if (row.state !== TASK_STATE.WAITING_FOR_HUMAN) {
         if (row.state !== TASK_STATE.PLAN_READY) {
@@ -1581,8 +1619,22 @@ export class Scheduler {
       baseSha: stageWorkspace.baseSha,
     });
     try {
+      const executionBrief = prepareExecutionBrief({
+        task,
+        role: Object.values(EXECUTION_ROLE).includes(stage.kind)
+          ? stage.kind
+          : EXECUTION_ROLE.WORKER,
+        stageId: stage.id,
+        runId,
+        attempt,
+        assignmentGoal: stage.goal,
+        readOnly: false,
+      });
+
+      this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
       const result = await harness.run({
-        task: { ...task, title: stage.goal },
+        task,
+        executionBrief,
         stageId: stage.id,
         runId,
         cwd: stageWorkspace.path,

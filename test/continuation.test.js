@@ -290,11 +290,13 @@ test('a stale native session falls back to a fresh correction with the same feed
       },
     });
     const sessions = [];
-    const goals = [];
+    const taskGoals = [];
+    const reviewFindings = [];
     const harness = {
       run: async (options) => {
         sessions.push(options.resumeSessionId);
-        goals.push(options.task.goal);
+        taskGoals.push(options.task.goal);
+        reviewFindings.push(options.executionBrief.context.reviewFindings);
         if (options.resumeSessionId) {
           const error = new Error('native session not found');
 
@@ -326,7 +328,8 @@ test('a stale native session falls back to a fresh correction with the same feed
 
     assert.equal(result.state, 'READY');
     assert.deepEqual(sessions, [previousRun.session_id, null]);
-    assert.match(goals.at(-1), /Keep the operator feedback/);
+    assert.equal(taskGoals.at(-1), 'test continuation');
+    assert.equal(reviewFindings.at(-1)[0].reason, 'Keep the operator feedback');
     assert.ok(store.listEvents('CONT-1').some((event) => event.type === 'SESSION_RESUME_FALLBACK'));
     assert.equal(store.listOperatorMessages('CONT-1')[0].target.sessionId, previousRun.session_id);
   } finally {

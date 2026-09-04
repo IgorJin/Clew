@@ -67,6 +67,8 @@ export type Task = {
   title: string;
   goal: string;
   profile: string;
+  analysis?: TaskAnalysis | null;
+  architecture?: ArchitectureResult | null;
   tags: string[];
   state: TaskState;
   attention?: string | null;
@@ -119,6 +121,33 @@ export type Task = {
   events: { seq: number; type: string; at: string; payload: Record<string, unknown> }[];
 };
 
+export type ArchitectureResult = {
+  version: 1;
+  taskId: string;
+  summary: string;
+  decisions: unknown[];
+  alternatives: unknown[];
+  components: unknown[];
+  risks: unknown[];
+  verification: unknown[];
+  plan: { parallelizable: boolean; stages: unknown[] };
+};
+
+export type TaskAnalysis = {
+  version: 1;
+  kind: { value: string; confidence: number };
+  readiness: {
+    score: number;
+    readyToStart: boolean;
+    unresolved: string[];
+  };
+  recommendation: {
+    action: 'shape' | 'investigate' | 'plan' | 'start';
+    profile: 'quick' | 'standard' | 'deep';
+    reasons: string[];
+  };
+};
+
 export type NextStep = {
   id?: string;
   taskId: string;
@@ -130,4 +159,5 @@ export type NextStep = {
   sideEffects?: string[];
   approvalRequired: boolean;
   status?: string;
+  analysis?: TaskAnalysis;
 };

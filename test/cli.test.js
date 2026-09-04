@@ -72,7 +72,7 @@ test('CLI creates the same inert MVP task from JSON and Markdown', () => {
 
     assert.equal(jsonTask.title, 'JSON task');
     assert.equal(jsonTask.description, 'Read package.json');
-    assert.equal(jsonTask.profile, 'quick');
+    assert.equal(jsonTask.profile, 'auto');
     assert.equal(markdownTask.contract.title, 'Markdown task');
     assert.equal(markdownTask.contract.description, 'List files only.');
     assert.equal(markdownTask.state, 'DRAFT');

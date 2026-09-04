@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/task-analysis.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "kind", "readiness", "recommendation"],
+  "properties": {
+    "version": { "const": 1 },
+    "kind": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence"],
+      "properties": {
+        "value": { "enum": ["feature", "bug", "refactor", "maintenance", "investigation"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "readyToStart", "checks", "unresolved"],
+      "properties": {
+        "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "readyToStart": { "type": "boolean" },
+        "checks": { "type": "array" },
+        "unresolved": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "profile", "reasons"],
+      "properties": {
+        "action": { "enum": ["shape", "investigate", "plan", "start"] },
+        "profile": { "enum": ["quick", "standard", "deep"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

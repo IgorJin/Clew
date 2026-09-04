@@ -45,5 +45,8 @@ test('Codex architect requests a read-only structured plan', async () => {
   assert.deepEqual(plan, expectedPlan);
   assert.equal(request.cwd, '/fixture');
   assert.equal(request.readOnly, true);
+  assert.equal(request.task.goal, task.goal);
+  assert.equal(request.executionBrief.role, 'architect');
+  assert.match(request.executionBrief.assignment.goal, /implementation DAG/);
   assert.deepEqual(request.outputSchema, PLAN_OUTPUT_SCHEMA);
 });

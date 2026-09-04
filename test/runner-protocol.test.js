@@ -182,6 +182,54 @@ test('forbids credentials, host data, prompts, reasoning, and PTY bytes', () => 
   }
 });
 
+test('transports a bounded Execution Brief but rejects a compiled prompt', () => {
+  const executionBrief = {
+    version: 1,
+    task: {
+      id: 'task-1',
+      title: 'Task',
+      goal: 'Goal',
+      acceptance: [{ id: 'AC-1', criterion: 'works' }],
+    },
+    run: { stageId: 'worker', runId: 'run-1', attempt: 1 },
+    role: 'worker',
+    assignment: { goal: 'Implement the task' },
+    context: { reviewFindings: [], evidence: [], revision: null, dependencyRevisions: [] },
+    requiredEvidence: [],
+    permissions: { write: true },
+  };
+  const offer = createRunnerEnvelope({
+    kind: RUNNER_MESSAGE_KIND.LEASE_OFFER,
+    messageId: 'offer-brief-1',
+    idempotencyKey: 'offer-brief-1',
+    correlationId: 'lease-brief-1',
+    payload: {
+      runnerId: 'runner-1',
+      leaseId: 'lease-brief-1',
+      epoch: 1,
+      taskId: 'task-1',
+      stageId: 'worker',
+      runId: 'run-1',
+      attempt: 1,
+      workspaceId: 'clew',
+      requirements: { executionBrief },
+    },
+  });
+
+  assert.deepEqual(offer.payload.requirements.executionBrief, executionBrief);
+  assert.throws(
+    () =>
+      createRunnerEnvelope({
+        ...registration(),
+        payload: {
+          ...registration().payload,
+          requirements: { executionBrief: { ...executionBrief, compiledPrompt: 'private' } },
+        },
+      }),
+    /forbidden transport data/,
+  );
+});
+
 test('fake Controller and Runner peers share conformance and duplicate semantics', () => {
   const runner = new FakeRunnerProtocolPeer();
   const controller = new FakeControllerProtocolPeer();

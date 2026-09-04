@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/architecture-result.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "taskId",
+    "summary",
+    "decisions",
+    "alternatives",
+    "components",
+    "risks",
+    "verification",
+    "plan"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "taskId": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "decisions": { "type": "array" },
+    "alternatives": { "type": "array" },
+    "components": { "type": "array" },
+    "risks": { "type": "array" },
+    "verification": { "type": "array" },
+    "plan": {
+      "type": "object",
+      "required": ["parallelizable", "stages"],
+      "properties": {
+        "parallelizable": { "type": "boolean" },
+        "stages": { "type": "array" }
+      }
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/execution-brief.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "task",
+    "run",
+    "role",
+    "assignment",
+    "context",
+    "requiredEvidence",
+    "permissions"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "goal", "acceptance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "goal": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "acceptance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "criterion"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "criterion": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "constraints": { "type": "array", "items": { "type": "string" } },
+        "nonGoals": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stageId", "runId", "attempt"],
+      "properties": {
+        "stageId": { "type": "string", "minLength": 1 },
+        "runId": { "type": ["string", "null"] },
+        "attempt": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "role": { "enum": ["worker", "reviewer", "architect", "integration", "qa"] },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": { "goal": { "type": "string", "minLength": 1 } }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reviewFindings", "evidence", "revision", "dependencyRevisions"],
+      "properties": {
+        "reviewFindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["severity", "criterion", "reason"],
+            "properties": {
+              "severity": { "type": "string", "minLength": 1 },
+              "criterion": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "evidence": { "type": "array" },
+        "revision": { "type": ["string", "null"] },
+        "dependencyRevisions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "requiredEvidence": { "type": "array" },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["write"],
+      "properties": { "write": { "type": "boolean" } }
+    }
+  }
+}
