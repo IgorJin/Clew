@@ -1,14 +1,14 @@
 ---
 id: CLEW-096
 title: Project shell, switcher, and project-scoped routes
-status: in_review
+status: done
 release: v0.7
 priority: P0
 size: L
 depends_on: [CLEW-095]
 parallel_group: null
 owner: null
-updated: 2026-09-04
+updated: 2026-09-08
 evidence_policy: v1
 ---
 
@@ -98,4 +98,6 @@ None.
 
 ## Completion record
 
-Not completed.
+- Merged to `main` in commit `1dd6eb1`, 2026-09-08.
+- Full release quality gate passes: backend 224/224, UI 51/51, eslint clean.
+- Note: the original "zero daemon commands on navigation" invariant is now refined to "zero control-plane commands on navigation"; `task changes` data loads triggered by task selection are allowed.

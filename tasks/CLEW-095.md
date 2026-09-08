@@ -1,14 +1,14 @@
 ---
 id: CLEW-095
 title: Project domain and lifecycle
-status: in_review
+status: done
 release: v0.7
 priority: P0
 size: L
 depends_on: []
 parallel_group: null
 owner: null
-updated: 2026-09-04
+updated: 2026-09-08
 evidence_policy: v1
 ---
 
@@ -102,4 +102,5 @@ None.
 
 ## Completion record
 
-Not completed.
+- Merged to `main` in commit `1dd6eb1`, 2026-09-08.
+- Full release quality gate passes: backend 224/224, UI 51/51, eslint clean, contracts and migrations verified.

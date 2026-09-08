@@ -1,7 +1,7 @@
 ---
 id: CLEW-098
 title: Cross-project awareness, global attention, keyboard switching
-status: in_review
+status: done
 release: v0.7
 priority: P1
 size: M
@@ -93,4 +93,5 @@ None.
 
 ## Completion record
 
-Not completed.
+- Merged to `main` in commit `1dd6eb1`, 2026-09-08.
+- Full release quality gate passes: backend 224/224, UI 51/51, eslint clean.
