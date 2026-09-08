@@ -17,6 +17,7 @@ import {
   TASK_STATE,
   resolveProfile,
   validateCompletionDecision,
+  validateProject,
   validateRetryRequest,
   validateTaskContract,
 } from './domain.js';
@@ -31,6 +32,7 @@ import { createChangeViewerRegistry } from './change-viewer.js';
 import { GitChangeInspectionService } from './change-inspection.js';
 import { analyzeTask } from './task-analysis.js';
 import { buildFinalizationReport } from './finalization.js';
+import { createProjectId, detectProject } from './project.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -75,6 +77,7 @@ const TASK_COMMANDS = new Set([
   'thread',
   'usage',
 ]);
+const PROJECT_COMMANDS = new Set(['add', 'list', 'show']);
 const SESSION_COMMANDS = new Set(['capabilities', 'open']);
 
 function getOptionValue(args, name, fallback = undefined) {
@@ -234,6 +237,7 @@ export class ClewService {
     const [command, subcommand] = args;
 
     if (command === 'task') return TASK_COMMANDS.has(subcommand);
+    if (command === 'project') return PROJECT_COMMANDS.has(subcommand);
     if (command === 'session') return SESSION_COMMANDS.has(subcommand);
 
     return SERVICE_COMMANDS.has(command);
@@ -244,6 +248,7 @@ export class ClewService {
     const [command, subcommand, ...rest] = args;
 
     if (command === 'task') return this.task(subcommand, rest);
+    if (command === 'project') return this.project(subcommand, rest);
     if (command === 'session') return this.session(subcommand, rest);
     if (command === 'continue') return this.continueTask(subcommand, rest, signal);
     if (command === 'plan') return this.plan(subcommand);
@@ -349,8 +354,41 @@ export class ClewService {
       version: 1,
       cursor,
       generatedAt: new Date().toISOString(),
+      projects: this.store.listProjects(),
       tasks: this.store.listTasks().map((task) => this.taskSnapshot(task.id)),
     };
+  }
+
+  project(subcommand, args) {
+    if (subcommand === 'list') return this.store.listProjects();
+    if (subcommand === 'show') {
+      const id = args[0];
+
+      if (!id) throw new Error('project id is required');
+      const project = this.store.getProject(id);
+
+      if (!project) throw new Error(`project not found: ${id}`);
+
+      return project;
+    }
+    if (subcommand === 'add') {
+      const folder = getOptionValue(args, '--path', args[0]);
+
+      if (!folder) throw new Error('project folder is required');
+      const detected = detectProject(folder);
+
+      return this.store.createProject(
+        validateProject({
+          id: getOptionValue(args, '--id') || createProjectId(),
+          name: getOptionValue(args, '--name', detected.name),
+          localPath: detected.localPath,
+          repositoryRoot: detected.repositoryRoot,
+          defaultBranch: detected.defaultBranch,
+        }),
+      );
+    }
+
+    throw new Error(`unsupported project command: ${subcommand}`);
   }
 
   task(subcommand, args) {
@@ -654,6 +692,7 @@ export class ClewService {
     else
       input = {
         id: getOptionValue(args, '--id'),
+        projectId: getOptionValue(args, '--project'),
         title: getOptionValue(args, '--title'),
         description: getOptionValue(args, '--description'),
         goal: getOptionValue(args, '--goal'),
@@ -677,6 +716,7 @@ export class ClewService {
     if (jsonFile) {
       const allowed = new Set([
         'id',
+        'projectId',
         'title',
         'description',
         'goal',
@@ -716,6 +756,8 @@ export class ClewService {
     delete input.attachments;
     const contract = validateTaskContract(input);
 
+    if (contract.projectId && !this.store.getProject(contract.projectId))
+      throw new Error(`project not found: ${contract.projectId}`);
     this.store.createTask(contract);
 
     return contract;

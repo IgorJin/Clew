@@ -6,6 +6,7 @@
   "required": ["id", "title", "goal", "acceptance", "risk", "profile", "base_ref"],
   "properties": {
     "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$" },
+    "projectId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$" },
     "title": { "type": "string", "minLength": 1 },
     "goal": { "type": "string", "minLength": 1 },
     "description": { "type": "string", "minLength": 1 },

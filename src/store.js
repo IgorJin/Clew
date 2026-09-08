@@ -68,9 +68,20 @@ export class Store {
         Array.isArray(contract.tags) && contract.tags.length ? JSON.stringify(contract.tags) : null;
 
       this.db
-        .prepare('INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)')
-        .run(contract.id, JSON.stringify(contract), TASK_STATE.DRAFT, now, now, tags);
+        .prepare(
+          'INSERT INTO tasks (id, contract, state, created_at, updated_at, tags, project_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          contract.id,
+          JSON.stringify(contract),
+          TASK_STATE.DRAFT,
+          now,
+          now,
+          tags,
+          contract.projectId ?? null,
+        );
       this.appendEvent(contract.id, 'TASK_CREATED', { state: TASK_STATE.DRAFT, contract });
+      if (contract.projectId) this.touchProject(contract.projectId);
     });
   }
   getTask(id) {
@@ -80,8 +91,63 @@ export class Store {
   }
   listTasks() {
     return this.db
-      .prepare('SELECT id, state, created_at, updated_at FROM tasks ORDER BY created_at DESC')
+      .prepare(
+        'SELECT id, state, project_id, created_at, updated_at FROM tasks ORDER BY created_at DESC',
+      )
       .all();
+  }
+  createProject(record) {
+    return this.runInTransaction(() => {
+      const now = new Date().toISOString();
+      const existing = this.db
+        .prepare('SELECT id FROM projects WHERE repository_root=?')
+        .get(record.repositoryRoot);
+
+      if (existing) throw new Error(`project already exists: ${existing.id}`);
+      try {
+        this.db
+          .prepare(
+            'INSERT INTO projects (id, name, local_path, repository_root, default_branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          )
+          .run(
+            record.id,
+            record.name,
+            record.localPath,
+            record.repositoryRoot,
+            record.defaultBranch,
+            now,
+            now,
+          );
+      } catch (error) {
+        if (String(error?.message).includes('UNIQUE constraint failed: projects.id'))
+          throw new Error(`project already exists: ${record.id}`, { cause: error });
+        if (String(error?.message).includes('UNIQUE constraint failed: projects.repository_root')) {
+          const conflict = this.db
+            .prepare('SELECT id FROM projects WHERE repository_root=?')
+            .get(record.repositoryRoot);
+
+          throw new Error(`project already exists: ${conflict?.id ?? record.repositoryRoot}`, {
+            cause: error,
+          });
+        }
+        throw error;
+      }
+
+      return this.getProject(record.id);
+    });
+  }
+  getProject(id) {
+    const row = this.db.prepare('SELECT * FROM projects WHERE id=?').get(id);
+
+    return row ?? null;
+  }
+  listProjects() {
+    return this.db.prepare('SELECT * FROM projects ORDER BY created_at ASC').all();
+  }
+  touchProject(id) {
+    this.db
+      .prepare('UPDATE projects SET updated_at=? WHERE id=?')
+      .run(new Date().toISOString(), id);
   }
   setTaskState(id, state) {
     return this.runInTransaction(() => {

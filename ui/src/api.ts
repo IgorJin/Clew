@@ -1,7 +1,8 @@
-import { fixtureTasks } from './fixtures';
+import { fixtureProjects, fixtureTasks } from './fixtures';
 import type {
   AgentRole,
   FinalizationReport,
+  Project,
   Run,
   Task,
   TaskAnalysis,
@@ -55,6 +56,20 @@ function mapRun(value: unknown, index: number): Run {
     lastAgentMessage: typeof run.lastAgentMessage === 'string' ? run.lastAgentMessage : null,
     interactionUpdatedAt:
       typeof run.interactionUpdatedAt === 'string' ? run.interactionUpdatedAt : null,
+  };
+}
+
+function mapProject(value: unknown, index: number): Project {
+  const project = object(value, 'project');
+
+  return {
+    id: typeof project.id === 'string' && project.id ? project.id : `project-${index}`,
+    name: typeof project.name === 'string' && project.name ? project.name : `Project ${index + 1}`,
+    localPath: nullableString(project.local_path),
+    repositoryRoot: nullableString(project.repository_root),
+    defaultBranch: nullableString(project.default_branch),
+    createdAt: nullableString(project.created_at),
+    updatedAt: nullableString(project.updated_at),
   };
 }
 
@@ -300,6 +315,7 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
 
   return {
     id: string(show.id, 'task id'),
+    projectId: typeof show.project_id === 'string' ? show.project_id : null,
     // Older daemon payloads did not expose created_at. Keep them usable while
     // still preferring the immutable creation timestamp for sidebar ordering.
     createdAt:
@@ -433,17 +449,21 @@ async function loadSnapshot(retryBootstrap = true): Promise<JsonObject> {
   return payload;
 }
 
-export async function loadTasks(): Promise<{ tasks: Task[]; state: ConnectionState }> {
+export async function loadTasks(): Promise<{
+  tasks: Task[];
+  projects: Project[];
+  state: ConnectionState;
+}> {
   const forced = import.meta.env.DEV ? new URLSearchParams(location.search).get('state') : null;
-  if (forced === 'empty') return { tasks: [], state: 'fixture' };
+  if (forced === 'empty') return { tasks: [], projects: [], state: 'fixture' };
   if (forced === 'disconnected' || forced === 'incompatible')
-    return { tasks: fixtureTasks, state: forced };
+    return { tasks: fixtureTasks, projects: fixtureProjects, state: forced };
   if (!sessionStorage.getItem('clew-token') && !sessionStorage.getItem('clew-session')) {
     const connected = await bootstrap();
     if (!connected)
       return import.meta.env.DEV
-        ? { tasks: fixtureTasks, state: 'fixture' }
-        : { tasks: [], state: 'disconnected' };
+        ? { tasks: fixtureTasks, projects: fixtureProjects, state: 'fixture' }
+        : { tasks: [], projects: [], state: 'disconnected' };
   }
   try {
     const payload = await loadSnapshot();
@@ -452,15 +472,19 @@ export async function loadTasks(): Promise<{ tasks: Task[]; state: ConnectionSta
 
       return mapTask(snapshot.show, snapshot.thread, snapshot.history);
     });
+    const projects = Array.isArray(payload.projects)
+      ? (payload.projects as unknown[]).map((value, index) => mapProject(value, index))
+      : [];
 
     if (Number.isSafeInteger(Number(payload.cursor)))
       sessionStorage.setItem('clew-event-cursor', String(payload.cursor));
-    return { tasks, state: 'connected' };
+    return { tasks, projects, state: 'connected' };
   } catch (error) {
     if (import.meta.env.DEV && !(error instanceof IncompatibleDaemonError))
-      return { tasks: fixtureTasks, state: 'fixture' };
+      return { tasks: fixtureTasks, projects: fixtureProjects, state: 'fixture' };
     return {
       tasks: [],
+      projects: [],
       state: error instanceof IncompatibleDaemonError ? 'incompatible' : 'disconnected',
     };
   }

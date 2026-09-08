@@ -293,6 +293,13 @@ export function validateTaskContract(contract) {
   }
   if (!Object.values(PROFILE_NAME).includes(contract.profile))
     throw new Error('task.profile must be auto, quick, standard, or deep');
+  if (
+    contract.projectId !== undefined &&
+    contract.projectId !== null &&
+    (typeof contract.projectId !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$/.test(contract.projectId))
+  )
+    throw new Error('task.projectId must contain 2-64 safe characters');
   const risk = contract.risk ?? RISK_LEVEL.MEDIUM;
 
   if (!Object.values(RISK_LEVEL).includes(risk))
@@ -345,6 +352,9 @@ export function validateTaskContract(contract) {
     title: contract.title,
     goal: contract.goal,
     ...(contract.description !== undefined ? { description: contract.description } : {}),
+    ...(contract.projectId !== undefined && contract.projectId !== null
+      ? { projectId: contract.projectId }
+      : {}),
     profile: contract.profile,
     risk,
     base_ref: baseRef,
@@ -361,6 +371,27 @@ export function validateTaskContract(contract) {
       ...(integration.targetBranch ? { targetBranch: integration.targetBranch } : {}),
       ...(integration.cleanup !== undefined ? { cleanup: integration.cleanup } : {}),
     },
+  };
+}
+
+export function validateProject(record) {
+  if (!record || typeof record !== 'object') throw new Error('project must be an object');
+  for (const field of ['id', 'name', 'localPath', 'repositoryRoot', 'defaultBranch']) {
+    if (typeof record[field] !== 'string' || !record[field].trim())
+      throw new Error(`project.${field} is required`);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$/.test(record.id))
+    throw new Error('project.id must contain 2-64 safe characters');
+  if (record.name.length > 120) throw new Error('project.name must be at most 120 characters');
+  if (record.defaultBranch.length > 120)
+    throw new Error('project.defaultBranch must be at most 120 characters');
+
+  return {
+    id: record.id,
+    name: record.name.trim(),
+    localPath: record.localPath,
+    repositoryRoot: record.repositoryRoot,
+    defaultBranch: record.defaultBranch.trim(),
   };
 }
 

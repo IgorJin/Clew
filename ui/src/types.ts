@@ -18,6 +18,16 @@ export type TaskState =
 
 export type AgentRole = 'architect' | 'worker' | 'reviewer' | 'qa';
 
+export type Project = {
+  id: string;
+  name: string;
+  localPath: string | null;
+  repositoryRoot: string | null;
+  defaultBranch: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 export type AgentSession = {
   id: string;
   taskId: string;
@@ -66,6 +76,7 @@ export type ThreadItem = {
 
 export type Task = {
   id: string;
+  projectId: string | null;
   createdAt: string;
   title: string;
   goal: string;

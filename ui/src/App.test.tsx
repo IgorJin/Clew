@@ -1,15 +1,16 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fixtureTasks } from './fixtures';
-import type { ThreadItem } from './types';
+import { fixtureProjects, fixtureTasks } from './fixtures';
+import type { Task, ThreadItem } from './types';
 
 const api = vi.hoisted(() => ({
-  execute: vi.fn(async (args: string[]): Promise<unknown> => {
-    void args;
-
-    return { fixture: true };
-  }),
-  loadTasks: vi.fn(async () => ({ tasks: structuredClone(fixtureTasks), state: 'fixture' })),
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  execute: vi.fn(async (_args: string[]): Promise<unknown> => ({ fixture: true })),
+  loadTasks: vi.fn(async () => ({
+    tasks: structuredClone(fixtureTasks),
+    projects: structuredClone(fixtureProjects),
+    state: 'fixture',
+  })),
   subscribeToEvents: vi.fn(
     (
       after: number,
@@ -60,10 +61,15 @@ describe('Preact control plane', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     sessionStorage.clear();
+    localStorage.clear();
     api.execute.mockReset();
     api.execute.mockResolvedValue({ fixture: true });
     api.loadTasks.mockReset();
-    api.loadTasks.mockResolvedValue({ tasks: structuredClone(fixtureTasks), state: 'fixture' });
+    api.loadTasks.mockResolvedValue({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
     api.subscribeToEvents.mockClear();
   });
 
@@ -98,7 +104,11 @@ describe('Preact control plane', () => {
         conflicts: false,
       },
     };
-    api.loadTasks.mockResolvedValue({ tasks: [gitTask], state: 'fixture' });
+    api.loadTasks.mockResolvedValue({
+      tasks: [gitTask],
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
@@ -161,7 +171,11 @@ describe('Preact control plane', () => {
         },
       ],
     };
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /^approve$/i }));
@@ -181,7 +195,11 @@ describe('Preact control plane', () => {
       terminalActive: true,
       terminalAvailable: true,
     };
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /finish worker/i }));
@@ -211,6 +229,7 @@ describe('Preact control plane', () => {
 
     api.loadTasks.mockResolvedValueOnce({
       tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
       state: 'connected',
     });
     api.subscribeToEvents.mockImplementationOnce((_after, _onEvent, onState) => {
@@ -242,15 +261,17 @@ describe('Preact control plane', () => {
     expect(api.execute).toHaveBeenCalledWith([
       'task',
       'create',
+      '--project',
+      'PRJ-CLEW',
       '--title',
       'Read-only MVP task',
       '--description',
       'List files without changing them',
       '--profile',
-      'auto',
+      'quick',
     ]);
     expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
-    expect(window.location.pathname).toMatch(/^\/tasks\/LOCAL-/);
+    expect(window.location.pathname).toMatch(/^\/projects\/PRJ-CLEW\/tasks\/LOCAL-/);
   });
 
   it('derives a title when the title field is left empty', async () => {
@@ -264,12 +285,14 @@ describe('Preact control plane', () => {
     expect(api.execute).toHaveBeenCalledWith([
       'task',
       'create',
+      '--project',
+      'PRJ-CLEW',
       '--title',
       'Investigate terminal startup',
       '--description',
       'Investigate terminal startup',
       '--profile',
-      'auto',
+      'quick',
     ]);
   });
 
@@ -282,7 +305,11 @@ describe('Preact control plane', () => {
     runningTasks[0].sessionId = null;
     runningTasks[0].sessionHarness = 'codex';
     runningTasks[0].sessionStageId = 'worker';
-    api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: runningTasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     render(<App />);
     const open = await screen.findByRole('button', { name: /open worker externally/i });
 
@@ -315,7 +342,11 @@ describe('Preact control plane', () => {
     runningTasks[0].sessionId = 'thread-live-1';
     runningTasks[0].terminalAvailable = true;
     runningTasks[0].terminalActive = true;
-    api.loadTasks.mockResolvedValueOnce({ tasks: runningTasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: runningTasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     render(<App />);
 
     const terminal = await screen.findByRole('region', { name: /live codex terminal/i });
@@ -325,7 +356,11 @@ describe('Preact control plane', () => {
   it('expands a stored architect session inside its agent card', async () => {
     const tasks = structuredClone(fixtureTasks);
     tasks[0].roles = ['architect', 'worker'];
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /expand architect terminal/i }));
@@ -343,7 +378,11 @@ describe('Preact control plane', () => {
     waitingTasks[0].terminalAvailable = true;
     waitingTasks[0].terminalActive = true;
     waitingTasks[0].interactionStatus = 'waiting_for_operator';
-    api.loadTasks.mockResolvedValueOnce({ tasks: waitingTasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: waitingTasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     const { container } = render(<App />);
 
     expect(await screen.findByText('Terminal is waiting for you')).toBeTruthy();
@@ -380,12 +419,16 @@ describe('Preact control plane', () => {
   });
 
   it('orders sidebar tasks newest first with a stable id tie-breaker', async () => {
-    const tasks = structuredClone(fixtureTasks);
+    const tasks = structuredClone(fixtureTasks).slice(0, 2);
     tasks[0].createdAt = '2026-09-01T10:00:00.000Z';
     tasks[1].createdAt = '2026-09-01T10:00:00.000Z';
     tasks[0].id = 'CLEW-A';
     tasks[1].id = 'CLEW-Z';
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     const { container } = render(<App />);
 
     await screen.findByText('CLEW-Z');
@@ -506,7 +549,11 @@ describe('Preact control plane', () => {
         terminalAccess: 'runner_local',
       },
     ];
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     api.execute.mockImplementation(async (args: string[]) => {
       if (args[0] === 'task' && args[1] === 'changes') {
         if (args[2] === 'frontend-1')
@@ -545,7 +592,11 @@ describe('Preact control plane', () => {
     let poll: (() => void) | undefined;
 
     tasks[0].runs[1].status = 'RUNNING';
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     api.execute.mockImplementation(async (args: string[]) => {
       if (args[0] === 'task' && args[1] === 'changes') return availableChanges(args[2]);
       if (args[0] === 'task' && args[1] === 'open-changes') return { state: 'opened' };
@@ -590,7 +641,11 @@ describe('Preact control plane', () => {
 
     tasks[0].runs = [{ ...tasks[0].runs[1], id: 'active-run', status: 'RUNNING' }];
     tasks[0].stages = [{ id: 'worker', status: 'RUNNING', kind: 'worker' }];
-    api.loadTasks.mockResolvedValueOnce({ tasks, state: 'connected' });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
     api.execute.mockImplementation((args: string[]) =>
       args[0] === 'task' && args[1] === 'changes'
         ? new Promise((resolve) => resolvers.push(resolve))
@@ -614,5 +669,394 @@ describe('Preact control plane', () => {
     expect(screen.getByRole('button', { name: 'Changes +9 −1' })).toBeTruthy();
     view.unmount();
     expect(clearInterval).toHaveBeenCalledWith(73);
+  });
+});
+
+describe('project shell', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('renders the selected project switcher and scoped task list', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: /project: clew/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /replace auth middleware/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /parallel cache migration/i })).toBeTruthy();
+    expect(screen.queryByText(/lykar/i)).toBeNull();
+  });
+
+  it('switches project scope from the switcher and updates the route', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /lykar/i }));
+    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR');
+
+    // Lykar has no tasks, so the scoped empty state appears.
+    expect(await screen.findByText('No tasks yet')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /replace auth middleware/i })).toBeNull();
+  });
+
+  it('resolves a project-scoped deep link directly', async () => {
+    window.history.replaceState({}, '', '/projects/PRJ-CLEW/tasks/ACC-DEEP');
+    render(<App />);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Parallel cache migration' }),
+    ).toBeTruthy();
+  });
+
+  it('persists the selected project and last opened task across reloads', async () => {
+    const { unmount } = render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /parallel cache migration/i }));
+    expect(window.location.pathname).toBe('/projects/PRJ-CLEW/tasks/ACC-DEEP');
+    unmount();
+
+    window.history.replaceState({}, '', '/');
+    render(<App />);
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Parallel cache migration' }),
+    ).toBeTruthy();
+  });
+
+  it('shows the welcome state with no projects', async () => {
+    api.loadTasks.mockResolvedValueOnce({ tasks: [], projects: [], state: 'fixture' });
+    render(<App />);
+
+    expect(await screen.findByText('Welcome to Clew')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /add project/i })).toBeTruthy();
+  });
+
+  it('shows a scoped empty state when the selected project has no tasks', async () => {
+    const tasks = structuredClone(fixtureTasks).map((task) => ({
+      ...task,
+      projectId: 'PRJ-LYKAR',
+    }));
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+
+    expect(await screen.findByText('No tasks yet')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /new task/i })).toBeTruthy();
+  });
+
+  it('issues no control-plane commands while navigating between projects and tasks', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /lykar/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /project: lykar/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /clew/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /parallel cache migration/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /overview/i }));
+
+    const controlPlaneCalls = api.execute.mock.calls.filter(([args]) => {
+      const command = (args as string[])[0];
+      const subcommand = (args as string[])[1];
+
+      return command !== 'task' || subcommand !== 'changes';
+    });
+
+    expect(controlPlaneCalls).toHaveLength(0);
+  });
+
+  it('returns focus to the switcher trigger on Escape', async () => {
+    render(<App />);
+    const trigger = await screen.findByRole('button', { name: /project: clew/i });
+
+    fireEvent.click(trigger);
+    expect(await screen.findByRole('button', { name: /lykar/i })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('button', { name: /lykar/i })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('recovers the add-project dialog when the daemon rejects the folder', async () => {
+    api.loadTasks.mockResolvedValueOnce({ tasks: [], projects: [], state: 'fixture' });
+    api.execute.mockRejectedValueOnce(new Error('not a git repository: /tmp/nope'));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add project/i }));
+    const dialog = screen.getByRole('textbox', { name: /folder/i }).closest('form') as HTMLElement;
+
+    fireEvent.input(screen.getByRole('textbox', { name: /folder/i }), {
+      target: { value: '/tmp/nope' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^add project$/i }));
+
+    expect(await within(dialog).findByRole('alert')).toBeTruthy();
+    expect(within(dialog).getByRole('alert').textContent).toContain('not a git repository');
+    const submit = within(dialog).getByRole('button', { name: /^add project$/i });
+
+    expect(submit.hasAttribute('disabled')).toBe(false);
+    expect(
+      within(dialog)
+        .getByRole('button', { name: /^cancel$/i })
+        .hasAttribute('disabled'),
+    ).toBe(false);
+  });
+});
+
+describe('project overview', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('orders Needs attention before Running and Ready sections', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
+
+    await screen.findByRole('heading', { name: 'Clew' });
+    const overview = screen.getByText('Needs attention').closest('.overview') as HTMLElement;
+    const sections = within(overview)
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent);
+
+    expect(sections).toEqual([
+      'Needs attention',
+      'Running',
+      'Ready',
+      'Recently completed',
+      'Failed',
+    ]);
+    expect(within(overview).getByText('Parallel cache migration')).toBeTruthy();
+    expect(within(overview).getByText('Session revocation rollout')).toBeTruthy();
+    expect(within(overview).getByText('Refresh token cleanup')).toBeTruthy();
+    expect(within(overview).getByText('Cache invalidation probe')).toBeTruthy();
+  });
+
+  it('omits empty overview sections entirely', async () => {
+    const tasks = structuredClone(fixtureTasks).map((task) => ({
+      ...task,
+      projectId: 'PRJ-LYKAR',
+      state: 'EXECUTING' as const,
+      attention: null,
+      runs: [
+        {
+          id: 'run-x',
+          stageId: 'worker',
+          attempt: 1,
+          status: 'RUNNING',
+          harness: 'codex',
+          sessionId: 's-x',
+          workspace: '/tmp/x',
+          commitSha: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        },
+      ],
+    }));
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    window.history.replaceState({}, '', '/projects/PRJ-LYKAR/overview');
+    render(<App />);
+
+    await screen.findByRole('heading', { name: 'Lykar' });
+    const overview = screen.getByText('Running').closest('.overview') as HTMLElement;
+    const headings = within(overview)
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent);
+
+    expect(headings).toEqual(['Running']);
+  });
+
+  it('opens the task when an overview row is selected', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
+    const overview = screen.getByText('Needs attention').closest('.overview') as HTMLElement;
+    fireEvent.click(within(overview).getByRole('button', { name: /session revocation rollout/i }));
+
+    expect(window.location.pathname).toBe('/projects/PRJ-CLEW/tasks/CLW-EXEC');
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Session revocation rollout' }),
+    ).toBeTruthy();
+  });
+
+  it('renders a compact project breadcrumb above the task title', async () => {
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: /^clew$/i })).toBeTruthy();
+    expect(
+      (await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' }))
+        .textContent,
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^clew$/i }).nextSibling?.textContent).toBe('/');
+  });
+});
+
+describe('project awareness', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  function mixedProjectTasks(): Task[] {
+    const base = structuredClone(fixtureTasks);
+    const exec = structuredClone(base.find((task) => task.id === 'CLW-EXEC')!);
+    const waiting = structuredClone(base.find((task) => task.id === 'ACC-DEEP')!);
+
+    exec.id = 'LYK-RUN';
+    exec.projectId = 'PRJ-LYKAR';
+    exec.title = 'Lykar rollout';
+    waiting.id = 'LYK-WAIT';
+    waiting.projectId = 'PRJ-LYKAR';
+    waiting.title = 'Lykar review needed';
+
+    return [...base, exec, waiting];
+  }
+
+  function idleProjectTasks(): Task[] {
+    const base = structuredClone(fixtureTasks).map((task) => ({
+      ...task,
+      state: 'READY' as const,
+      attention: null,
+      runStatus: null,
+      runs: [],
+      stages: [],
+      interactionStatus: null,
+    }));
+    const idle = structuredClone(base[0]);
+
+    idle.id = 'LYK-IDLE';
+    idle.projectId = 'PRJ-LYKAR';
+    idle.title = 'Idle Lykar task';
+
+    return [...base, idle];
+  }
+
+  function projectMenu(): HTMLElement {
+    return document.querySelector('.project-menu') as HTMLElement;
+  }
+
+  it('shows running and waiting counts per project in the switcher', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: mixedProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
+    const lykarItem = await within(projectMenu()).findByRole('button', { name: /lykar/i });
+
+    expect(lykarItem.textContent).toContain('1 running');
+    expect(lykarItem.textContent).toContain('1 waiting');
+
+    const clewItem = within(projectMenu()).getByRole('button', { name: /clew/i });
+
+    expect(clewItem.textContent).toContain('1 running');
+    expect(clewItem.textContent).toContain('1 waiting');
+  });
+
+  it('counts waiting tasks across all projects in the global attention indicator', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: mixedProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: '2 attention items' })).toBeTruthy();
+  });
+
+  it('jumps to a waiting task from another project in one action', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: mixedProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /attention/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /lykar review needed/i }));
+
+    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Lykar review needed' }),
+    ).toBeTruthy();
+  });
+
+  it('opens the palette with Cmd+K and selects a task with the keyboard', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: mixedProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+    await screen.findByRole('button', { name: /project: clew/i });
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox');
+
+    fireEvent.input(input, { target: { value: 'lyk-wait' } });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+
+    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+  });
+
+  it('selects a palette entry with the pointer', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: mixedProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+    await screen.findByRole('button', { name: /project: clew/i });
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(dialog).getByRole('textbox');
+
+    fireEvent.input(input, { target: { value: 'lykar review needed' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /lykar review needed/i }));
+
+    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+  });
+
+  it('closes the palette with Escape', async () => {
+    render(<App />);
+    await screen.findByRole('button', { name: /project: clew/i });
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull(),
+    );
+  });
+
+  it('stays muted when no project has running or waiting work', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: idleProjectTasks(),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: /project: clew/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /attention/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /project: clew/i }));
+    const lykarItem = await within(projectMenu()).findByRole('button', { name: /lykar/i });
+    const clewItem = within(projectMenu()).getByRole('button', { name: /clew/i });
+
+    expect(lykarItem.textContent).not.toContain('running');
+    expect(lykarItem.textContent).not.toContain('waiting');
+    expect(clewItem.textContent).not.toContain('running');
+    expect(clewItem.textContent).not.toContain('waiting');
   });
 });

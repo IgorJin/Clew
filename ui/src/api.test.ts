@@ -112,7 +112,6 @@ describe('control-plane client', () => {
     });
     expect(result.tasks[0].thread.items[0].summary).toBe('Task created: Projection');
     const urls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-
     expect(urls.filter((url) => url.endsWith('/api/v1/snapshot'))).toHaveLength(1);
     expect(urls.some((url) => url.endsWith('/api/v1/command'))).toBe(false);
   });
@@ -132,7 +131,7 @@ describe('control-plane client', () => {
   it('rejects an invalid thread cursor as an incompatible daemon', async () => {
     installApi({ invalidThread: true });
 
-    await expect(loadTasks()).resolves.toEqual({ tasks: [], state: 'incompatible' });
+    await expect(loadTasks()).resolves.toEqual({ tasks: [], projects: [], state: 'incompatible' });
   });
 
   it('shows pending Deep plan stages before they are materialized', async () => {
@@ -185,5 +184,105 @@ describe('control-plane client', () => {
     FakeSocket.instance.onmessage?.({ data: JSON.stringify({ cursor: 4 }) } as MessageEvent);
 
     expect(states).toEqual(['reconnecting', 'incompatible']);
+  });
+
+  it('maps snapshot projects and task project bindings', async () => {
+    sessionStorage.setItem('clew-session', '1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith('/api/v1/snapshot'))
+          return response({
+            version: 1,
+            cursor: 2,
+            generatedAt: '2026-08-28T09:42:00.000Z',
+            projects: [
+              {
+                id: 'PRJ-1',
+                name: 'Clew',
+                local_path: '/tmp/clew',
+                repository_root: '/tmp/clew',
+                default_branch: 'main',
+                created_at: '2026-08-28T09:00:00.000Z',
+                updated_at: '2026-08-28T09:00:00.000Z',
+              },
+            ],
+            tasks: [
+              {
+                show: {
+                  id: 'T-9',
+                  project_id: 'PRJ-1',
+                  state: 'DRAFT',
+                  contract: { title: 'Bound', goal: 'Bound goal', profile: 'quick' },
+                  stages: [],
+                  runs: [],
+                  harnessApprovals: [],
+                  agentSessions: [],
+                },
+                thread: { version: 1, items: [], nextCursor: null, hasMore: false },
+                history: { events: [] },
+              },
+            ],
+          });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const result = await loadTasks();
+
+    expect(result.state).toBe('connected');
+    expect(result.projects).toEqual([
+      {
+        id: 'PRJ-1',
+        name: 'Clew',
+        localPath: '/tmp/clew',
+        repositoryRoot: '/tmp/clew',
+        defaultBranch: 'main',
+        createdAt: '2026-08-28T09:00:00.000Z',
+        updatedAt: '2026-08-28T09:00:00.000Z',
+      },
+    ]);
+    expect(result.tasks[0].projectId).toBe('PRJ-1');
+  });
+
+  it('tolerates snapshots from daemons without project support', async () => {
+    sessionStorage.setItem('clew-session', '1');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+
+        if (url.endsWith('/api/v1/snapshot'))
+          return response({
+            version: 1,
+            cursor: 3,
+            generatedAt: '2026-08-28T09:42:00.000Z',
+            tasks: [
+              {
+                show: {
+                  id: 'T-legacy',
+                  state: 'READY',
+                  contract: { title: 'Legacy', goal: 'Legacy goal', profile: 'quick' },
+                  stages: [],
+                  runs: [],
+                  harnessApprovals: [],
+                  agentSessions: [],
+                },
+                thread: { version: 1, items: [], nextCursor: null, hasMore: false },
+                history: { events: [] },
+              },
+            ],
+          });
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const result = await loadTasks();
+
+    expect(result.state).toBe('connected');
+    expect(result.projects).toEqual([]);
+    expect(result.tasks[0].projectId).toBeNull();
   });
 });

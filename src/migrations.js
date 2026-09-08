@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -473,6 +473,28 @@ const MIGRATIONS = Object.freeze([
         if (typeof started?.baseSha === 'string' && typeof started?.branch === 'string')
           update.run(started.baseSha, started.branch, run.id);
       }
+    },
+  },
+  {
+    version: 22,
+    apply(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          local_path TEXT NOT NULL,
+          repository_root TEXT NOT NULL,
+          default_branch TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS projects_repository_root
+          ON projects(repository_root);
+      `);
+      const columns = db.prepare('PRAGMA table_info(tasks)').all();
+
+      if (!columns.some((column) => column.name === 'project_id'))
+        db.exec('ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT NULL');
     },
   },
 ]);

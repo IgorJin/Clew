@@ -1,6 +1,29 @@
-import type { Task, ThreadItem } from './types';
+import type { Project, Task, ThreadItem } from './types';
 
 const item = (data: Omit<ThreadItem, 'version'>): ThreadItem => ({ version: 1, ...data });
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+export const fixtureProjects: Project[] = [
+  {
+    id: 'PRJ-CLEW',
+    name: 'Clew',
+    localPath: '/tmp/clew',
+    repositoryRoot: '/tmp/clew',
+    defaultBranch: 'main',
+    createdAt: '2026-08-28T09:00:00.000Z',
+    updatedAt: '2026-08-28T10:04:00.000Z',
+  },
+  {
+    id: 'PRJ-LYKAR',
+    name: 'Lykar',
+    localPath: '/tmp/lykar',
+    repositoryRoot: '/tmp/lykar',
+    defaultBranch: 'main',
+    createdAt: '2026-08-28T09:00:00.000Z',
+    updatedAt: '2026-08-28T09:30:00.000Z',
+  },
+];
 
 const standardThread: ThreadItem[] = [
   item({
@@ -80,6 +103,7 @@ const standardThread: ThreadItem[] = [
 export const fixtureTasks: Task[] = [
   {
     id: 'CLEW-071',
+    projectId: 'PRJ-CLEW',
     createdAt: '2026-08-28T09:40:00.000Z',
     title: 'Replace auth middleware',
     goal: 'Move the local auth boundary behind a typed adapter.',
@@ -173,6 +197,7 @@ export const fixtureTasks: Task[] = [
   },
   {
     id: 'ACC-DEEP',
+    projectId: 'PRJ-CLEW',
     createdAt: '2026-08-28T09:55:00.000Z',
     title: 'Parallel cache migration',
     goal: 'Split backend and frontend work, then integrate safely.',
@@ -220,5 +245,126 @@ export const fixtureTasks: Task[] = [
         createdAt: '2026-08-28T09:55:00.000Z',
       },
     ],
+  },
+  {
+    id: 'CLW-EXEC',
+    projectId: 'PRJ-CLEW',
+    createdAt: '2026-08-28T09:50:00.000Z',
+    title: 'Session revocation rollout',
+    goal: 'Roll out session revocation behind the new auth boundary.',
+    profile: 'standard',
+    tags: ['auth'],
+    state: 'EXECUTING',
+    attention: null,
+    revision: null,
+    attempts: 1,
+    roles: ['worker', 'reviewer'],
+    runs: [
+      {
+        id: 'run-exec',
+        stageId: 'worker',
+        attempt: 1,
+        status: 'RUNNING',
+        harness: 'opencode',
+        sessionId: 'sess-exec',
+        workspace: '/tmp/clew-workspace',
+        commitSha: null,
+        startedAt: minutesAgo(12),
+        finishedAt: null,
+      },
+    ],
+    stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+    reviewed: false,
+    findings: 0,
+    thread: {
+      version: 1,
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+      redaction: 'public-safe',
+    },
+    events: [],
+    agentSessions: [],
+  },
+  {
+    id: 'CLW-DONE',
+    projectId: 'PRJ-CLEW',
+    createdAt: '2026-08-28T09:00:00.000Z',
+    title: 'Refresh token cleanup',
+    goal: 'Remove expired refresh tokens from storage.',
+    profile: 'quick',
+    tags: [],
+    state: 'COMPLETED',
+    attention: null,
+    revision: 'c3f0a11',
+    attempts: 1,
+    roles: ['worker'],
+    runs: [
+      {
+        id: 'run-done',
+        stageId: 'worker',
+        attempt: 1,
+        status: 'COMPLETED',
+        harness: 'codex',
+        sessionId: 'sess-done',
+        workspace: '/tmp/clew-workspace',
+        commitSha: 'c3f0a11',
+        startedAt: minutesAgo(90),
+        finishedAt: minutesAgo(60),
+      },
+    ],
+    stages: [{ id: 'worker', status: 'COMPLETED', kind: 'worker' }],
+    reviewed: true,
+    findings: 0,
+    thread: {
+      version: 1,
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+      redaction: 'public-safe',
+    },
+    events: [],
+    agentSessions: [],
+    completion: { at: minutesAgo(58), actor: 'test' },
+  },
+  {
+    id: 'CLW-FAIL',
+    projectId: 'PRJ-CLEW',
+    createdAt: '2026-08-28T09:20:00.000Z',
+    title: 'Cache invalidation probe',
+    goal: 'Probe cache invalidation paths.',
+    profile: 'quick',
+    tags: [],
+    state: 'FAILED',
+    attention: null,
+    revision: null,
+    attempts: 1,
+    roles: ['worker'],
+    runs: [
+      {
+        id: 'run-fail',
+        stageId: 'worker',
+        attempt: 1,
+        status: 'FAILED',
+        harness: 'codex',
+        sessionId: 'sess-fail',
+        workspace: '/tmp/clew-workspace',
+        commitSha: null,
+        startedAt: minutesAgo(30),
+        finishedAt: minutesAgo(28),
+      },
+    ],
+    stages: [{ id: 'worker', status: 'FAILED', kind: 'worker' }],
+    reviewed: false,
+    findings: 1,
+    thread: {
+      version: 1,
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+      redaction: 'public-safe',
+    },
+    events: [],
+    agentSessions: [],
   },
 ];

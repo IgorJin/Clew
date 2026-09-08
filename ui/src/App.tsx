@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
   Activity,
   AlertTriangle,
   ArrowUpRight,
+  Bell,
   Check,
   ChevronDown,
   ChevronRight,
@@ -12,7 +13,9 @@ import {
   GitBranch,
   Inbox,
   Laptop,
+  Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   SquareTerminal,
   Terminal,
@@ -21,9 +24,17 @@ import {
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
 import { rolesForProfile } from './api';
-import type { AgentRole, AgentSession, NextStep, Run, Task, TaskState, ThreadItem } from './types';
+import type {
+  AgentRole,
+  AgentSession,
+  NextStep,
+  Project,
+  Run,
+  Task,
+  TaskState,
+  ThreadItem,
+} from './types';
 import { TerminalPane } from './TerminalPane';
-import packageMetadata from '../package.json';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -84,6 +95,103 @@ const kindLabel: Record<string, string> = {
   worker_output: 'Output',
 };
 
+type ProjectAwareness = { running: number; waiting: number };
+
+function projectAwareness(all: Task[], projectId: string): ProjectAwareness {
+  let running = 0;
+  let waiting = 0;
+
+  for (const task of all) {
+    if (task.projectId !== projectId) continue;
+    const group = statusGroup[task.state];
+
+    if (group === 'active') running += 1;
+    if (group === 'waiting') waiting += 1;
+  }
+
+  return { running, waiting };
+}
+
+type AttentionItem = {
+  task: Task;
+  project: Project;
+};
+
+function globalAttention(all: Task[], projects: Project[]): AttentionItem[] {
+  const items: AttentionItem[] = [];
+
+  for (const task of all) {
+    const group = statusGroup[task.state];
+
+    if (group !== 'waiting') continue;
+    const project = projects.find((entry) => entry.id === task.projectId) ?? null;
+
+    if (!project) continue;
+    items.push({ task, project });
+  }
+
+  return items;
+}
+
+function taskProgress(state: TaskState): number {
+  switch (state) {
+    case 'DRAFT':
+      return 5;
+    case 'PLAN_READY':
+      return 15;
+    case 'QUEUED':
+      return 25;
+    case 'RECOVERING':
+      return 35;
+    case 'EXECUTING':
+      return 45;
+    case 'VERIFYING':
+      return 60;
+    case 'REVIEWING':
+      return 75;
+    case 'WAITING_FOR_HUMAN':
+      return 70;
+    case 'READY':
+      return 90;
+    case 'COMPLETED':
+      return 100;
+    case 'FAILED':
+      return 20;
+    case 'CANCELLED':
+      return 0;
+    case 'BLOCKED':
+      return 30;
+    default:
+      return 0;
+  }
+}
+
+function waveTone(state: TaskState): string {
+  if (state === 'COMPLETED' || state === 'READY') return 'green';
+  const group = statusGroup[state];
+  if (group === 'error') return 'red';
+  if (group === 'waiting') return 'amber';
+  if (group === 'active') return 'blue';
+  return 'accent';
+}
+
+function Wave({ state }: { state: TaskState }) {
+  const fill = taskProgress(state);
+  return (
+    <div
+      className={`progress wave-${waveTone(state)}`}
+      role="progressbar"
+      aria-valuenow={fill}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={`${stateLabel[state]} · ${fill}%`}
+      title={`${stateLabel[state]} · ${fill}% complete`}
+    >
+      <span className="progress-fill" style={{ width: `${fill}%` }} />
+    </div>
+  );
+}
+
 function Status({ state }: { state: TaskState }) {
   return (
     <span className={`status status-${state.toLowerCase()}`}>
@@ -130,9 +238,115 @@ function agentIcon(role: AgentRole) {
   return <Terminal size={12} />;
 }
 
-function taskIdFromLocation() {
-  const match = window.location.pathname.match(/^\/tasks\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+type Route = {
+  projectId: string | null;
+  taskId: string | null;
+  view: 'overview' | 'tasks';
+};
+
+function routeFromLocation(): Route {
+  const pathname = window.location.pathname;
+  const taskMatch = pathname.match(/^\/projects\/([^/]+)\/tasks\/([^/]+)\/?$/);
+
+  if (taskMatch)
+    return {
+      projectId: decodeURIComponent(taskMatch[1]),
+      taskId: decodeURIComponent(taskMatch[2]),
+      view: 'tasks',
+    };
+  const overviewMatch = pathname.match(/^\/projects\/([^/]+)\/overview\/?$/);
+
+  if (overviewMatch)
+    return {
+      projectId: decodeURIComponent(overviewMatch[1]),
+      taskId: null,
+      view: 'overview',
+    };
+  const projectMatch = pathname.match(/^\/projects\/([^/]+)\/?$/);
+
+  if (projectMatch)
+    return {
+      projectId: decodeURIComponent(projectMatch[1]),
+      taskId: null,
+      view: 'tasks',
+    };
+  const legacyMatch = pathname.match(/^\/tasks\/([^/]+)\/?$/);
+
+  if (legacyMatch)
+    return { projectId: null, taskId: decodeURIComponent(legacyMatch[1]), view: 'tasks' };
+
+  return { projectId: null, taskId: null, view: 'tasks' };
+}
+
+function resolveDefaultRoute(current: Route, projects: Project[], tasks: Task[]): Route {
+  let projectId = current.projectId;
+
+  if (projectId && !projects.some((entry) => entry.id === projectId)) projectId = null;
+  if (!projectId && current.taskId) {
+    const ownerId = tasks.find((entry) => entry.id === current.taskId)?.projectId ?? null;
+
+    if (ownerId && projects.some((entry) => entry.id === ownerId)) projectId = ownerId;
+  }
+  if (!projectId) {
+    const stored = storedProjectId();
+
+    if (stored && projects.some((entry) => entry.id === stored)) projectId = stored;
+  }
+  if (!projectId) projectId = projects[0]?.id ?? null;
+  if (!projectId) return current;
+
+  let taskId = current.view === 'overview' ? null : current.taskId;
+  const scoped = scopedTasks(tasks, projectId);
+
+  if (taskId && !scoped.some((entry) => entry.id === taskId)) taskId = null;
+  if (!taskId && current.view !== 'overview') {
+    taskId = storedTaskId(projectId);
+    if (taskId && !scoped.some((entry) => entry.id === taskId)) taskId = null;
+    if (!taskId) taskId = scoped[0]?.id ?? null;
+  }
+
+  return { projectId, taskId, view: current.view };
+}
+
+function routePath(projectId: string, taskId: string | null, view: 'overview' | 'tasks'): string {
+  if (taskId)
+    return `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`;
+  if (view === 'overview') return `/projects/${encodeURIComponent(projectId)}/overview`;
+
+  return `/projects/${encodeURIComponent(projectId)}`;
+}
+
+const PROJECT_STORAGE_PREFIX = 'clew.v1';
+
+function readPreference(key: string): string | null {
+  try {
+    return localStorage.getItem(`${PROJECT_STORAGE_PREFIX}.${key}`);
+  } catch {
+    return null;
+  }
+}
+
+function writePreference(key: string, value: string) {
+  try {
+    localStorage.setItem(`${PROJECT_STORAGE_PREFIX}.${key}`, value);
+  } catch {
+    // Private browsing or disabled storage must never break navigation.
+  }
+}
+
+function storedProjectId(): string | null {
+  return readPreference('current-project');
+}
+
+function storedTaskId(projectId: string): string | null {
+  return readPreference(`last-task.${projectId}`);
+}
+
+/** Legacy tasks without a project stay visible instead of vanishing after the upgrade. */
+function scopedTasks(all: Task[], projectId: string | null): Task[] {
+  if (!projectId) return [];
+
+  return all.filter((task) => task.projectId === projectId || task.projectId == null);
 }
 
 function Logo() {
@@ -145,6 +359,436 @@ function Logo() {
       <span className="brand-slash">/</span>
       <span className="brand-context">control plane</span>
     </div>
+  );
+}
+
+function ProjectSwitcher({
+  projects,
+  currentId,
+  awareness,
+  onSelect,
+  onAdd,
+}: {
+  projects: Project[];
+  currentId: string;
+  awareness: Record<string, ProjectAwareness>;
+  onSelect: (projectId: string) => void;
+  onAdd: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const current = projects.find((entry) => entry.id === currentId);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node))
+        setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className="project-switcher" ref={containerRef}>
+      <button
+        ref={buttonRef}
+        className="project-switcher-button"
+        onClick={() => setOpen(!open)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Project: ${current?.name ?? 'none'}`}
+      >
+        <span className="project-switcher-mark">
+          <GitBranch size={13} />
+        </span>
+        <span className="project-switcher-name">{current?.name ?? 'Select project'}</span>
+        <ChevronDown size={12} className="project-switcher-caret" />
+      </button>
+      {open && (
+        <div className="project-menu">
+          {projects.map((entry) => {
+            const a = awareness[entry.id];
+
+            return (
+              <button
+                key={entry.id}
+                className={`project-menu-item${entry.id === currentId ? ' active' : ''}`}
+                aria-current={entry.id === currentId}
+                onClick={() => {
+                  setOpen(false);
+                  onSelect(entry.id);
+                }}
+              >
+                <GitBranch size={12} />
+                <span className="project-menu-name">{entry.name}</span>
+                {a && (a.running > 0 || a.waiting > 0) && (
+                  <span className="project-menu-badges">
+                    {a.running > 0 && <span className="badge badge-blue">{a.running} running</span>}
+                    {a.waiting > 0 && (
+                      <span className="badge badge-amber">{a.waiting} waiting</span>
+                    )}
+                  </span>
+                )}
+                {entry.id === currentId && <Check size={12} className="project-menu-check" />}
+              </button>
+            );
+          })}
+          <div className="project-menu-sep" />
+          <button
+            className="project-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onAdd();
+            }}
+          >
+            <Plus size={12} />
+            <span className="project-menu-name">Add project</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GlobalAttention({
+  items,
+  onSelect,
+}: {
+  items: AttentionItem[];
+  onSelect: (projectId: string, taskId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node))
+        setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  if (!items.length) return null;
+
+  return (
+    <div className="global-attention" ref={containerRef}>
+      <button
+        className="icon-button attention-trigger"
+        aria-label={`${items.length} attention item${items.length === 1 ? '' : 's'}`}
+        onClick={() => setOpen(!open)}
+      >
+        <Bell size={14} />
+        <span className="attention-count">{items.length}</span>
+      </button>
+      {open && (
+        <div className="attention-dropdown">
+          <div className="attention-dropdown-head">
+            <span>Needs attention</span>
+          </div>
+          {items.map(({ task, project }) => (
+            <button
+              key={task.id}
+              className="attention-dropdown-item"
+              onClick={() => {
+                setOpen(false);
+                onSelect(project.id, task.id);
+              }}
+            >
+              <span className="task-id">{task.id}</span>
+              <span className="attention-dropdown-title">{task.title}</span>
+              <span className="attention-dropdown-project">{project.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CommandPalette({
+  projects,
+  tasks,
+  onSelect,
+}: {
+  projects: Project[];
+  tasks: Task[];
+  onSelect: (projectId: string, taskId: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const items = useMemo(() => {
+    const all: { projectId: string; projectName: string; taskId: string | null; label: string }[] =
+      [];
+
+    for (const project of projects) {
+      all.push({
+        projectId: project.id,
+        projectName: project.name,
+        taskId: null,
+        label: project.name,
+      });
+      for (const task of tasks) {
+        if (task.projectId !== project.id) continue;
+        all.push({
+          projectId: project.id,
+          projectName: project.name,
+          taskId: task.id,
+          label: `${task.id} — ${task.title}`,
+        });
+      }
+    }
+
+    if (!query.trim()) return all;
+    const lower = query.toLowerCase();
+
+    return all.filter(
+      (entry) =>
+        entry.label.toLowerCase().includes(lower) ||
+        entry.projectName.toLowerCase().includes(lower) ||
+        (entry.taskId ?? '').toLowerCase().includes(lower),
+    );
+  }, [projects, tasks, query]);
+
+  const openRef = useRef(open);
+  openRef.current = open;
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  useLayoutEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setOpen((v) => !v);
+
+        return;
+      }
+      if (!openRef.current) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveIndex((i) => Math.min(i + 1, itemsRef.current.length - 1));
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveIndex((i) => Math.max(i - 1, 0));
+      } else if (event.key === 'Enter' && itemsRef.current[activeIndexRef.current]) {
+        event.preventDefault();
+        const entry = itemsRef.current[activeIndexRef.current];
+
+        setOpen(false);
+        onSelectRef.current(entry.projectId, entry.taskId);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActiveIndex(0);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
+
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop palette-backdrop" role="presentation">
+      <div className="command-palette" role="dialog" aria-label="Command palette">
+        <div className="palette-input-wrap">
+          <Search size={14} className="palette-search-icon" />
+          <input
+            ref={inputRef}
+            className="palette-input"
+            placeholder="Switch project or task…"
+            value={query}
+            onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
+          />
+        </div>
+        <div className="palette-list">
+          {items.length === 0 && <div className="palette-empty">No results</div>}
+          {items.map((entry, i) => (
+            <button
+              key={`${entry.projectId}-${entry.taskId ?? 'proj'}`}
+              className={`palette-item${i === activeIndex ? ' active' : ''}`}
+              onClick={() => {
+                setOpen(false);
+                onSelect(entry.projectId, entry.taskId);
+              }}
+              onMouseEnter={() => setActiveIndex(i)}
+            >
+              {entry.taskId ? (
+                <span className="palette-item-task">
+                  <span className="task-id">{entry.taskId}</span>
+                  {entry.label.slice(entry.taskId.length)}
+                </span>
+              ) : (
+                <span className="palette-item-project">
+                  <GitBranch size={12} />
+                  {entry.projectName}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="palette-footer">
+          <span>↑↓ navigate</span>
+          <span>↵ select</span>
+          <span>esc close</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectSidebar({
+  projects,
+  projectId,
+  view,
+  tasks,
+  selectedTaskId,
+  statusFilter,
+  awareness,
+  onSelectProject,
+  onSelectView,
+  onSelectTask,
+  onSetStatusFilter,
+  onCreateTask,
+  onAddProject,
+}: {
+  projects: Project[];
+  projectId: string;
+  view: 'overview' | 'tasks';
+  tasks: Task[];
+  selectedTaskId: string | null;
+  statusFilter: string | null;
+  awareness: Record<string, ProjectAwareness>;
+  onSelectProject: (projectId: string) => void;
+  onSelectView: (view: 'overview' | 'tasks') => void;
+  onSelectTask: (taskId: string) => void;
+  onSetStatusFilter: (filter: string | null) => void;
+  onCreateTask: () => void;
+  onAddProject: () => void;
+}) {
+  return (
+    <aside className="sidebar">
+      <ProjectSwitcher
+        projects={projects}
+        currentId={projectId}
+        awareness={awareness}
+        onSelect={onSelectProject}
+        onAdd={onAddProject}
+      />
+      <nav className="sidebar-nav" aria-label="Project navigation">
+        <button
+          className={`sidebar-nav-item${view === 'overview' ? ' active' : ''}`}
+          onClick={() => onSelectView('overview')}
+        >
+          Overview
+        </button>
+        <button
+          className={`sidebar-nav-item${view === 'tasks' ? ' active' : ''}`}
+          onClick={() => onSelectView('tasks')}
+        >
+          Tasks
+        </button>
+      </nav>
+      <div className="sidebar-heading">
+        <span>Tasks</span>
+        <button className="text-button" onClick={onCreateTask}>
+          + New
+        </button>
+        <span className="count">{tasks.length}</span>
+      </div>
+      <div className="sidebar-filters">
+        {[
+          { key: null, label: 'All' },
+          { key: 'waiting', label: 'Waiting' },
+          { key: 'active', label: 'Active' },
+          { key: 'other', label: 'Other' },
+          { key: 'error', label: 'Failed' },
+        ].map((f) => (
+          <button
+            key={f.key ?? 'all'}
+            className={`filter-chip${statusFilter === f.key ? ' active' : ''}`}
+            onClick={() => onSetStatusFilter(f.key)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <div className="task-list">
+        {tasks.map((entry) => (
+          <button
+            className={`task-row ${entry.id === selectedTaskId ? 'selected' : ''}${entry.interactionStatus === 'waiting_for_operator' ? ' task-row-waiting' : ''}`}
+            key={entry.id}
+            onClick={() => onSelectTask(entry.id)}
+          >
+            <div className="task-row-top">
+              <span className="task-id">{entry.id}</span>
+              <Status state={entry.state} />
+            </div>
+            <strong>{entry.title}</strong>
+            {entry.interactionStatus === 'waiting_for_operator' && (
+              <span className="task-interaction-status">
+                <SquareTerminal size={12} /> Waiting for operator
+              </span>
+            )}
+            {entry.attention && (
+              <span className="attention">
+                <AlertTriangle size={11} />
+                {entry.attention.replaceAll('_', ' ')}
+              </span>
+            )}
+            <span className="task-meta">
+              {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
+            </span>
+            <Wave state={entry.state} />
+          </button>
+        ))}
+      </div>
+      <div className="sidebar-footer">
+        <span className="version">v0.4</span>
+      </div>
+    </aside>
   );
 }
 
@@ -183,6 +827,153 @@ export function Thread({ items }: { items: ThreadItem[] }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function formatElapsed(value?: string | null): string | null {
+  if (!value) return null;
+  const start = new Date(value).getTime();
+
+  if (!Number.isFinite(start)) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - start) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function attentionLabel(task: Task): string | null {
+  if (task.attention === 'PLAN_APPROVAL_REQUIRED') return 'Plan approval required';
+  if (task.attention === 'HUMAN_ACTION_REQUIRED') return 'Operator input required';
+  if (task.interactionStatus === 'waiting_for_operator') return 'Waiting for operator';
+  if (task.state === 'BLOCKED') return 'Blocked';
+
+  return null;
+}
+
+function lastEventAt(task: Task): string | null {
+  return task.thread.items.at(-1)?.at ?? task.runs.at(-1)?.startedAt ?? null;
+}
+
+function OverviewSection({
+  title,
+  tasks,
+  meta,
+  onSelectTask,
+}: {
+  title: string;
+  tasks: Task[];
+  meta: (task: Task) => string;
+  onSelectTask: (taskId: string) => void;
+}) {
+  if (!tasks.length) return null;
+
+  return (
+    <section className="overview-section">
+      <div className="overview-section-head">
+        <h3>{title}</h3>
+        <span className="small-muted">{tasks.length}</span>
+      </div>
+      <div className="overview-list">
+        {tasks.map((task) => (
+          <button className="overview-row" key={task.id} onClick={() => onSelectTask(task.id)}>
+            <div className="overview-row-top">
+              <span className="task-id">{task.id}</span>
+              <Status state={task.state} />
+            </div>
+            <strong>{task.title}</strong>
+            <span className="overview-row-meta">{meta(task)}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Overview({
+  project,
+  tasks,
+  onSelectTask,
+  onCreateTask,
+}: {
+  project: Project;
+  tasks: Task[];
+  onSelectTask: (taskId: string) => void;
+  onCreateTask: () => void;
+}) {
+  const attention = tasks.filter((task) => statusGroup[task.state] === 'waiting');
+  const running = tasks.filter((task) => statusGroup[task.state] === 'active');
+  const ready = tasks.filter((task) => ['DRAFT', 'PLAN_READY', 'READY'].includes(task.state));
+  const completed = tasks.filter((task) => task.state === 'COMPLETED');
+  const failed = tasks.filter((task) => ['FAILED', 'CANCELLED'].includes(task.state));
+
+  const attentionMeta = (task: Task) => {
+    const label = attentionLabel(task) ?? task.state.toLowerCase();
+    const elapsed = formatElapsed(lastEventAt(task));
+
+    return elapsed ? `${label} · ${elapsed}` : label;
+  };
+  const runningMeta = (task: Task) => {
+    const run = task.runs.at(-1);
+    const harness = run?.harness ?? task.sessionHarness ?? 'codex';
+    const stage = run?.stageId ?? task.stages.at(-1)?.id ?? 'worker';
+    const elapsed = formatElapsed(run?.startedAt ?? lastEventAt(task));
+
+    return `${stage} · ${harness}${elapsed ? ` · ${elapsed}` : ''}`;
+  };
+  const readyMeta = (task: Task) => {
+    if (task.state === 'READY') return 'Ready';
+    if (task.state === 'PLAN_READY') return 'Plan ready';
+
+    return 'Draft';
+  };
+  const completedMeta = (task: Task) => {
+    const elapsed = formatElapsed(task.completion?.at);
+
+    return elapsed ? `completed ${elapsed} ago` : 'completed';
+  };
+  const failedMeta = (task: Task) => (task.state === 'FAILED' ? 'Failed' : 'Cancelled');
+
+  return (
+    <div className="overview">
+      <div className="overview-head">
+        <div className="overview-title">
+          <span className="eyebrow">Project</span>
+          <h2>{project.name}</h2>
+        </div>
+        <button className="button primary small" onClick={onCreateTask}>
+          <Plus size={12} /> New task
+        </button>
+      </div>
+      <OverviewSection
+        title="Needs attention"
+        tasks={attention}
+        meta={attentionMeta}
+        onSelectTask={onSelectTask}
+      />
+      <OverviewSection
+        title="Running"
+        tasks={running}
+        meta={runningMeta}
+        onSelectTask={onSelectTask}
+      />
+      <OverviewSection title="Ready" tasks={ready} meta={readyMeta} onSelectTask={onSelectTask} />
+      <OverviewSection
+        title="Recently completed"
+        tasks={completed}
+        meta={completedMeta}
+        onSelectTask={onSelectTask}
+      />
+      <OverviewSection
+        title="Failed"
+        tasks={failed}
+        meta={failedMeta}
+        onSelectTask={onSelectTask}
+      />
     </div>
   );
 }
@@ -732,6 +1523,8 @@ function AgentGrid({
 type CreateTaskInput = {
   title: string;
   body: string;
+  profile: 'quick' | 'standard' | 'deep';
+  tags: string;
 };
 
 function autoTitle(body: string): string {
@@ -749,6 +1542,8 @@ function CreateTask({
 }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [profile, setProfile] = useState<'quick' | 'standard' | 'deep'>('quick');
+  const [tags, setTags] = useState('');
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const handleBodyInput = (event: Event) => {
@@ -769,6 +1564,8 @@ function CreateTask({
     void onCreate({
       title: cleanTitle,
       body: body.trim(),
+      profile,
+      tags: tags.trim(),
     });
   };
 
@@ -801,8 +1598,42 @@ function CreateTask({
           onInput={(event) => setTitle(event.currentTarget.value)}
           placeholder={autoTitle(body) || 'Short title'}
         />
+        <label>Complexity</label>
+        <div className="profile-selector">
+          {(
+            [
+              ['quick', 'Quick'],
+              ['standard', 'Standard'],
+              ['deep', 'Deep'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={`profile-chip ${profile === key ? 'selected' : ''}`}
+              onClick={() => setProfile(key)}
+              aria-pressed={profile === key}
+            >
+              <span className="profile-name">{label}</span>
+              <span className="profile-hint">
+                {key === 'quick'
+                  ? 'worker'
+                  : key === 'standard'
+                    ? '+ review'
+                    : 'architect + review'}
+              </span>
+            </button>
+          ))}
+        </div>
+        <label htmlFor="task-tags">Tags</label>
+        <input
+          id="task-tags"
+          value={tags}
+          onInput={(event) => setTags(event.currentTarget.value)}
+          placeholder="comma, separated"
+        />
         <p className="small-muted">
-          Clew will analyze readiness and recommend an execution profile after creation.
+          Created as Draft. You'll need to approve the next step before it starts.
         </p>
         <div className="modal-actions">
           <button type="button" className="button secondary" onClick={onClose}>
@@ -959,6 +1790,81 @@ function FinalizationGate({
   );
 }
 
+function AddProject({
+  onClose,
+  onAdd,
+}: {
+  onClose: () => void;
+  onAdd: (folder: string, name: string) => Promise<void>;
+}) {
+  const [folder, setFolder] = useState('');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: Event) => {
+    event.preventDefault();
+    if (!folder.trim() || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onAdd(folder.trim(), name.trim());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not add project');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="create-task add-project" onSubmit={(event) => void submit(event)}>
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">Local repository</span>
+            <h2>Add project</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <label htmlFor="project-folder">Folder</label>
+        <input
+          id="project-folder"
+          value={folder}
+          onInput={(event) => setFolder(event.currentTarget.value)}
+          placeholder="/Users/me/dev/clew"
+          required
+        />
+        <label htmlFor="project-name">Project name</label>
+        <input
+          id="project-name"
+          value={name}
+          onInput={(event) => setName(event.currentTarget.value)}
+          placeholder="Clew"
+        />
+        <p className="small-muted">
+          The folder must be a local Git repository. Its repository root, default branch, and name
+          are detected automatically.
+        </p>
+        {error && (
+          <p className="add-project-error" role="alert">
+            <AlertTriangle size={12} />
+            {error}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="button primary" disabled={busy}>
+            {busy ? 'Adding…' : 'Add project'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 const WORKFLOW_STEPS = [
   { key: 'plan', label: 'Plan' },
   { key: 'execute', label: 'Execute' },
@@ -1023,14 +1929,14 @@ function StepIndicator({
 
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [selected, setSelected] = useState(
-    () => taskIdFromLocation() ?? sessionStorage.getItem('clew-selected-task') ?? 'CLEW-071',
-  );
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [route, setRoute] = useState<Route>(() => routeFromLocation());
   const [connection, setConnection] = useState<ConnectionState>('reconnecting');
   const [diagnostic, setDiagnostic] = useState(false);
   const [notice, setNotice] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState('plan');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -1046,45 +1952,44 @@ export default function App() {
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshTimer = useRef<number | undefined>(undefined);
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
-
-  const selectTask = useCallback((taskId: string) => {
-    setSelected(taskId);
-    sessionStorage.setItem('clew-selected-task', taskId);
-    if (window.location.pathname !== `/tasks/${encodeURIComponent(taskId)}`)
-      window.history.pushState({}, '', `/tasks/${encodeURIComponent(taskId)}`);
-  }, []);
+  const routeRef = useRef(route);
+  routeRef.current = route;
 
   useEffect(() => {
-    const onPopState = () => {
-      const taskId = taskIdFromLocation();
-      if (taskId) {
-        setSelected(taskId);
-        sessionStorage.setItem('clew-selected-task', taskId);
-      }
-    };
+    const onPopState = () => setRoute(routeFromLocation());
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const refresh = useCallback(() => {
     if (refreshInFlight.current) return refreshInFlight.current;
-    const operation = loadTasks().then(({ tasks: next, state }) => {
-      setConnection(state);
-      if (state === 'connected' || state === 'fixture') {
-        setTasks(next);
-        setLastUpdatedAt(new Date());
-        if (next[0] && !next.some((task) => task.id === selectedRef.current)) {
-          selectTask(next[0].id);
+    const operation = loadTasks().then(
+      ({ tasks: nextTasks, projects: nextProjects = [], state }) => {
+        setConnection(state);
+        if (state === 'connected' || state === 'fixture') {
+          setTasks(nextTasks);
+          setProjects(nextProjects);
+          setLastUpdatedAt(new Date());
+          const resolved = resolveDefaultRoute(routeRef.current, nextProjects, nextTasks);
+          const changed =
+            resolved.projectId !== routeRef.current.projectId ||
+            resolved.taskId !== routeRef.current.taskId ||
+            resolved.view !== routeRef.current.view;
+
+          if (changed) {
+            const path = routePath(resolved.projectId!, resolved.taskId, resolved.view);
+
+            setRoute(resolved);
+            if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+          }
         }
-      }
-    });
+      },
+    );
     refreshInFlight.current = operation.finally(() => {
       refreshInFlight.current = null;
     });
     return refreshInFlight.current;
-  }, [selectTask]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -1115,10 +2020,127 @@ export default function App() {
     };
   }, [refresh]);
 
-  const task = useMemo(
-    () => tasks.find((entry) => entry.id === selected) ?? tasks[0],
-    [selected, tasks],
+  const project = useMemo(() => {
+    if (route.projectId) {
+      const direct = projects.find((entry) => entry.id === route.projectId);
+      if (direct) return direct;
+    }
+    if (route.taskId) {
+      const ownerId = tasks.find((entry) => entry.id === route.taskId)?.projectId ?? null;
+      const owner = ownerId ? projects.find((entry) => entry.id === ownerId) : null;
+      if (owner) return owner;
+    }
+    const stored = storedProjectId();
+    if (stored) {
+      const candidate = projects.find((entry) => entry.id === stored);
+      if (candidate) return candidate;
+    }
+    return projects[0] ?? null;
+  }, [projects, tasks, route.projectId, route.taskId]);
+
+  const projectTasks = useMemo(
+    () => (project ? scopedTasks(tasks, project.id) : []),
+    [tasks, project],
   );
+
+  const awareness = useMemo(() => {
+    const map: Record<string, ProjectAwareness> = {};
+
+    for (const p of projects) map[p.id] = projectAwareness(tasks, p.id);
+
+    return map;
+  }, [tasks, projects]);
+
+  const attentionItems = useMemo(() => globalAttention(tasks, projects), [tasks, projects]);
+
+  const task = useMemo(() => {
+    if (!project || route.view === 'overview') return null;
+    if (route.taskId) {
+      const direct = projectTasks.find((entry) => entry.id === route.taskId);
+      if (direct) return direct;
+    }
+    const stored = storedTaskId(project.id);
+    const fromStored = stored ? projectTasks.find((entry) => entry.id === stored) : null;
+
+    return fromStored ?? projectTasks[0] ?? null;
+  }, [project, projectTasks, route.taskId, route.view]);
+
+  const selectProject = (projectId: string) => {
+    writePreference('current-project', projectId);
+    const targetTasks = scopedTasks(tasks, projectId);
+    const last = storedTaskId(projectId);
+    const taskId =
+      last && targetTasks.some((entry) => entry.id === last) ? last : (targetTasks[0]?.id ?? null);
+    setStatusFilter(null);
+    setRoute({ projectId, taskId, view: 'tasks' });
+    const path = routePath(projectId, taskId, 'tasks');
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  };
+
+  const selectTask = (taskId: string) => {
+    if (!project) return;
+    writePreference(`last-task.${project.id}`, taskId);
+    setRoute({ projectId: project.id, taskId, view: 'tasks' });
+    const path = routePath(project.id, taskId, 'tasks');
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  };
+
+  const selectView = (nextView: 'overview' | 'tasks') => {
+    if (!project) return;
+    const taskId = nextView === 'overview' ? null : (task?.id ?? null);
+    setRoute({ projectId: project.id, taskId, view: nextView });
+    const path = routePath(project.id, taskId, nextView);
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  };
+
+  const selectProjectAndTask = (projectId: string, taskId: string | null) => {
+    writePreference('current-project', projectId);
+    if (taskId) writePreference(`last-task.${projectId}`, taskId);
+    const targetTasks = scopedTasks(tasks, projectId);
+    const resolvedTaskId =
+      taskId && targetTasks.some((entry) => entry.id === taskId)
+        ? taskId
+        : (targetTasks[0]?.id ?? null);
+    setStatusFilter(null);
+    setRoute({ projectId, taskId: resolvedTaskId, view: 'tasks' });
+    const path = routePath(projectId, resolvedTaskId, 'tasks');
+    if (window.location.pathname !== path) window.history.pushState({}, '', path);
+  };
+
+  const addProject = async (folder: string, name: string) => {
+    try {
+      const result = await execute(['project', 'add', folder, ...(name ? ['--name', name] : [])]);
+      if ((result as { fixture?: boolean } | null)?.fixture) {
+        const id = `PRJ-${Date.now()}`;
+        const created: Project = {
+          id,
+          name: name || folder.split('/').filter(Boolean).pop() || 'Project',
+          localPath: folder,
+          repositoryRoot: folder,
+          defaultBranch: 'main',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        setProjects((current) => [...current, created]);
+        setNotice(`Project added: ${created.name}`);
+        setAddProjectOpen(false);
+        selectProject(id);
+      } else {
+        await refresh();
+        const created = result as { id?: string } | null;
+        if (created?.id) {
+          setNotice('Project added');
+          setAddProjectOpen(false);
+          selectProject(created.id);
+        } else setNotice('Project added');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not add project';
+
+      setNotice(message);
+      throw new Error(message);
+    }
+  };
 
   useEffect(() => {
     setSelectedChangeRunId((current) => {
@@ -1225,25 +2247,40 @@ export default function App() {
 
   const sortedTasks = useMemo(() => {
     const list = statusFilter
-      ? tasks.filter((t) => {
+      ? projectTasks.filter((t) => {
           if (statusFilter === 'waiting') return statusGroup[t.state] === 'waiting';
           if (statusFilter === 'error') return statusGroup[t.state] === 'error';
           if (statusFilter === 'active') return statusGroup[t.state] === 'active';
           if (statusFilter === 'other') return statusGroup[t.state] === 'other';
           return true;
         })
-      : tasks;
+      : projectTasks;
     return [...list].sort(
       (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
     );
-  }, [tasks, statusFilter]);
+  }, [projectTasks, statusFilter]);
 
-  const createTask = async ({ title, body }: CreateTaskInput) => {
+  const createTask = async ({ title, body, profile, tags }: CreateTaskInput) => {
     if (!canMutateFor(connection)) {
       setNotice('Actions are disabled while the control plane is disconnected');
       return;
     }
-    const args = ['task', 'create', '--title', title, '--description', body, '--profile', 'auto'];
+    const tagList = tags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const args = [
+      'task',
+      'create',
+      ...(project ? ['--project', project.id] : []),
+      '--title',
+      title,
+      '--description',
+      body,
+      '--profile',
+      profile,
+      ...tagList.flatMap((tag) => ['--tags', tag]),
+    ];
     try {
       const result = await execute(args);
       if ((result as { fixture?: boolean } | null)?.fixture) {
@@ -1251,11 +2288,12 @@ export default function App() {
         setTasks((current) => [
           {
             id,
+            projectId: project?.id ?? null,
             createdAt: new Date().toISOString(),
             title,
             goal: body,
-            profile: 'auto',
-            tags: [],
+            profile,
+            tags: tagList,
             analysis: {
               version: 1,
               kind: { value: 'feature', confidence: 0.62 },
@@ -1304,37 +2342,161 @@ export default function App() {
     }
   };
 
-  if (!task) {
+  if (!project) {
     const unavailable = connection === 'disconnected' || connection === 'incompatible';
+    const waiting = connection === 'reconnecting';
     return (
       <div className="app">
         <header className="topbar">
           <Logo />
-          <Connection state={connection} />
+          <div className="topbar-right">
+            <Connection state={connection} />
+          </div>
         </header>
         <main className="empty">
           {unavailable ? <WifiOff size={24} /> : <Inbox size={24} />}
-          <h1>{unavailable ? 'Control plane unavailable' : 'No tasks yet'}</h1>
+          <h1>
+            {unavailable
+              ? 'Control plane unavailable'
+              : waiting
+                ? 'Connecting…'
+                : 'Welcome to Clew'}
+          </h1>
           <p>
             {connection === 'incompatible'
               ? 'This UI cannot safely read the daemon response. Update Clew and reload.'
               : connection === 'disconnected'
                 ? 'Start the local daemon, then retry the connection.'
-                : 'Create a task with the Clew CLI, then refresh this view.'}
+                : waiting
+                  ? 'Loading your projects.'
+                  : 'Add a local Git project to start managing agentic development.'}
           </p>
           <div className="empty-actions">
-            <button className="button primary" onClick={() => setCreateOpen(true)}>
-              <Check size={14} /> Create task
-            </button>
-            <button className="button secondary" onClick={() => void refresh()}>
-              <RefreshCw size={14} /> Retry
-            </button>
+            {unavailable || waiting ? (
+              <button className="button secondary" onClick={() => void refresh()}>
+                <RefreshCw size={14} /> Retry
+              </button>
+            ) : (
+              <button className="button primary" onClick={() => setAddProjectOpen(true)}>
+                <Plus size={14} /> Add project
+              </button>
+            )}
           </div>
         </main>
-        {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
+        {!unavailable && !waiting && addProjectOpen && (
+          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+        )}
       </div>
     );
   }
+
+  if (!projectTasks.length) {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <Logo />
+          <div className="topbar-right">
+            <Connection state={connection} />
+            <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+          </div>
+        </header>
+        <div className="workspace">
+          <ProjectSidebar
+            projects={projects}
+            projectId={project.id}
+            view={route.view}
+            tasks={[]}
+            selectedTaskId={null}
+            statusFilter={statusFilter}
+            awareness={awareness}
+            onSelectProject={selectProject}
+            onSelectView={selectView}
+            onSelectTask={selectTask}
+            onSetStatusFilter={setStatusFilter}
+            onCreateTask={() => setCreateOpen(true)}
+            onAddProject={() => setAddProjectOpen(true)}
+          />
+          <main className="content">
+            <div className="content-inner">
+              <div className="empty">
+                <Inbox size={24} />
+                <h1>No tasks yet</h1>
+                <p>{project.name}</p>
+                <div className="empty-actions">
+                  <button className="button primary" onClick={() => setCreateOpen(true)}>
+                    <Check size={14} /> New task
+                  </button>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+        {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
+        {addProjectOpen && (
+          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+        )}
+        <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
+      </div>
+    );
+  }
+
+  if (route.view === 'overview') {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <Logo />
+          <div className="topbar-right">
+            <Connection state={connection} />
+            <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+            <button
+              className="icon-button"
+              aria-label="Refresh tasks"
+              onClick={() => void refresh()}
+            >
+              <RefreshCw size={14} />
+            </button>
+            <span className="avatar">LC</span>
+          </div>
+        </header>
+        <div className="workspace">
+          <ProjectSidebar
+            projects={projects}
+            projectId={project.id}
+            view="overview"
+            tasks={sortedTasks}
+            selectedTaskId={task?.id ?? null}
+            statusFilter={statusFilter}
+            awareness={awareness}
+            onSelectProject={selectProject}
+            onSelectView={selectView}
+            onSelectTask={selectTask}
+            onSetStatusFilter={setStatusFilter}
+            onCreateTask={() => setCreateOpen(true)}
+            onAddProject={() => setAddProjectOpen(true)}
+          />
+          <main className="content">
+            <div className="content-inner">
+              <Overview
+                project={project}
+                tasks={projectTasks}
+                onSelectTask={selectTask}
+                onCreateTask={() => setCreateOpen(true)}
+              />
+            </div>
+          </main>
+        </div>
+        {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
+        {addProjectOpen && (
+          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+        )}
+        <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
+      </div>
+    );
+  }
+
+  // The tasks view is reached only with a non-empty project task list, where
+  // the memo falls back to the first task. Narrow for the render path below.
+  if (!task) return null;
 
   const canMutate = connection === 'connected' || connection === 'fixture';
   const act = async (args: string[], success: string) => {
@@ -1520,6 +2682,7 @@ export default function App() {
         <Logo />
         <div className="topbar-right">
           <Connection state={connection} />
+          <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
           <button className="icon-button" aria-label="Refresh tasks" onClick={() => void refresh()}>
             <RefreshCw size={14} />
           </button>
@@ -1527,68 +2690,29 @@ export default function App() {
         </div>
       </header>
       <div className="workspace">
-        <aside className="sidebar">
-          <div className="sidebar-heading">
-            <span>Tasks</span>
-            <button className="text-button" onClick={() => setCreateOpen(true)}>
-              + New
-            </button>
-            <span className="count">{tasks.length}</span>
-          </div>
-          <div className="sidebar-filters">
-            {[
-              { key: null, label: 'All' },
-              { key: 'waiting', label: 'Waiting' },
-              { key: 'active', label: 'Active' },
-              { key: 'other', label: 'Other' },
-              { key: 'error', label: 'Failed' },
-            ].map((f) => (
-              <button
-                key={f.key ?? 'all'}
-                className={`filter-chip${statusFilter === f.key ? ' active' : ''}`}
-                onClick={() => setStatusFilter(f.key)}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <div className="task-list">
-            {sortedTasks.map((entry) => (
-              <button
-                className={`task-row ${entry.id === task.id ? 'selected' : ''}${entry.interactionStatus === 'waiting_for_operator' ? ' task-row-waiting' : ''}`}
-                key={entry.id}
-                onClick={() => selectTask(entry.id)}
-              >
-                <div className="task-row-top">
-                  <span className="task-id">{entry.id}</span>
-                  <Status state={entry.state} />
-                </div>
-                <strong>{entry.title}</strong>
-                {entry.interactionStatus === 'waiting_for_operator' && (
-                  <span className="task-interaction-status">
-                    <SquareTerminal size={12} /> Waiting for operator
-                  </span>
-                )}
-                {entry.attention && (
-                  <span className="attention">
-                    <AlertTriangle size={11} />
-                    {entry.attention.replaceAll('_', ' ')}
-                  </span>
-                )}
-                <span className="task-meta">
-                  {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="sidebar-footer">
-            <span className="version">v{packageMetadata.version}</span>
-          </div>
-        </aside>
+        <ProjectSidebar
+          projects={projects}
+          projectId={project.id}
+          view="tasks"
+          tasks={sortedTasks}
+          selectedTaskId={task.id}
+          statusFilter={statusFilter}
+          awareness={awareness}
+          onSelectProject={selectProject}
+          onSelectView={selectView}
+          onSelectTask={selectTask}
+          onSetStatusFilter={setStatusFilter}
+          onCreateTask={() => setCreateOpen(true)}
+          onAddProject={() => setAddProjectOpen(true)}
+        />
         <main className="content">
           <div className="content-inner">
             <section className="task-header">
               <div className="eyebrow">
+                <button className="breadcrumb-project" onClick={() => selectView('tasks')}>
+                  {project.name}
+                </button>
+                <span className="eyebrow-slash">/</span>
                 {task.id}
                 <span className="eyebrow-tag">{task.profile}</span>
               </div>
@@ -1968,6 +3092,8 @@ export default function App() {
       {finishOpen && task.finalization && (
         <FinalizationGate task={task} onClose={() => setFinishOpen(false)} onAction={act} />
       )}
+      {addProjectOpen && <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />}
+      <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
     </div>
   );
 }
