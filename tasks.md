@@ -1,10 +1,10 @@
 # Clew — implementation backlog
 
-**Status:** v0.6.0 release complete; completed detailed cards are archived in [`tasks/done/`](./tasks/done/)
+**Status:** v0.9.0 release complete; completed detailed cards are archived in [`tasks/done/`](./tasks/done/)
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Clew v0.7.0 pairing operations and self-hosted packaging; v0.8.0 Agent Change Visibility is complete
+**Active target:** Clew v0.9.0 Task Finalization Workflow is complete; follow-up discovery is tracked in [`ROADMAP.md`](./ROADMAP.md)
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 

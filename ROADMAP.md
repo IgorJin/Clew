@@ -388,7 +388,23 @@ CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091
 
 The v0.7 scope remains unchanged. Worktree results are transferred to the target branch manually through merge, cherry-pick, or PR; `Complete` does not merge or push automatically.
 
-## Research queue after v0.8
+## v0.9 — Task Finalization Workflow (completed 2026-09-08)
+
+**Outcome:** Operators can move a task from agent completion through verification and review into an explicit, auditable finalization gate, then integrate local Git changes and record release evidence without implicit merge or deployment side effects.
+
+### [CLEW-093](./tasks/CLEW-093.md) — Task screen v3 and finalization workflow
+
+Delivered the prototype-based Task Screen v3, task-level actions, current-stage and agent-runtime surfaces, responsive mobile action bar, Finalization Gate, lifecycle states, local Git integration, conflict handling, cleanup eligibility, and `MERGED → RELEASED` separation.
+
+### v0.9 execution order and release gate
+
+```text
+lifecycle contracts → Finalization Gate → Git integration → Task Screen v3 → responsive acceptance → release sign-off
+```
+
+Release evidence is recorded in [`RELEASE-0.9.md`](./RELEASE-0.9.md). External deployment detection, cloud PR providers, and automatic merge/push remain outside the release boundary.
+
+## Research queue after v0.9
 
 These topics require discovery before release commitment:
 

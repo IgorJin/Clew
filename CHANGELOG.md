@@ -4,6 +4,14 @@
 
 No changes yet.
 
+## 0.9.0
+
+- Added the Task Screen v3 workflow with task-level actions, current-stage context, agent runtime controls, and responsive desktop/mobile layouts.
+- Added a read-only Finalization Gate with versioned checks for workspace, verification, evidence, review, and Git integration readiness.
+- Added explicit `READY_TO_FINISH`, `MERGED`, and `RELEASED` lifecycle states while preserving legacy `READY` and non-Git `COMPLETED` behavior.
+- Added opt-in local Git integration with clean-target preflight, squash/merge/human handoff policies, conflict attention StageRuns, cleanup eligibility, and explicit release evidence.
+- Added keyboard focus handling, reduced-motion support, strict UI report mapping, and end-to-end lifecycle acceptance coverage.
+
 ## 0.8.0
 
 - Persisted immutable run Git provenance with safe recovery for legacy v0.7 databases.

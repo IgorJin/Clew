@@ -150,6 +150,7 @@ try {
     'package/migrations/011_usage_costs.sql',
     'package/RELEASE-0.6.md',
     'package/RELEASE-0.8.md',
+    'package/RELEASE-0.9.md',
     'package/docs/GIT-WORKFLOW.md',
     'package/docs/adr/0002-diff-viewer.md',
     'package/migrations/021_run_git_provenance.sql',

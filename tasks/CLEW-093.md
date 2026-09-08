@@ -8,7 +8,7 @@ size: XL
 depends_on: [CLEW-087, CLEW-088, CLEW-089, CLEW-091, CLEW-092]
 parallel_group: null
 owner: null
-updated: 2026-09-04
+updated: 2026-09-08
 evidence_policy: v1
 ---
 
@@ -134,20 +134,20 @@ AGENT
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                            | Logical scenarios                                         | Result |
-| --------- | ------------------------------------------------------------- | --------------------------------------------------------- | ------ |
-| AC-1      | `test/domain.test.js`, `test/scheduler.test.js`               | READY_TO_FINISH, COMPLETED without Git, old database      | done   |
-| AC-2      | `test/finalization.test.js`, `ui/src/App.test.tsx`            | open/recheck gate, read-only behavior                     | done   |
-| AC-3      | `test/finalization.test.js`                                   | failed verification, blocking review, incomplete evidence | done   |
-| AC-4      | `test/workspace.test.js`, `test/finalization-service.test.js` | clean branch, already committed agent output              | done   |
-| AC-5      | `test/workspace.test.js`, `test/finalization-service.test.js` | dirty/untracked workspace, editable message               | done   |
-| AC-6      | `test/workspace.test.js`, service integration tests           | squash, merge commit, PR/human policy                     | done   |
-| AC-7      | `test/workspace.test.js`, integration service tests           | changed target branch, conflict recovery, restart         | done   |
-| AC-8      | `test/finalization-service.test.js`                           | cleanup after merge, preserved history/evidence           | done   |
-| AC-9      | `test/finalization-service.test.js`, `ui/src/App.test.tsx`    | MERGED without RELEASED, explicit Mark released           | done   |
-| AC-10     | `ui/src/App.test.tsx`, responsive CSS                         | desktop, 360px mobile, keyboard                           | done   |
-| AC-11     | existing Agent/Terminal UI tests                              | worker, architect, reviewer, terminal states              | done   |
-| AC-12     | `npm run check`                                               | legacy task, no-Git task, duplicate requests              | done   |
+| Criterion | Automated evidence                                            | Logical scenarios                                             | Result |
+| --------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ------ |
+| AC-1      | `test/domain.test.js`, `test/scheduler.test.js`               | READY_TO_FINISH, COMPLETED without Git, old database          | done   |
+| AC-2      | `test/finalization.test.js`, `ui/src/App.test.tsx`            | open/recheck gate, read-only behavior                         | done   |
+| AC-3      | `test/finalization.test.js`                                   | negative verification, blocking review, evidence not complete | done   |
+| AC-4      | `test/workspace.test.js`, `test/finalization-service.test.js` | clean branch, already committed agent output                  | done   |
+| AC-5      | `test/workspace.test.js`, `test/finalization-service.test.js` | dirty/untracked workspace, editable message                   | done   |
+| AC-6      | `test/workspace.test.js`, service integration tests           | squash, merge commit, PR/human policy                         | done   |
+| AC-7      | `test/workspace.test.js`, integration service tests           | changed target branch, conflict recovery, restart             | done   |
+| AC-8      | `test/finalization-service.test.js`                           | cleanup after merge, preserved history/evidence               | done   |
+| AC-9      | `test/finalization-service.test.js`, `ui/src/App.test.tsx`    | MERGED without RELEASED, explicit Mark released               | done   |
+| AC-10     | `ui/src/App.test.tsx`, responsive CSS                         | desktop, 360px mobile, keyboard                               | done   |
+| AC-11     | existing Agent/Terminal UI tests                              | worker, architect, reviewer, terminal states                  | done   |
+| AC-12     | `npm run check`                                               | legacy task, no-Git task, duplicate requests                  | done   |
 
 ## Verification
 
@@ -162,9 +162,9 @@ AGENT
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: release verification
+- Findings: No blocking findings; lifecycle, finalization, Git integration, responsive UI, and installed-package gates are covered.
 
 ## Dependencies and parallelization
 
@@ -183,6 +183,6 @@ None.
 
 ## Completion record
 
-- Completed: 2026-09-04
-- Verification: `npm run check` — 215 backend tests (205 passed, 10 loopback skips) and 29 UI tests passed.
+- Completed: 2026-09-08
+- Verification: `npm run check` — backend, UI, lint, format, task-card, and syntax gates passed; installed-package acceptance passed.
 - Note: PR/human strategies intentionally create an audited integration handoff; external provider/deployment automation remains out of scope.
