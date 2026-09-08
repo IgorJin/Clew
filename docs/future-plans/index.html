@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clew — План развития</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --surface: #161b22;
+    --surface-2: #1c232d;
+    --border: #2b3441;
+    --text: #e6edf3;
+    --muted: #9aa7b4;
+    --accent: #4dabf7;
+    --accent-2: #8b5cf6;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --cyan: #39c5cf;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+  header.hero {
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #131a24 0%, #0e1116 100%);
+    padding: 60px 0 44px;
+  }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.12em; font-size: 12px;
+    color: var(--accent); font-weight: 600; margin: 0 0 12px;
+  }
+  h1 { font-size: 42px; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .tagline { color: var(--muted); font-size: 19px; margin: 0 0 6px; }
+  .positioning { color: var(--accent-2); font-style: italic; font-size: 16px; margin: 0; }
+  .hero-meta { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .pill {
+    border: 1px solid var(--border); border-radius: 999px; padding: 4px 14px;
+    font-size: 13px; color: var(--muted); background: var(--surface);
+  }
+
+  nav.toc {
+    position: sticky; top: 0; background: rgba(14,17,22,0.92);
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); z-index: 10;
+  }
+  nav.toc ul {
+    list-style: none; display: flex; gap: 4px; margin: 0 auto; padding: 0 24px;
+    overflow-x: auto; max-width: 880px;
+  }
+  nav.toc a {
+    display: inline-block; padding: 12px 14px; color: var(--muted);
+    font-size: 14px; white-space: nowrap; border-bottom: 2px solid transparent;
+  }
+  nav.toc a:hover { color: var(--text); text-decoration: none; }
+
+  section { padding: 46px 0; border-bottom: 1px solid var(--border); }
+  h2 { font-size: 25px; letter-spacing: -0.01em; margin: 0 0 6px; }
+  h2 .num { color: var(--accent); font-size: 14px; font-weight: 700; margin-right: 10px; }
+  .lede { color: var(--muted); margin: 0 0 24px; max-width: 720px; font-size: 15px; }
+  h3 { font-size: 18px; margin: 30px 0 12px; }
+
+  /* Plan items */
+  .plan-item {
+    display: flex; gap: 16px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin: 12px 0;
+  }
+  .plan-item:hover { border-color: var(--accent); }
+  .plan-item .num {
+    flex: 0 0 auto; width: 34px; height: 34px; border-radius: 9px;
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--accent); font-weight: 700; display: flex; align-items: center;
+    justify-content: center; font-size: 15px;
+  }
+  .plan-item h4 { margin: 0 0 4px; font-size: 16px; color: var(--text); }
+  .plan-item p { margin: 0; color: var(--muted); font-size: 14px; }
+  .plan-item ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .plan-item li { margin: 3px 0; }
+
+  .plan-item.research .num { color: var(--cyan); }
+  .plan-item.research h4 { color: #d3dbe5; }
+
+  /* Done list */
+  .done-list { list-style: none; padding: 0; margin: 0; }
+  .done-list li {
+    position: relative; padding: 8px 0 8px 30px; color: var(--muted); font-size: 15px;
+  }
+  .done-list li::before {
+    content: "✓"; position: absolute; left: 4px; top: 9px; color: var(--green); font-weight: 700;
+  }
+
+  /* Deferred */
+  .def-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 20px; margin: 12px 0;
+  }
+  .def-item h4 { margin: 0 0 4px; font-size: 15px; color: var(--text); }
+  .def-item h4 .x { color: var(--red); margin-right: 8px; }
+  .def-item p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  .summary-box {
+    border: 1px solid var(--border); border-left: 4px solid var(--green);
+    background: var(--surface); border-radius: 10px; padding: 20px 24px; margin-top: 8px;
+  }
+  .summary-box p { margin: 0 0 6px; color: var(--muted); font-size: 15px; }
+  .summary-box .lead { color: var(--text); font-weight: 600; margin-bottom: 8px; }
+
+  .note {
+    margin: 16px 0 0; padding: 12px 16px; border-left: 3px solid var(--cyan);
+    background: var(--surface-2); border-radius: 0 8px 8px 0; font-size: 14px; color: var(--muted);
+  }
+
+  footer { padding: 40px 0 64px; color: var(--muted); font-size: 13px; }
+  footer .rule { border-top: 1px solid var(--border); padding-top: 24px; margin-top: 24px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Clew · План развития</p>
+    <h1>Что дальше</h1>
+    <p class="tagline">Понятный план развития продукта — для всех, кто следит за проектом.</p>
+    <p class="positioning">Принеси свой AI-инструмент. Clew сохранит нить работы.</p>
+    <div class="hero-meta">
+      <span class="pill">Обновлено: 08.09.2026</span>
+      <span class="pill">Последний релиз: v0.9</span>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <ul>
+    <li><a href="#done">Что уже есть</a></li>
+    <li><a href="#next">Ближайший план</a></li>
+    <li><a href="#research">Исследования</a></li>
+    <li><a href="#deferred">Не делаем</a></li>
+    <li><a href="#summary">Итог</a></li>
+  </ul>
+</nav>
+
+<main class="wrap">
+
+  <section id="intro">
+    <h2><span class="num">·</span>Коротко о продукте</h2>
+    <p class="lede">Clew — инструмент, который помогает разработчику управлять задачами, выполняемыми AI-агентами. Вместо того чтобы самому запускать и контролировать агента, вы отдаёте задачу Clew, а он следит за всем процессом: выполнением, проверкой, ревью и завершением — и показывает понятную историю каждой задачи.</p>
+  </section>
+
+  <section id="done">
+    <h2><span class="num">01</span>Что уже есть</h2>
+    <p class="lede">Clew уже умеет управлять полным циклом задачи — от запуска до сдачи результата.</p>
+    <ul class="done-list">
+      <li>Запуск задач через разные AI-инструменты (Codex, OpenCode).</li>
+      <li>Локальное приложение с веб-интерфейсом и собственным сервером.</li>
+      <li>Интерактивный терминал — можно наблюдать за работой агента в реальном времени.</li>
+      <li>Просмотр изменений кода, которые внёс каждый агент.</li>
+      <li>Прозрачное завершение задачи: проверка → внесение в основную ветку → релиз.</li>
+      <li>Учёт использования и стоимости выполнения задач.</li>
+    </ul>
+  </section>
+
+  <section id="next">
+    <h2><span class="num">02</span>Ближайший план</h2>
+    <p class="lede">Три конкретных шага, которые мы делаем следующими. Это один логический релиз: Clew станет легко запускать на сервере и подключать к нему рабочие машины.</p>
+
+    <div class="plan-item">
+      <span class="num">1</span>
+      <div>
+        <h4>Разворачивание через Docker</h4>
+        <p>Чтобы Clew можно было поднять на сервере одной командой — сервер и веб-интерфейс в контейнере, с сохранением всех данных при обновлениях.</p>
+        <ul>
+          <li>готовый образ для Docker;</li>
+          <li>простая инструкция запуска;</li>
+          <li>данные хранятся отдельно и не теряются при обновлении;</li>
+          <li>резервное копирование и восстановление;</li>
+          <li>инструкция по настройке безопасного доступа (HTTPS).</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="plan-item">
+      <span class="num">2</span>
+      <div>
+        <h4>Простое и безопасное подключение исполнителя</h4>
+        <p>Сейчас подключение рабочей машины требует ручной настройки. Мы сделаем понятный процесс: «подключить этот компьютер» — без возни с конфигами и ключами.</p>
+        <ul>
+          <li>одноразовый код для подключения — работает один раз и действует ограниченное время;</li>
+          <li>простое управление подключением прямо из веб-интерфейса;</li>
+          <li>возможность сменить или отозвать доступ в любой момент;</li>
+          <li>секреты не попадают в логи и не хранятся в открытом виде;</li>
+          <li>второй «лишний» исполнитель не подключится без явного разрешения.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="plan-item">
+      <span class="num">3</span>
+      <div>
+        <h4>Проверка, что всё работает «из коробки»</h4>
+        <p>Перед выпуском мы убедимся, что пользователь может пройти весь путь без нашей помощи: установить, подключить компьютер, выполнить задачу, пережить перезапуск и восстановить данные.</p>
+        <ul>
+          <li>установка и запуск через Docker за один проход;</li>
+          <li>выполнение задач всех типов через подключённый компьютер;</li>
+          <li>устойчивость к обрывам связи и перезапускам;</li>
+          <li>обновление и откат версии без потери истории;</li>
+          <li>проверка, что в собранном образе нет лишних секретов или исходников.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="research">
+    <h2><span class="num">03</span>Направления для исследования</h2>
+    <p class="lede">Это идеи на будущее. Прежде чем браться за них, нужно понять, как именно они должны работать и зачем. Они станут конкретными задачами только после отдельной проработки.</p>
+
+    <div class="plan-item research">
+      <span class="num">1</span>
+      <div>
+        <h4>Детерминированная проверка качества и контроль над тестами</h4>
+        <p>Сегодня Clew фиксирует, что агент сделал, но не оценивает качество результата. Хотим добавить понятную систему проверки: какие проверки обязательны, чем проверка отличается от ревью, и как работать с устаревшими результатами.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">2</span>
+      <div>
+        <h4>Единая картина доказательств качества</h4>
+        <p>Связывать в одну цепочку тесты, проверки, ревью и релизные данные с конкретным изменением кода — чтобы было видно, что именно проверено и насколько этому можно доверять.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">3</span>
+      <div>
+        <h4>Память о задачах и ошибках</h4>
+        <p>Сохранять опыт после каждой задачи, чтобы агенты учитывали похожие случаи из прошлого и не повторяли ошибок. При этом это не должна быть универсальная база знаний — только опыт, привязанный к конкретным задачам и проектам.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">4</span>
+      <div>
+        <h4>Задачи на несколько проектов сразу</h4>
+        <p>Одна задача, затрагивающая несколько репозиториев (например, фронтенд и бэкенд). Пока Clew работает в основном с одним проектом за раз.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">5</span>
+      <div>
+        <h4>Автоматический сбор задач</h4>
+        <p>Находить работу из GitHub, Jira и других источников. Но запуск возможен только с согласия человека — автоматически запускаться ничего не должно.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">6</span>
+      <div>
+        <h4>Умный выбор AI-инструмента</h4>
+        <p>Выбирать лучший инструмент и модель под задачу на основе реальной статистики Clew, а не общих рейтингов.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">7</span>
+      <div>
+        <h4>Контроль нагрузки</h4>
+        <p>Не запускать слишком много задач одновременно, учитывать лимиты, стоимость и внимание человека.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">8</span>
+      <div>
+        <h4>Публичная проверка в GitHub</h4>
+        <p>Показывать статус проверки задачи прямо в GitHub — но аккуратно, не раскрывая секреты.</p>
+      </div>
+    </div>
+
+    <div class="plan-item research">
+      <span class="num">9</span>
+      <div>
+        <h4>Командная работа</h4>
+        <p>Несколько исполнителей, общие задачи, роли и права. Это большой шаг — начнём его только после того, как одиночный режим станет стабильным.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="deferred">
+    <h2><span class="num">04</span>Чего мы сознательно не делаем</h2>
+    <p class="lede">Эти вещи мы исключаем намеренно — чтобы сохранить доверие и предсказуемость. «Не делаем» не значит «никогда», а значит «не без отдельного решения».</p>
+
+    <div class="def-item">
+      <h4><span class="x">×</span>Автоматический merge</h4>
+      <p>Изменения попадают в основную ветку только после явного согласия человека.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Автоматическое завершение задач</h4>
+      <p>Задача считается готовой только после подтверждения человеком.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Собственная оценка качества</h4>
+      <p>Clew показывает факты и доказательства, но не утверждает сам, что продукт качественный.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Собственный AI-ревьюер кода</h4>
+      <p>Ревью остаётся подключаемой ролью, а не отдельным продуктом Clew.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Собственный AI-агент</h4>
+      <p>Clew управляет процессом, но не заменяет существующие AI-инструменты своим.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Замена терминала</h4>
+      <p>Интерактивный терминал уже есть, но Clew не становится универсальным эмулятором терминала.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Универсальная база знаний</h4>
+      <p>Память о задачах может появиться, но Clew не превращается в поисковик по всем данным.</p>
+    </div>
+    <div class="def-item">
+      <h4><span class="x">×</span>Роли и командная аналитика</h4>
+      <p>До того, как одиночный режим станет стабильным.</p>
+    </div>
+  </section>
+
+  <section id="summary">
+    <h2><span class="num">05</span>Итог</h2>
+    <div class="summary-box">
+      <p class="lead">Следующий шаг:</p>
+      <p>1. Разворачивание через Docker</p>
+      <p>2. Простое и безопасное подключение исполнителя</p>
+      <p>3. Проверка, что всё работает «из коробки»</p>
+    </div>
+    <div class="note">Всё остальное — направления для исследования. Они станут конкретным планом только после отдельной проработки, чтобы не превращать идеи в работу без понятного результата.</div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Этот документ описывает направление развития, а не гарантии текущей версии. Технические детали — в <a href="https://github.com/IgorJin/Clew/blob/main/ROADMAP.md">ROADMAP.md</a> и <a href="https://github.com/IgorJin/Clew/blob/main/VISION.md">VISION.md</a>.</p>
+    <div class="rule">
+      <p>Clew — Принеси свой AI-инструмент. Clew сохранит нить работы. · Обновлено 08.09.2026</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

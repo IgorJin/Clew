@@ -144,6 +144,11 @@ Configuration precedence is command flag → environment → project `.clew.json
 
 Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.
 
+## Roadmap and future plans
+
+- [`docs/future-plans/index.html`](https://igorjin.github.io/Clew/future-plans/) — human-readable plan of what is next (hosted on GitHub Pages);
+- [`docs/future-plans/index.html`](./docs/future-plans/index.html) — the same plan as a file in the repository.
+
 ## Release evidence
 
 - [`spec.md`](./spec.md) — product and technical contract;
