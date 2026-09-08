@@ -2716,15 +2716,8 @@ export default function App() {
                 {task.id}
                 <span className="eyebrow-tag">{task.profile}</span>
               </div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'start',
-                  gap: 16,
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
+              <div className="task-title-row">
+                <div className="task-title-copy">
                   <h1>{task.title}</h1>
                 </div>
                 <div className="header-actions">
@@ -2832,7 +2825,10 @@ export default function App() {
                 </section>
               )}
               {task.finalization && task.state !== 'DRAFT' && (
-                <section className="task-recommendation" aria-label="Finalization gate">
+                <section
+                  className="task-recommendation finalization-recommendation"
+                  aria-label="Finalization gate"
+                >
                   <div>
                     <span className="eyebrow">Finalization gate</span>
                     <h3>{task.finalization.ready ? 'Ready to finish' : 'Attention required'}</h3>

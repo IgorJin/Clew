@@ -75,9 +75,16 @@ describe('Preact control plane', () => {
 
   it('opens the finalization gate and completes the pinned revision', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<App />);
+    const { container } = render(<App />);
+    const finishButton = await screen.findByRole('button', { name: /finish work/i });
 
-    fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
+    expect(
+      container
+        .querySelector('[aria-label="Finalization gate"]')
+      ?.classList.contains('finalization-recommendation'),
+    ).toBe(true);
+
+    fireEvent.click(finishButton);
     fireEvent.click(await screen.findByRole('button', { name: /complete task/i }));
 
     expect(api.execute).toHaveBeenCalledWith(['complete', 'CLEW-071', '--revision', 'a91c4e2']);
@@ -570,6 +577,9 @@ describe('Preact control plane', () => {
     render(<App />);
 
     const runSelect = await screen.findByRole('combobox', { name: 'Select change run' });
+    expect(runSelect.closest('label')?.querySelector('.sr-only')?.textContent).toBe(
+      'Select change run',
+    );
     fireEvent.change(runSelect, { target: { value: 'backend-2' } });
     await waitFor(() => expect((runSelect as HTMLSelectElement).value).toBe('backend-2'));
     fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));

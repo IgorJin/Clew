@@ -32,6 +32,18 @@
   box-sizing: border-box;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -657,9 +669,52 @@ h1 {
   letter-spacing: -0.03em;
 }
 
+.task-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.task-title-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .header-actions {
   display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+}
+
+.change-run-select {
+  display: inline-flex;
+  min-width: 0;
+}
+
+.change-run-select select {
+  height: 32px;
+  max-width: 190px;
+  padding: 0 28px 0 10px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.change-run-select select:hover,
+.change-run-select select:focus-visible {
+  border-color: var(--border-hover);
+}
+
+.change-run-select select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
 }
 
 /* ── Stepper ─────────────────────────────────── */
@@ -756,6 +811,21 @@ h1 {
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
 }
 
+.task-recommendation > div {
+  min-width: 0;
+}
+
+.finalization-recommendation {
+  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1.55fr);
+  align-items: start;
+  padding: 18px 20px;
+}
+
+.finalization-recommendation .recommendation-meta {
+  align-content: flex-start;
+  justify-content: flex-start;
+}
+
 .task-recommendation h3,
 .task-recommendation p {
   margin: 4px 0 0;
@@ -779,6 +849,7 @@ h1 {
   color: var(--muted);
   font-size: 11px;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 
 /* ── Metrics ─────────────────────────────────── */
@@ -2774,6 +2845,22 @@ textarea:focus {
   .content-inner {
     padding: 28px 24px 50px;
   }
+  .task-title-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .task-recommendation,
+  .finalization-recommendation {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .task-recommendation .button {
+    justify-self: start;
+  }
 }
 
 @media (max-width: 680px) {
@@ -2829,6 +2916,8 @@ textarea:focus {
     border-radius: 8px;
     backdrop-filter: blur(8px);
     overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
   }
   .content-inner {
     padding-bottom: 96px;
