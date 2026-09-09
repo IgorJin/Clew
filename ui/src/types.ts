@@ -35,6 +35,7 @@ export type AgentSession = {
   harness: string;
   sessionId: string;
   workspace: string | null;
+  terminalAccess: 'controller_local' | 'runner_local' | 'unavailable';
   createdAt: string;
 };
 

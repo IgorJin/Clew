@@ -1450,8 +1450,9 @@ function AgentGrid({
               (run?.terminalAccess ?? (isCurrentRun ? task.terminalAccess : 'unavailable')) !==
                 'runner_local',
             )
-          : Boolean(agentSession);
+          : Boolean(agentSession && agentSession.terminalAccess === 'controller_local');
         const expanded = expandedAgent === key && terminalAvailable && Boolean(terminalId);
+        const canOpenExternally = isWorkerRole ? hasSession : terminalAvailable;
         const hasOpenReviewFindings = role === 'reviewer' && task.findings > 0;
         const statusClass = isRunning
           ? 'running'
@@ -1496,12 +1497,25 @@ function AgentGrid({
                   {task.findings > 0
                     ? `Review requested corrections · ${task.findings} open finding${task.findings === 1 ? '' : 's'}`
                     : 'Review passed'}
-                  {agentSession && <span> · {agentSession.harness} session available</span>}
+                  {agentSession && (
+                    <span>
+                      {' · '}
+                      {agentSession.harness}{' '}
+                      {agentSession.terminalAccess === 'runner_local'
+                        ? 'session recorded on Runner'
+                        : 'session available'}
+                    </span>
+                  )}
                 </span>
               ) : agentSession ? (
                 <>
-                  {agentSession.harness} · session available
-                  {agentSession.workspace && <span> · {agentSession.workspace}</span>}
+                  {agentSession.harness} ·{' '}
+                  {agentSession.terminalAccess === 'runner_local'
+                    ? 'session recorded on Runner'
+                    : 'session available'}
+                  {agentSession.workspace && agentSession.terminalAccess !== 'runner_local' && (
+                    <span> · {agentSession.workspace}</span>
+                  )}
                 </>
               ) : (
                 <span>{role === 'reviewer' ? 'Review not started' : 'Plan not created yet'}</span>
@@ -1520,10 +1534,14 @@ function AgentGrid({
               </button>
               <button
                 className="button secondary small"
-                disabled={!canMutate || !hasSession}
+                disabled={!canMutate || !canOpenExternally}
                 aria-label={`Open ${label} externally`}
                 title={
-                  hasSession ? `Open ${label} in Terminal` : `No session available for ${label}`
+                  canOpenExternally
+                    ? `Open ${label} in Terminal`
+                    : agentSession?.terminalAccess === 'runner_local'
+                      ? `${label} session is available only on the Runner`
+                      : `No session available for ${label}`
                 }
                 onClick={() => {
                   if (isWorkerRole) {

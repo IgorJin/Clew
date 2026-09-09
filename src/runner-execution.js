@@ -28,6 +28,9 @@ function safeReview(review) {
   return {
     verdict: review.verdict,
     revision: boundedText(review.revision, 128),
+    ...(boundedText(review.sessionId, 128)
+      ? { sessionId: boundedText(review.sessionId, 128) }
+      : {}),
     findings: Array.isArray(review.findings)
       ? review.findings.slice(0, 100).map((finding) => ({
           severity: finding.severity,

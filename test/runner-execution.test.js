@@ -52,6 +52,47 @@ test('Runner execution resolves only configured mappings and returns normalized 
   );
 });
 
+test('Runner preserves a bounded Codex reviewer session id without exposing its local path', async () => {
+  const port = new RunnerExecutionPort({
+    workspaces: [{ id: 'clew', path: '/runner/local/clew' }],
+    harnessFactory: () => ({
+      async run(options) {
+        if (options.readOnly)
+          return {
+            output: { verdict: 'pass', findings: [] },
+            sessionId: 'review-session-on-runner',
+          };
+
+        return {
+          rationale: 'done',
+          verification: [{ type: 'command', command: 'npm test', result: 'passed' }],
+        };
+      },
+    }),
+  });
+  const result = await port.accept({
+    leaseId: 'lease-review',
+    epoch: 1,
+    workspaceId: 'clew',
+    stageId: 'worker',
+    runId: 'run-review',
+    harness: 'codex',
+    requirements: {
+      task: {
+        id: 'task-review',
+        title: 'Task',
+        goal: 'Goal',
+        acceptance: [{ id: 'AC-1', criterion: 'works' }],
+      },
+      review: true,
+      reviewHarness: 'codex',
+    },
+  });
+
+  assert.equal(result.review.sessionId, 'review-session-on-runner');
+  assert.equal(JSON.stringify(result.review).includes('/runner/local/clew'), false);
+});
+
 test('Runner owns isolated Git worktrees and integrates Deep dependency revisions locally', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'clew-runner-worktrees-'));
   const project = join(directory, 'project');

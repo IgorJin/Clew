@@ -529,6 +529,33 @@ describe('Preact control plane', () => {
     expect(screen.queryByText('Plan not created yet')).toBeNull();
   });
 
+  it('shows paired reviewer sessions without offering a controller-local terminal', async () => {
+    const tasks = structuredClone(fixtureTasks);
+
+    tasks[0].agentSessions.push({
+      id: 'CLEW-071:reviewer:runner-review-session',
+      taskId: 'CLEW-071',
+      role: 'reviewer',
+      harness: 'codex',
+      sessionId: 'runner-review-session',
+      workspace: 'runner-workspace:clew',
+      terminalAccess: 'runner_local',
+      createdAt: '2026-08-28T10:05:00.000Z',
+    });
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
+    render(<App />);
+
+    expect(await screen.findByText(/session recorded on Runner/i)).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: /open reviewer externally/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
   it('shows when a completed worker turn is waiting for operator input', async () => {
     const waitingTasks = structuredClone(fixtureTasks);
 

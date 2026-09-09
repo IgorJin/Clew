@@ -405,6 +405,13 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
             harness: string(session.harness, 'session harness'),
             sessionId: string(session.session_id, 'session session_id'),
             workspace: session.workspace ? string(session.workspace, 'session workspace') : null,
+            terminalAccess:
+              typeof session.workspace === 'string' &&
+              session.workspace.startsWith('runner-workspace:')
+                ? 'runner_local'
+                : typeof session.workspace === 'string'
+                  ? 'controller_local'
+                  : 'unavailable',
             createdAt: string(session.created_at, 'session created_at'),
           };
         })

@@ -578,9 +578,11 @@ export class Scheduler {
 
     if (needsReview) {
       let review = stageResult.review;
+      const reviewerName =
+        requestedReviewHarness ??
+        (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness);
 
       if (!review && harnessName === HARNESS_NAME.FAKE) {
-        const reviewerName = requestedReviewHarness ?? HARNESS_NAME.FAKE;
         const reviewer = this.createReviewerAdapter(reviewerName);
 
         review = await reviewer.review({
@@ -589,9 +591,9 @@ export class Scheduler {
           revision: stageResult.revision,
           cwd: stageResult.workspace.path,
         });
-        this.recordReviewerSession(taskId, review, stageResult.workspace.path, reviewerName);
       }
       if (!review) throw new Error('paired Runner completed without the required review result');
+      this.recordReviewerSession(taskId, review, stageResult.workspace.path, reviewerName);
       this.store.appendEvent(taskId, 'REVIEW_RECORDED', {
         ...review,
         runId: stageResult.runId,
