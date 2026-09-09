@@ -144,6 +144,32 @@ test('Git change inspection bypasses a running worker command', async () => {
   assert.equal(await running, 'worker-finished');
 });
 
+test('project folder browsing bypasses a running worker command', async () => {
+  const daemon = new LocalDaemon();
+  let releaseWorker;
+  const worker = new Promise((resolve) => {
+    releaseWorker = resolve;
+  });
+
+  daemon.control = {
+    execute: async (args) => {
+      if (args[0] === 'task') {
+        await worker;
+
+        return 'worker-finished';
+      }
+
+      return { folder: '/tmp/chosen-repository' };
+    },
+  };
+  const running = daemon.dispatch(['task', 'approve-step', 'BROWSE-1']);
+  const browsed = daemon.dispatch(['project', 'browse']);
+
+  assert.deepEqual(await browsed, { folder: '/tmp/chosen-repository' });
+  releaseWorker();
+  assert.equal(await running, 'worker-finished');
+});
+
 test('public event filtering suppresses tool and protocol events', async () => {
   const { isPublicThreadEvent } = await import('../src/thread.js');
 
@@ -359,6 +385,12 @@ test('daemon serves the packaged UI and restricts browser bootstrap to its origi
     assert.match(page.headers.get('content-type'), /text\/html/);
     assert.match(await page.text(), /<title>Clew \/ Task control plane<\/title>/i);
 
+    const deepLink = await fetch(`${metadata.endpoint}/projects/clew/tasks/DEEP-LINK`);
+
+    assert.equal(deepLink.status, 200);
+    assert.match(deepLink.headers.get('content-type'), /text\/html/);
+    assert.match(await deepLink.text(), /<title>Clew \/ Task control plane<\/title>/i);
+
     const rejected = await fetch(`${metadata.endpoint}/api/v1/bootstrap`, {
       headers: { origin: 'http://malicious.invalid' },
     });
@@ -369,6 +401,7 @@ test('daemon serves the packaged UI and restricts browser bootstrap to its origi
     });
 
     assert.equal(accepted.status, 204);
+    assert.equal(accepted.headers.get('x-clew-runtime-version'), '4');
     assert.match(accepted.headers.get('set-cookie'), /clew_token=/);
     assert.equal(accepted.headers.get('access-control-allow-origin'), metadata.endpoint);
     assert.equal(token.length, 64);

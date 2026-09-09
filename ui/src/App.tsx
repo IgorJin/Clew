@@ -10,6 +10,7 @@ import {
   CircleHelp,
   Copy,
   FileDiff,
+  FolderOpen,
   GitBranch,
   Inbox,
   Laptop,
@@ -278,10 +279,36 @@ function routeFromLocation(): Route {
   return { projectId: null, taskId: null, view: 'tasks' };
 }
 
-function resolveDefaultRoute(current: Route, projects: Project[], tasks: Task[]): Route {
-  let projectId = current.projectId;
+function projectSlug(name: string): string {
+  return name
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+}
 
-  if (projectId && !projects.some((entry) => entry.id === projectId)) projectId = null;
+function projectRouteKey(project: Project, projects: Project[]): string {
+  const slug = projectSlug(project.name) || project.id.toLowerCase();
+  const matches = projects.filter((entry) => projectSlug(entry.name) === slug);
+
+  return matches[0]?.id === project.id ? slug : `${slug}-${project.id.toLowerCase()}`;
+}
+
+function projectFromRouteKey(routeKey: string, projects: Project[]): Project | null {
+  const byId = projects.find((entry) => entry.id === routeKey);
+
+  if (byId) return byId;
+  const normalized = routeKey.toLowerCase();
+
+  return projects.find((entry) => projectRouteKey(entry, projects) === normalized) ?? null;
+}
+
+function resolveDefaultRoute(current: Route, projects: Project[], tasks: Task[]): Route {
+  let projectId = current.projectId
+    ? (projectFromRouteKey(current.projectId, projects)?.id ?? null)
+    : null;
+
   if (!projectId && current.taskId) {
     const ownerId = tasks.find((entry) => entry.id === current.taskId)?.projectId ?? null;
 
@@ -308,12 +335,20 @@ function resolveDefaultRoute(current: Route, projects: Project[], tasks: Task[])
   return { projectId, taskId, view: current.view };
 }
 
-function routePath(projectId: string, taskId: string | null, view: 'overview' | 'tasks'): string {
-  if (taskId)
-    return `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}`;
-  if (view === 'overview') return `/projects/${encodeURIComponent(projectId)}/overview`;
+function routePath(
+  projectId: string,
+  taskId: string | null,
+  view: 'overview' | 'tasks',
+  projects: Project[],
+): string {
+  const project = projects.find((entry) => entry.id === projectId);
+  const routeKey = project ? projectRouteKey(project, projects) : projectId;
 
-  return `/projects/${encodeURIComponent(projectId)}`;
+  if (taskId)
+    return `/projects/${encodeURIComponent(routeKey)}/tasks/${encodeURIComponent(taskId)}`;
+  if (view === 'overview') return `/projects/${encodeURIComponent(routeKey)}/overview`;
+
+  return `/projects/${encodeURIComponent(routeKey)}`;
 }
 
 const PROJECT_STORAGE_PREFIX = 'clew.v1';
@@ -342,11 +377,10 @@ function storedTaskId(projectId: string): string | null {
   return readPreference(`last-task.${projectId}`);
 }
 
-/** Legacy tasks without a project stay visible instead of vanishing after the upgrade. */
 function scopedTasks(all: Task[], projectId: string | null): Task[] {
   if (!projectId) return [];
 
-  return all.filter((task) => task.projectId === projectId || task.projectId == null);
+  return all.filter((task) => task.projectId === projectId);
 }
 
 function Logo() {
@@ -803,7 +837,6 @@ export function Thread({ items }: { items: ThreadItem[] }) {
           key={entry.id}
         >
           <div className="thread-marker">{iconFor(entry.kind)}</div>
-          <div className="thread-line" />
           <div className="thread-content">
             <div className="thread-meta">
               <span className="thread-kind">
@@ -1521,16 +1554,13 @@ function AgentGrid({
 }
 
 type CreateTaskInput = {
+  id: string;
   title: string;
   body: string;
-  profile: 'quick' | 'standard' | 'deep';
-  tags: string;
 };
 
-function autoTitle(body: string): string {
-  const firstLine = body.split('\n')[0].trim();
-
-  return firstLine.slice(0, 120);
+function createClientTaskId(): string {
+  return `CLEW-${crypto.randomUUID().replaceAll('-', '').slice(0, 12).toUpperCase()}`;
 }
 
 function CreateTask({
@@ -1542,108 +1572,184 @@ function CreateTask({
 }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [profile, setProfile] = useState<'quick' | 'standard' | 'deep'>('quick');
-  const [tags, setTags] = useState('');
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const submitting = useRef(false);
+  const intentId = useRef<string | null>(null);
 
-  const handleBodyInput = (event: Event) => {
-    const value = (event.currentTarget as HTMLTextAreaElement).value;
-    setBody(value);
-    if (
-      !title.trim() ||
-      (title === autoTitle(body.slice(0, value.length - 1)) && value.length > 0)
-    ) {
-      setTitle(autoTitle(value));
-    }
-  };
-
-  const submit = (event: Event) => {
+  const submit = async (event: Event) => {
     event.preventDefault();
-    const cleanTitle = (title.trim() || autoTitle(body)).trim();
-    if (!cleanTitle || !body.trim()) return;
-    void onCreate({
-      title: cleanTitle,
-      body: body.trim(),
-      profile,
-      tags: tags.trim(),
-    });
+    if (submitting.current) return;
+    const cleanTitle = title.trim();
+    const cleanBody = body.trim();
+
+    if (!cleanTitle || !cleanBody) return;
+    submitting.current = true;
+    intentId.current ??= createClientTaskId();
+    setBusy(true);
+    setError('');
+    try {
+      await onCreate({ id: intentId.current, title: cleanTitle, body: cleanBody });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Task creation failed');
+      submitting.current = false;
+      setBusy(false);
+    }
   };
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <form className="create-task" onSubmit={submit}>
+      <form className="create-task" onSubmit={(event) => void submit(event)}>
         <div className="panel-head compact">
           <div>
             <span className="eyebrow">New task</span>
             <h2>Create a task</h2>
           </div>
-          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={busy}
+          >
             <X size={14} />
           </button>
         </div>
-        <label htmlFor="task-body">What should be done?</label>
-        <textarea
-          ref={bodyRef}
-          id="task-body"
-          className="create-task-body"
-          value={body}
-          onInput={handleBodyInput}
-          placeholder="Describe the task, expected behavior, constraints..."
-          required
-        />
         <label htmlFor="task-title">Title</label>
         <input
           id="task-title"
           value={title}
           onInput={(event) => setTitle(event.currentTarget.value)}
-          placeholder={autoTitle(body) || 'Short title'}
+          placeholder="Short title"
+          required
         />
-        <label>Complexity</label>
-        <div className="profile-selector">
-          {(
-            [
-              ['quick', 'Quick'],
-              ['standard', 'Standard'],
-              ['deep', 'Deep'],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`profile-chip ${profile === key ? 'selected' : ''}`}
-              onClick={() => setProfile(key)}
-              aria-pressed={profile === key}
-            >
-              <span className="profile-name">{label}</span>
-              <span className="profile-hint">
-                {key === 'quick'
-                  ? 'worker'
-                  : key === 'standard'
-                    ? '+ review'
-                    : 'architect + review'}
-              </span>
-            </button>
-          ))}
-        </div>
-        <label htmlFor="task-tags">Tags</label>
-        <input
-          id="task-tags"
-          value={tags}
-          onInput={(event) => setTags(event.currentTarget.value)}
-          placeholder="comma, separated"
+        <label htmlFor="task-body">Description</label>
+        <textarea
+          id="task-body"
+          className="create-task-body"
+          value={body}
+          onInput={(event) => setBody(event.currentTarget.value)}
+          placeholder="Describe the task, expected behavior, and constraints"
+          required
         />
         <p className="small-muted">
-          Created as Draft. You'll need to approve the next step before it starts.
+          Clew selects the workflow from the description. Quick tasks start immediately.
         </p>
+        {error && (
+          <p className="add-project-error" role="alert">
+            <AlertTriangle size={12} />
+            {error}
+          </p>
+        )}
         <div className="modal-actions">
-          <button type="button" className="button secondary" onClick={onClose}>
+          <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" className="button primary">
-            Create task
+          <button type="submit" className="button primary" disabled={busy}>
+            {busy ? 'Creating…' : 'Create task'}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+type StartApproval = {
+  taskId: string;
+  title: string;
+  profile: 'standard' | 'deep';
+  step: NextStep;
+};
+
+function StartApprovalDialog({
+  approval,
+  onClose,
+  onConfirm,
+}: {
+  approval: StartApproval;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const confirming = useRef(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelButton.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !confirming.current) onClose();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const confirm = async () => {
+    if (confirming.current) return;
+    confirming.current = true;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } catch {
+      confirming.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        className="create-task start-approval"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="start-approval-title"
+      >
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">{approval.profile} workflow</span>
+            <h2 id="start-approval-title">Start this task?</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={busy}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <p>
+          <strong>{approval.title}</strong>
+        </p>
+        <p>{approval.step.summary}</p>
+        {approval.step.sideEffects?.length ? (
+          <ul className="start-approval-effects">
+            {approval.step.sideEffects.map((effect) => (
+              <li key={effect}>{effect}</li>
+            ))}
+          </ul>
+        ) : null}
+        <div className="modal-actions">
+          <button
+            ref={cancelButton}
+            type="button"
+            className="button secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void confirm()}
+            disabled={busy}
+          >
+            {busy ? 'Starting…' : 'Start task'}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1793,18 +1899,48 @@ function FinalizationGate({
 function AddProject({
   onClose,
   onAdd,
+  onBrowse,
 }: {
   onClose: () => void;
   onAdd: (folder: string, name: string) => Promise<void>;
+  onBrowse: () => Promise<string | null>;
 }) {
   const [folder, setFolder] = useState('');
   const [name, setName] = useState('');
+  const [nameEdited, setNameEdited] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState('');
+
+  const folderName = (path: string) =>
+    path
+      .trim()
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .at(-1) ?? '';
+
+  const browse = async () => {
+    if (busy || browsing) return;
+    setBrowsing(true);
+    setError('');
+    try {
+      const selected = await onBrowse();
+
+      if (selected) {
+        setFolder(selected);
+        if (!nameEdited) setName(folderName(selected));
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not open folder picker');
+    } finally {
+      setBrowsing(false);
+    }
+  };
 
   const submit = async (event: Event) => {
     event.preventDefault();
-    if (!folder.trim() || busy) return;
+    if (!folder.trim() || busy || browsing) return;
     setBusy(true);
     setError('');
     try {
@@ -1828,18 +1964,31 @@ function AddProject({
           </button>
         </div>
         <label htmlFor="project-folder">Folder</label>
-        <input
-          id="project-folder"
-          value={folder}
-          onInput={(event) => setFolder(event.currentTarget.value)}
-          placeholder="/Users/me/dev/clew"
-          required
-        />
+        <div className="folder-picker-field">
+          <input
+            id="project-folder"
+            value={folder}
+            onInput={(event) => setFolder(event.currentTarget.value)}
+            placeholder="/Users/me/dev/clew"
+            required
+          />
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => void browse()}
+            disabled={busy || browsing}
+          >
+            <FolderOpen size={14} /> {browsing ? 'Opening…' : 'Browse…'}
+          </button>
+        </div>
         <label htmlFor="project-name">Project name</label>
         <input
           id="project-name"
           value={name}
-          onInput={(event) => setName(event.currentTarget.value)}
+          onInput={(event) => {
+            setName(event.currentTarget.value);
+            setNameEdited(true);
+          }}
           placeholder="Clew"
         />
         <p className="small-muted">
@@ -1853,10 +2002,15 @@ function AddProject({
           </p>
         )}
         <div className="modal-actions">
-          <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={onClose}
+            disabled={busy || browsing}
+          >
             Cancel
           </button>
-          <button type="submit" className="button primary" disabled={busy}>
+          <button type="submit" className="button primary" disabled={busy || browsing}>
             {busy ? 'Adding…' : 'Add project'}
           </button>
         </div>
@@ -1901,7 +2055,7 @@ function StepIndicator({
   onSelect,
 }: {
   state: TaskState;
-  selected: string;
+  selected: string | null;
   onSelect: (key: string) => void;
 }) {
   const active = workflowStepIndex(state);
@@ -1916,7 +2070,9 @@ function StepIndicator({
             onClick={() => onSelect(step.key)}
             aria-current={i === active ? 'step' : undefined}
             aria-pressed={selected === step.key}
-            className={`${active < 0 ? 'step' : i < active ? 'step done' : i === active ? 'step active' : 'step'}${selected === step.key ? ' selected' : ''}`}
+            className={
+              active < 0 ? 'step' : i < active ? 'step done' : i === active ? 'step active' : 'step'
+            }
           >
             <span className="step-dot" />
             {step.label}
@@ -1937,8 +2093,9 @@ export default function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [startApproval, setStartApproval] = useState<StartApproval | null>(null);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
-  const [selectedStep, setSelectedStep] = useState('plan');
+  const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [descExpanded, setDescExpanded] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -1947,6 +2104,7 @@ export default function App() {
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
   const [selectedChangeRunId, setSelectedChangeRunId] = useState<string | null>(null);
   const [runRequested, setRunRequested] = useState(false);
+  const startRequests = useRef(new Set<string>());
   const autoOpenedTerminal = useRef<string | null>(null);
   const changeRequestSequence = useRef<Record<string, number>>({});
   const lastCursor = useRef(Number(sessionStorage.getItem('clew-event-cursor') ?? 0));
@@ -1976,10 +2134,15 @@ export default function App() {
             resolved.taskId !== routeRef.current.taskId ||
             resolved.view !== routeRef.current.view;
 
-          if (changed) {
-            const path = routePath(resolved.projectId!, resolved.taskId, resolved.view);
+          if (changed) setRoute(resolved);
+          if (resolved.projectId) {
+            const path = routePath(
+              resolved.projectId,
+              resolved.taskId,
+              resolved.view,
+              nextProjects,
+            );
 
-            setRoute(resolved);
             if (window.location.pathname !== path) window.history.replaceState({}, '', path);
           }
         }
@@ -2022,7 +2185,7 @@ export default function App() {
 
   const project = useMemo(() => {
     if (route.projectId) {
-      const direct = projects.find((entry) => entry.id === route.projectId);
+      const direct = projectFromRouteKey(route.projectId, projects);
       if (direct) return direct;
     }
     if (route.taskId) {
@@ -2037,6 +2200,13 @@ export default function App() {
     }
     return projects[0] ?? null;
   }, [projects, tasks, route.projectId, route.taskId]);
+
+  useEffect(() => {
+    if (!project) return;
+    const path = routePath(project.id, route.taskId, route.view, projects);
+
+    if (window.location.pathname !== path) window.history.replaceState({}, '', path);
+  }, [project, projects, route.taskId, route.view]);
 
   const projectTasks = useMemo(
     () => (project ? scopedTasks(tasks, project.id) : []),
@@ -2073,7 +2243,7 @@ export default function App() {
       last && targetTasks.some((entry) => entry.id === last) ? last : (targetTasks[0]?.id ?? null);
     setStatusFilter(null);
     setRoute({ projectId, taskId, view: 'tasks' });
-    const path = routePath(projectId, taskId, 'tasks');
+    const path = routePath(projectId, taskId, 'tasks', projects);
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
   };
 
@@ -2081,7 +2251,7 @@ export default function App() {
     if (!project) return;
     writePreference(`last-task.${project.id}`, taskId);
     setRoute({ projectId: project.id, taskId, view: 'tasks' });
-    const path = routePath(project.id, taskId, 'tasks');
+    const path = routePath(project.id, taskId, 'tasks', projects);
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
   };
 
@@ -2089,7 +2259,7 @@ export default function App() {
     if (!project) return;
     const taskId = nextView === 'overview' ? null : (task?.id ?? null);
     setRoute({ projectId: project.id, taskId, view: nextView });
-    const path = routePath(project.id, taskId, nextView);
+    const path = routePath(project.id, taskId, nextView, projects);
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
   };
 
@@ -2103,7 +2273,7 @@ export default function App() {
         : (targetTasks[0]?.id ?? null);
     setStatusFilter(null);
     setRoute({ projectId, taskId: resolvedTaskId, view: 'tasks' });
-    const path = routePath(projectId, resolvedTaskId, 'tasks');
+    const path = routePath(projectId, resolvedTaskId, 'tasks', projects);
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
   };
 
@@ -2140,6 +2310,20 @@ export default function App() {
       setNotice(message);
       throw new Error(message);
     }
+  };
+
+  const browseProjectFolder = async () => {
+    const result = (await execute(['project', 'browse'])) as {
+      fixture?: boolean;
+      folder?: unknown;
+    } | null;
+
+    if (result?.fixture) throw new Error('Connect to the local Clew daemon to browse folders');
+    if (result?.folder === null || result?.folder === undefined) return null;
+    if (typeof result.folder !== 'string')
+      throw new Error('Folder picker returned an invalid path');
+
+    return result.folder;
   };
 
   useEffect(() => {
@@ -2260,59 +2444,129 @@ export default function App() {
     );
   }, [projectTasks, statusFilter]);
 
-  const createTask = async ({ title, body, profile, tags }: CreateTaskInput) => {
-    if (!canMutateFor(connection)) {
-      setNotice('Actions are disabled while the control plane is disconnected');
+  const runApprovedStart = async (taskId: string, actionId: string) => {
+    if (startRequests.current.has(taskId)) return;
+    startRequests.current.add(taskId);
+    setStartApproval(null);
+    setRunRequested(true);
+    setNotice('Starting task…');
+    const operation = execute(['task', 'approve-step', taskId, '--action', actionId]);
+
+    try {
+      const result = await operation;
+
+      if ((result as { fixture?: boolean } | null)?.fixture)
+        setTasks((current) =>
+          current.map((entry) =>
+            entry.id === taskId ? { ...entry, state: 'EXECUTING' as TaskState } : entry,
+          ),
+        );
+      else await refresh();
+      setNotice('Start approved');
+    } catch (error) {
+      setRunRequested(false);
+      setNotice(error instanceof Error ? error.message : 'Could not start task');
+    } finally {
+      startRequests.current.delete(taskId);
+    }
+  };
+
+  const requestStart = (taskId: string, title: string, step: NextStep) => {
+    const profile = step.analysis?.recommendation.profile ?? step.inputs?.profile;
+
+    if (!step.id) throw new Error('Next step returned no action id');
+    if (profile === 'quick') {
+      void runApprovedStart(taskId, step.id);
       return;
     }
-    const tagList = tags
-      .split(',')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    setStartApproval({
+      taskId,
+      title,
+      profile: profile === 'deep' ? 'deep' : 'standard',
+      step,
+    });
+  };
+
+  const prepareStart = async (taskId: string, title: string) => {
+    const result = (await execute(['task', 'next-step', taskId])) as NextStep & {
+      fixture?: boolean;
+    };
+    const step: NextStep = result?.fixture
+      ? {
+          id: `action-${taskId}`,
+          taskId,
+          kind: 'start_worker',
+          currentStep: 'DRAFT',
+          resultingStep: 'EXECUTING',
+          summary: 'Start implementation with the quick profile',
+          inputs: { harness: 'codex', profile: 'quick', permissionMode: 'read-only' },
+          sideEffects: ['start one local worker process', 'create one run record'],
+          approvalRequired: true,
+          status: 'PENDING',
+        }
+      : result;
+
+    setNextStep(step);
+    requestStart(taskId, title, step);
+  };
+
+  const createTask = async ({ id, title, body }: CreateTaskInput) => {
+    if (!canMutateFor(connection)) {
+      const error = new Error('Actions are disabled while the control plane is disconnected');
+
+      setNotice(error.message);
+      throw error;
+    }
     const args = [
       'task',
       'create',
+      '--id',
+      id,
       ...(project ? ['--project', project.id] : []),
       '--title',
       title,
       '--description',
       body,
       '--profile',
-      profile,
-      ...tagList.flatMap((tag) => ['--tags', tag]),
+      'auto',
+      '--risk',
+      'low',
+      '--accept',
+      `Deliver the requested outcome: ${body}`,
     ];
     try {
       const result = await execute(args);
+      const createdId = (result as { id?: string } | null)?.id ?? id;
+
       if ((result as { fixture?: boolean } | null)?.fixture) {
-        const id = `LOCAL-${Date.now()}`;
         setTasks((current) => [
           {
-            id,
+            id: createdId,
             projectId: project?.id ?? null,
             createdAt: new Date().toISOString(),
             title,
             goal: body,
-            profile,
-            tags: tagList,
+            profile: 'auto',
+            tags: [],
             analysis: {
               version: 1,
               kind: { value: 'feature', confidence: 0.62 },
               readiness: {
-                score: 50,
-                readyToStart: false,
-                unresolved: ['Acceptance criteria are distinct and testable'],
+                score: 100,
+                readyToStart: true,
+                unresolved: [],
               },
               recommendation: {
-                action: 'shape' as const,
-                profile: 'standard' as const,
-                reasons: ['1 readiness check(s) unresolved'],
+                action: 'start' as const,
+                profile: 'quick' as const,
+                reasons: ['Clear, bounded, low-risk task'],
               },
             },
             state: 'DRAFT' as TaskState,
             attention: null,
             revision: null,
             attempts: 0,
-            roles: rolesForProfile('standard'),
+            roles: rolesForProfile('quick'),
             runs: [],
             stages: [],
             reviewed: false,
@@ -2329,16 +2583,23 @@ export default function App() {
           },
           ...current,
         ]);
-        selectTask(id);
+        selectTask(createdId);
       } else {
         await refresh();
-        const createdId = (result as { id?: string }).id;
-        if (createdId) selectTask(createdId);
+        selectTask(createdId);
       }
       setCreateOpen(false);
       setNotice(`Task created: ${title}`);
+      try {
+        await prepareStart(createdId, title);
+      } catch (error) {
+        setNotice(
+          `Task created, but its start could not be prepared: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Task creation failed');
+      throw error;
     }
   };
 
@@ -2384,7 +2645,11 @@ export default function App() {
           </div>
         </main>
         {!unavailable && !waiting && addProjectOpen && (
-          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+          <AddProject
+            onClose={() => setAddProjectOpen(false)}
+            onAdd={addProject}
+            onBrowse={browseProjectFolder}
+          />
         )}
       </div>
     );
@@ -2433,7 +2698,11 @@ export default function App() {
         </div>
         {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
         {addProjectOpen && (
-          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+          <AddProject
+            onClose={() => setAddProjectOpen(false)}
+            onAdd={addProject}
+            onBrowse={browseProjectFolder}
+          />
         )}
         <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
       </div>
@@ -2487,7 +2756,11 @@ export default function App() {
         </div>
         {createOpen && <CreateTask onClose={() => setCreateOpen(false)} onCreate={createTask} />}
         {addProjectOpen && (
-          <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
+          <AddProject
+            onClose={() => setAddProjectOpen(false)}
+            onAdd={addProject}
+            onBrowse={browseProjectFolder}
+          />
         )}
         <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
       </div>
@@ -2515,8 +2788,7 @@ export default function App() {
     ]);
     if (
       (confirmationRequired.has(args[0]) ||
-        (args[0] === 'task' &&
-          ['approve-step', 'integrate', 'mark-merged', 'mark-released'].includes(args[1]))) &&
+        (args[0] === 'task' && ['integrate', 'mark-merged', 'mark-released'].includes(args[1]))) &&
       !window.confirm(`Confirm ${args.join(' ')}?`)
     )
       return false;
@@ -2561,15 +2833,6 @@ export default function App() {
   const interactiveWorker =
     task.runStatus === 'RUNNING' && task.terminalActive === true && Boolean(task.runId);
   const pendingHarnessApproval = task.harnessApprovals?.find((a) => !a.decision);
-  const recommendedActionLabel = task.analysis
-    ? {
-        shape: 'Shape task',
-        investigate: 'Investigate',
-        plan: 'Plan',
-        start: 'Start',
-      }[task.analysis.recommendation.action]
-    : 'Analyze task';
-
   const explainNextStep = async () => {
     try {
       const result = await execute(['task', 'next-step', task.id]);
@@ -2761,10 +3024,7 @@ export default function App() {
                           'Continuation requested',
                         );
                       if (nextStep?.status === 'PENDING')
-                        return void act(
-                          ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
-                          'Start approved',
-                        );
+                        return requestStart(task.id, task.title, nextStep);
                       return void explainNextStep();
                     }}
                   >
@@ -2794,114 +3054,64 @@ export default function App() {
                 {descExpanded ? '▾' : '▸'} Description
               </button>
               {descExpanded && <p className="description-text">{task.goal}</p>}
-              {task.state === 'DRAFT' && task.analysis && (
-                <section className="task-recommendation" aria-label="Recommended next action">
-                  <div>
-                    <span className="eyebrow">Recommended next action</span>
-                    <h3>{recommendedActionLabel}</h3>
-                    <p>{task.analysis.recommendation.reasons.join(' · ')}</p>
-                  </div>
-                  <div className="recommendation-meta">
-                    <span>{task.analysis.kind.value}</span>
-                    <span>Readiness {task.analysis.readiness.score}%</span>
-                    <span>{task.analysis.recommendation.profile}</span>
-                  </div>
-                  <button
-                    className="button primary small"
-                    disabled={!canMutate}
-                    onClick={() => {
-                      if (nextStep?.status === 'PENDING')
-                        void act(
-                          ['task', 'approve-step', task.id, '--action', nextStep.id ?? ''],
-                          'Recommended action started',
-                        );
-                      else void explainNextStep();
-                    }}
-                  >
-                    {nextStep?.status === 'PENDING'
-                      ? `Start ${nextStep.inputs?.profile ?? task.analysis.recommendation.profile}`
-                      : recommendedActionLabel}
-                  </button>
-                </section>
-              )}
-              {task.finalization && task.state !== 'DRAFT' && (
-                <section
-                  className="task-recommendation finalization-recommendation"
-                  aria-label="Finalization gate"
-                >
-                  <div>
-                    <span className="eyebrow">Finalization gate</span>
-                    <h3>{task.finalization.ready ? 'Ready to finish' : 'Attention required'}</h3>
-                    <p>
-                      {task.finalization.ready
-                        ? 'Verification, review, and workspace checks are complete.'
-                        : task.finalization.blockingReasons.join(' · ') ||
-                          'Inspect the checks before finishing.'}
-                    </p>
-                  </div>
-                  <div className="recommendation-meta">
-                    {task.finalization.checks.map((item) => (
-                      <span key={item.id}>
-                        {item.passed ? '✓' : '○'} {item.label}
-                      </span>
-                    ))}
-                  </div>
-                </section>
-              )}
               <StepIndicator
                 state={task.state}
                 selected={selectedStep}
                 onSelect={(key) => {
-                  setSelectedStep(key);
-                  if (key === 'execute' && !nextStep) void explainNextStep();
+                  const closing = selectedStep === key;
+
+                  setSelectedStep(closing ? null : key);
+                  if (!closing && key === 'execute' && !nextStep) void explainNextStep();
                 }}
               />
-              <section className="step-details" aria-label={`${selectedStep} step details`}>
-                <span className="eyebrow">Selected step</span>
-                <h3>
-                  {selectedStep === 'plan'
-                    ? 'Plan'
-                    : selectedStep === 'execute'
-                      ? 'Execute'
-                      : selectedStep === 'review'
-                        ? 'Review'
-                        : 'Done'}
-                </h3>
-                <p>{stepDetail.explanation}</p>
-                <dl className="step-detail-grid">
-                  <div>
-                    <dt>Status</dt>
-                    <dd>{selectedStepStatus}</dd>
-                  </div>
-                  <div>
-                    <dt>Prerequisites</dt>
-                    <dd>{stepDetail.prerequisites}</dd>
-                  </div>
-                  <div>
-                    <dt>Available action</dt>
-                    <dd>{stepDetail.action}</dd>
-                  </div>
-                  <div>
-                    <dt>Approval</dt>
-                    <dd>{stepDetail.approval}</dd>
-                  </div>
-                  <div>
-                    <dt>Side effects</dt>
-                    <dd>{stepDetail.sideEffects}</dd>
-                  </div>
-                </dl>
-                {selectedStep === 'execute' && nextStep && (
-                  <div className="next-step-details">
-                    <span>
-                      {nextStep.currentStep} → {nextStep.resultingStep ?? '—'}
-                    </span>
-                    <span>
-                      Harness: {nextStep.inputs?.harness ?? '—'} · Model:{' '}
-                      {nextStep.inputs?.model ?? '—'}
-                    </span>
-                  </div>
-                )}
-              </section>
+              {selectedStep && (
+                <section className="step-details" aria-label={`${selectedStep} step details`}>
+                  <span className="eyebrow">Selected step</span>
+                  <h3>
+                    {selectedStep === 'plan'
+                      ? 'Plan'
+                      : selectedStep === 'execute'
+                        ? 'Execute'
+                        : selectedStep === 'review'
+                          ? 'Review'
+                          : 'Done'}
+                  </h3>
+                  <p>{stepDetail.explanation}</p>
+                  <dl className="step-detail-grid">
+                    <div>
+                      <dt>Status</dt>
+                      <dd>{selectedStepStatus}</dd>
+                    </div>
+                    <div>
+                      <dt>Prerequisites</dt>
+                      <dd>{stepDetail.prerequisites}</dd>
+                    </div>
+                    <div>
+                      <dt>Available action</dt>
+                      <dd>{stepDetail.action}</dd>
+                    </div>
+                    <div>
+                      <dt>Approval</dt>
+                      <dd>{stepDetail.approval}</dd>
+                    </div>
+                    <div>
+                      <dt>Side effects</dt>
+                      <dd>{stepDetail.sideEffects}</dd>
+                    </div>
+                  </dl>
+                  {selectedStep === 'execute' && nextStep && (
+                    <div className="next-step-details">
+                      <span>
+                        {nextStep.currentStep} → {nextStep.resultingStep ?? '—'}
+                      </span>
+                      <span>
+                        Harness: {nextStep.inputs?.harness ?? '—'} · Model:{' '}
+                        {nextStep.inputs?.model ?? '—'}
+                      </span>
+                    </div>
+                  )}
+                </section>
+              )}
               {(task.attention || pendingHarnessApproval) && (
                 <div className="attention-actions">
                   <span className="attention-label">
@@ -3027,7 +3237,7 @@ export default function App() {
               <div className="connection-banner" role="alert">
                 <WifiOff size={14} />
                 {connection === 'incompatible'
-                  ? 'Daemon contract is incompatible. Actions are disabled.'
+                  ? 'Daemon version is incompatible. Run `clew daemon restart`, then reload.'
                   : `Daemon connection is unavailable. Showing last known data${lastUpdatedAt ? ` from ${lastUpdatedAt.toLocaleTimeString()}` : ''}; actions are disabled.`}
               </div>
             )}
@@ -3088,7 +3298,20 @@ export default function App() {
       {finishOpen && task.finalization && (
         <FinalizationGate task={task} onClose={() => setFinishOpen(false)} onAction={act} />
       )}
-      {addProjectOpen && <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />}
+      {startApproval && (
+        <StartApprovalDialog
+          approval={startApproval}
+          onClose={() => setStartApproval(null)}
+          onConfirm={() => runApprovedStart(startApproval.taskId, startApproval.step.id!)}
+        />
+      )}
+      {addProjectOpen && (
+        <AddProject
+          onClose={() => setAddProjectOpen(false)}
+          onAdd={addProject}
+          onBrowse={browseProjectFolder}
+        />
+      )}
       <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
     </div>
   );

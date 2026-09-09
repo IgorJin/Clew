@@ -34,6 +34,9 @@ import {
 const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const UI_ROOT = join(PACKAGE_ROOT, 'ui', 'dist');
 const DAEMON_VERSION = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')).version;
+// Increment this when the UI and daemon must be restarted together after a protocol change.
+
+export const DAEMON_RUNTIME_VERSION = 4;
 
 export const DEFAULT_DAEMON_PORT = 43176;
 const DAEMON_FILES = ['daemon.json', 'daemon.lock', 'daemon.token', 'daemon.stderr.log'];
@@ -269,6 +272,7 @@ export class LocalDaemon {
       const address = this.server.address();
       const metadata = {
         version: DAEMON_VERSION,
+        runtimeVersion: DAEMON_RUNTIME_VERSION,
         daemonId: randomUUID(),
         stateDirectory: this.stateDir,
         pid: process.pid,
@@ -353,7 +357,10 @@ export class LocalDaemon {
     try {
       if (
         request.method === 'GET' &&
-        (pathname === '/' || pathname === '/index.html' || pathname.startsWith('/tasks/'))
+        (pathname === '/' ||
+          pathname === '/index.html' ||
+          pathname.startsWith('/tasks/') ||
+          pathname.startsWith('/projects/'))
       )
         return this.uiIndex(response);
       if (request.method === 'GET' && pathname.startsWith('/assets/'))
@@ -378,6 +385,7 @@ export class LocalDaemon {
           });
         response.writeHead(204, {
           'cache-control': 'no-store',
+          'x-clew-runtime-version': String(DAEMON_RUNTIME_VERSION),
           ...(origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {}),
           'set-cookie': [
             `clew_token=${readFileSync(this.tokenPath, 'utf8').trim()}; Path=/; SameSite=Strict; HttpOnly`,
@@ -391,6 +399,7 @@ export class LocalDaemon {
       if (request.method === 'GET' && request.url === '/api/v1/health')
         return json(response, 200, {
           version: DAEMON_VERSION,
+          runtimeVersion: DAEMON_RUNTIME_VERSION,
           daemonId: this.metadata.daemonId,
           endpoint: this.metadata.endpoint,
           stateDirectory: this.stateDir,
@@ -415,6 +424,13 @@ export class LocalDaemon {
           retryable: false,
         });
       const envelope = validateApiEnvelope(await readBody(request));
+
+      const clientRuntimeVersion = envelope.payload?.clientRuntimeVersion;
+
+      if (clientRuntimeVersion !== undefined && clientRuntimeVersion !== DAEMON_RUNTIME_VERSION)
+        throw new Error(
+          `daemon runtime version mismatch: client ${clientRuntimeVersion}, daemon ${DAEMON_RUNTIME_VERSION}; restart the daemon`,
+        );
 
       if (
         envelope.kind !== 'command' ||
@@ -470,6 +486,7 @@ export class LocalDaemon {
     const bypassQueue =
       isLiveInspection ||
       args[0] === 'finish-worker' ||
+      (args[0] === 'project' && args[1] === 'browse') ||
       (args[0] === 'task' && ['changes', 'inspect-changes'].includes(args[1]));
 
     return bypassQueue ? this.executeCommand(args) : this.enqueue(args);
@@ -770,6 +787,14 @@ export async function daemonStatus(cwd = process.cwd()) {
     if (!response.ok || health.daemonId !== metadata.daemonId)
       throw new Error('daemon health identity mismatch');
 
+    if (health.runtimeVersion !== DAEMON_RUNTIME_VERSION)
+      return {
+        ...metadata,
+        status: 'incompatible',
+        healthy: false,
+        daemonRuntimeVersion: health.runtimeVersion ?? null,
+      };
+
     return { ...metadata, status: 'running', healthy: true };
   } catch {
     return {
@@ -787,6 +812,10 @@ export async function startDaemonProcess(
   const existing = await daemonStatus(cwd);
 
   if (existing.status === 'running') return { ...existing, alreadyRunning: true };
+  if (existing.status === 'incompatible')
+    throw new Error(
+      `daemon runtime version mismatch: running ${existing.daemonRuntimeVersion ?? 'unknown'}, current ${DAEMON_RUNTIME_VERSION}; run \`clew daemon restart\``,
+    );
   if (existing.status === 'unreachable')
     throw new Error(
       `daemon process ${existing.pid} is alive but its health endpoint is unreachable`,
@@ -821,6 +850,19 @@ export async function startDaemonProcess(
   }
 
   throw new Error(`daemon startup timed out; inspect ${paths.log}`);
+}
+
+async function waitForDaemonStop(cwd, timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const status = await daemonStatus(cwd);
+
+    if (status.status === 'stopped' || status.status === 'stale') return status;
+    await delay(50);
+  }
+
+  throw new Error('daemon did not stop after restart request');
 }
 
 export async function daemonRequest(cwd, args, { timeoutMs = 30_000 } = {}) {
@@ -858,7 +900,7 @@ export async function daemonRequest(cwd, args, { timeoutMs = 30_000 } = {}) {
 export async function stopDaemon(cwd = process.cwd()) {
   const status = await daemonStatus(cwd);
 
-  if (status.status !== 'running') {
+  if (status.status !== 'running' && status.status !== 'incompatible') {
     if (status.status === 'stale') removeDaemonState(cwd);
     if (status.status === 'unreachable')
       throw new Error(
@@ -876,5 +918,9 @@ export async function stopDaemon(cwd = process.cwd()) {
 
   if (!response.ok) throw new Error(`daemon shutdown failed: HTTP ${response.status}`);
 
-  return response.json();
+  const result = await response.json();
+
+  await waitForDaemonStop(cwd);
+
+  return result;
 }

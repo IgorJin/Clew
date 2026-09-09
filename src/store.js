@@ -133,6 +133,21 @@ export class Store {
         throw error;
       }
 
+      const projectCount = this.db.prepare('SELECT COUNT(*) AS count FROM projects').get().count;
+
+      if (projectCount === 1) {
+        const tasks = this.db
+          .prepare('SELECT id,contract FROM tasks WHERE project_id IS NULL')
+          .all();
+        const update = this.db.prepare('UPDATE tasks SET project_id=?,contract=? WHERE id=?');
+
+        for (const task of tasks) {
+          const contract = JSON.parse(task.contract);
+
+          update.run(record.id, JSON.stringify({ ...contract, projectId: record.id }), task.id);
+        }
+      }
+
       return this.getProject(record.id);
     });
   }

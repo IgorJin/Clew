@@ -1,9 +1,57 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { assertSecureRunnerEndpoint } from './runner-protocol.js';
 
 const SECRET_KEY_PATTERN = /(?:authorization|api[_-]?key|token|password|secret|cookie)/i;
+
+function isExecutableFile(path) {
+  try {
+    accessSync(path, constants.X_OK);
+
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function resolveCodexExecutable(
+  command = 'codex',
+  {
+    env = process.env,
+    platform = process.platform,
+    home = homedir(),
+    isExecutable = isExecutableFile,
+  } = {},
+) {
+  if (typeof command !== 'string' || !command.trim() || command.includes('\0'))
+    throw new Error('codexBin must be a non-empty executable name or path');
+  const configured = command.trim();
+  const pathLike = isAbsolute(configured) || configured.includes('/') || configured.includes('\\');
+
+  if (pathLike) {
+    const candidate = isAbsolute(configured) ? configured : resolve(configured);
+
+    return isExecutable(candidate) ? candidate : configured;
+  }
+  const pathCandidates = String(env.PATH ?? '')
+    .split(delimiter)
+    .filter(Boolean)
+    .map((directory) => join(directory, configured));
+  const platformCandidates =
+    configured === 'codex' && platform === 'darwin'
+      ? [
+          join(home, '.local', 'bin', 'codex'),
+          join(home, '.npm-global', 'bin', 'codex'),
+          '/opt/homebrew/bin/codex',
+          '/usr/local/bin/codex',
+          '/Applications/ChatGPT.app/Contents/Resources/codex',
+          '/Applications/Codex.app/Contents/Resources/codex',
+        ]
+      : [];
+
+  return [...pathCandidates, ...platformCandidates].find(isExecutable) ?? configured;
+}
 
 export const DEFAULT_CONFIG = Object.freeze({
   codexBin: 'codex',
@@ -111,6 +159,7 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
 
   return {
     ...merged,
+    codexBin: resolveCodexExecutable(merged.codexBin, { env }),
     openCodexDesktop: ['1', 'true', 'yes', 'on'].includes(
       String(env.CLEW_CODEX_OPEN_DESKTOP ?? '').toLowerCase(),
     ),
@@ -176,7 +225,7 @@ export function loadRunnerConfig(env = process.env) {
       reservedEntries: configured.outbox?.reservedEntries ?? 32,
     },
     adapterConfig: {
-      codexBin: configured.codexBin ?? 'codex',
+      codexBin: resolveCodexExecutable(configured.codexBin ?? 'codex', { env }),
       openCodeUrl: configured.openCodeUrl ?? 'http://127.0.0.1:4096',
       openCodexDesktop: configured.openCodexDesktop === true,
     },

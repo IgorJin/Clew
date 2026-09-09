@@ -741,12 +741,6 @@ h1 {
   cursor: pointer;
 }
 
-.step.selected {
-  outline: 1px solid var(--accent);
-  outline-offset: 3px;
-  border-radius: 4px;
-}
-
 .step-dot {
   width: 6px;
   height: 6px;
@@ -797,59 +791,6 @@ h1 {
   line-height: 1.6;
   margin: 0 0 12px;
   max-width: 600px;
-}
-
-.task-recommendation {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 20px;
-  margin: 14px 0 18px;
-  padding: 14px 16px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
-}
-
-.task-recommendation > div {
-  min-width: 0;
-}
-
-.finalization-recommendation {
-  grid-template-columns: minmax(240px, 0.45fr) minmax(0, 1.55fr);
-  align-items: start;
-  padding: 18px 20px;
-}
-
-.finalization-recommendation .recommendation-meta {
-  align-content: flex-start;
-  justify-content: flex-start;
-}
-
-.task-recommendation h3,
-.task-recommendation p {
-  margin: 4px 0 0;
-}
-
-.task-recommendation p {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.recommendation-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.recommendation-meta span {
-  padding: 4px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: capitalize;
-  white-space: nowrap;
 }
 
 /* ── Metrics ─────────────────────────────────── */
@@ -1966,6 +1907,16 @@ textarea:focus {
   font-size: 11px;
 }
 
+.folder-picker-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.folder-picker-field .button {
+  white-space: nowrap;
+}
+
 .overview {
   display: grid;
   gap: 18px;
@@ -2852,14 +2803,6 @@ textarea:focus {
   .header-actions {
     width: 100%;
     justify-content: flex-start;
-  }
-  .task-recommendation,
-  .finalization-recommendation {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-  .task-recommendation .button {
-    justify-self: start;
   }
 }
 

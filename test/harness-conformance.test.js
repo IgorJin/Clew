@@ -9,6 +9,7 @@ import { ReadableStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
   APPROVAL_DECISION,
+  codexLaunchError,
   CodexHarness,
   FakeHarness,
   HARNESS_EVENT_TYPE,
@@ -22,6 +23,25 @@ const fixtureTask = Object.freeze({
   title: 'Harness conformance',
   goal: 'Exercise the normalized harness lifecycle',
   acceptance: [{ id: 'AC-1', criterion: 'the lifecycle is correlated' }],
+});
+
+test('Codex launch errors replace raw ENOENT with actionable configuration guidance', async () => {
+  const missing = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+  const normalized = codexLaunchError(missing, '/missing/codex');
+
+  assert.equal(normalized.code, 'CODEX_EXECUTABLE_NOT_FOUND');
+  assert.match(normalized.message, /set CLEW_CODEX_BIN/i);
+  assert.doesNotMatch(normalized.message, /ENOENT/);
+
+  const harness = new CodexHarness({ command: '/definitely/missing/clew-codex', timeoutMs: 100 });
+
+  await assert.rejects(
+    harness.run({ task: fixtureTask, cwd: process.cwd(), onEvent: () => {} }),
+    (error) =>
+      error.code === 'CODEX_EXECUTABLE_NOT_FOUND' &&
+      /set CLEW_CODEX_BIN/i.test(error.message) &&
+      !/ENOENT/.test(error.message),
+  );
 });
 
 function createJsonResponse(data, status = 200) {

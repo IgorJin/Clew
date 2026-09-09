@@ -78,11 +78,7 @@ describe('Preact control plane', () => {
     const { container } = render(<App />);
     const finishButton = await screen.findByRole('button', { name: /finish work/i });
 
-    expect(
-      container
-        .querySelector('[aria-label="Finalization gate"]')
-      ?.classList.contains('finalization-recommendation'),
-    ).toBe(true);
+    expect(container.querySelector('[aria-label="Finalization gate"]')).toBeNull();
 
     fireEvent.click(finishButton);
     fireEvent.click(await screen.findByRole('button', { name: /complete task/i }));
@@ -254,20 +250,39 @@ describe('Preact control plane', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/actions are disabled/i);
   });
 
-  it('creates a task from the UI without starting it', async () => {
+  it('creates a task from the minimal form and starts a Quick workflow immediately', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /new/i }));
-    fireEvent.input(screen.getByRole('textbox', { name: /what should be done/i }), {
-      target: { value: 'List files without changing them' },
-    });
+
+    expect(screen.getAllByRole('textbox')).toHaveLength(2);
+    expect(screen.queryByText(/complexity/i)).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /tags/i })).toBeNull();
     fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
       target: { value: 'Read-only MVP task' },
     });
+    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
+      target: { value: 'List files without changing them' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
 
-    expect(api.execute).toHaveBeenCalledWith([
+    const createArgs = await waitFor(() => {
+      const call = api.execute.mock.calls.find(
+        ([args]) => (args as string[])[0] === 'task' && (args as string[])[1] === 'create',
+      );
+
+      expect(call).toBeTruthy();
+      return call![0] as string[];
+    });
+    const id = createArgs[createArgs.indexOf('--id') + 1];
+
+    expect(id).toMatch(/^CLEW-[A-F0-9]{12}$/);
+    expect(createArgs).toEqual([
       'task',
       'create',
+      '--id',
+      id,
       '--project',
       'PRJ-CLEW',
       '--title',
@@ -275,33 +290,150 @@ describe('Preact control plane', () => {
       '--description',
       'List files without changing them',
       '--profile',
-      'quick',
+      'auto',
+      '--risk',
+      'low',
+      '--accept',
+      'Deliver the requested outcome: List files without changing them',
     ]);
-    expect(await screen.findByText('Task created: Read-only MVP task')).toBeTruthy();
-    expect(window.location.pathname).toMatch(/^\/projects\/PRJ-CLEW\/tasks\/LOCAL-/);
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['task', 'next-step', id]));
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'task',
+        'approve-step',
+        id,
+        '--action',
+        `action-${id}`,
+      ]),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: /start this task/i })).toBeNull();
+    expect(window.location.pathname).toBe(`/projects/clew/tasks/${id}`);
   });
 
-  it('derives a title when the title field is left empty', async () => {
+  it('requires both title and description before creating a task', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /new/i }));
-    fireEvent.input(screen.getByRole('textbox', { name: /what should be done/i }), {
+    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
       target: { value: 'Investigate terminal startup' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
+    const form = screen.getByRole('textbox', { name: /^description$/i }).closest('form')!;
 
-    expect(api.execute).toHaveBeenCalledWith([
-      'task',
-      'create',
-      '--project',
-      'PRJ-CLEW',
-      '--title',
-      'Investigate terminal startup',
-      '--description',
-      'Investigate terminal startup',
-      '--profile',
-      'quick',
-    ]);
+    fireEvent.submit(form);
+    expect(
+      api.execute.mock.calls.filter(
+        ([args]) => (args as string[])[0] === 'task' && (args as string[])[1] === 'create',
+      ),
+    ).toHaveLength(0);
   });
+
+  it('sends one create command when the form is submitted repeatedly while pending', async () => {
+    let resolveCreate!: (value: unknown) => void;
+    const pendingCreate = new Promise<unknown>((resolve) => {
+      resolveCreate = resolve;
+    });
+
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'create') return pendingCreate;
+      return { fixture: true };
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /new/i }));
+    fireEvent.input(screen.getByRole('textbox', { name: /^title$/i }), {
+      target: { value: 'Single flight creation' },
+    });
+    fireEvent.input(screen.getByRole('textbox', { name: /^description$/i }), {
+      target: { value: 'Create this task exactly once' },
+    });
+    const form = screen.getByRole('textbox', { name: /^description$/i }).closest('form')!;
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    fireEvent.click(screen.getByRole('button', { name: /creating/i }));
+
+    expect(
+      api.execute.mock.calls.filter(
+        ([args]) => (args as string[])[0] === 'task' && (args as string[])[1] === 'create',
+      ),
+    ).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /creating/i }).hasAttribute('disabled')).toBe(true);
+
+    resolveCreate({ fixture: true });
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: /create a task/i })).toBeNull(),
+    );
+  });
+
+  it.each(['standard', 'deep'] as const)(
+    'uses the product approval dialog for a %s task and keeps approval single-flight',
+    async (profile) => {
+      const confirm = vi.spyOn(window, 'confirm');
+      const draft = structuredClone(fixtureTasks[0]);
+      const actionId = `action-${profile}`;
+
+      draft.state = 'DRAFT';
+      draft.profile = profile;
+      draft.runs = [];
+      draft.runId = null;
+      draft.runStatus = null;
+      api.loadTasks.mockResolvedValue({
+        tasks: [draft],
+        projects: structuredClone(fixtureProjects),
+        state: 'connected',
+      });
+      api.execute.mockImplementation(async (args: string[]) => {
+        if (args[0] === 'task' && args[1] === 'next-step')
+          return {
+            id: actionId,
+            taskId: draft.id,
+            kind: 'start_worker',
+            currentStep: 'DRAFT',
+            resultingStep: 'EXECUTING',
+            summary: `Start the ${profile} workflow`,
+            inputs: { harness: 'codex', profile, permissionMode: 'read-only' },
+            sideEffects: ['start one local worker process', 'create one run record'],
+            approvalRequired: true,
+            status: 'PENDING',
+          };
+        return { fixture: true };
+      });
+      render(<App />);
+
+      fireEvent.click(await screen.findByRole('button', { name: /^next step$/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /^approve start$/i }));
+      expect(await screen.findByRole('dialog', { name: /start this task/i })).toBeTruthy();
+      expect(screen.getByText(`${profile} workflow`)).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+      expect(screen.queryByRole('dialog', { name: /start this task/i })).toBeNull();
+      expect(
+        api.execute.mock.calls.filter(
+          ([args]) => (args as string[])[0] === 'task' && (args as string[])[1] === 'approve-step',
+        ),
+      ).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('button', { name: /^approve start$/i }));
+      const start = await screen.findByRole('button', { name: /^start task$/i });
+
+      fireEvent.click(start);
+      fireEvent.click(start);
+      await waitFor(() =>
+        expect(
+          api.execute.mock.calls.filter(
+            ([args]) =>
+              (args as string[])[0] === 'task' && (args as string[])[1] === 'approve-step',
+          ),
+        ).toHaveLength(1),
+      );
+      expect(api.execute).toHaveBeenCalledWith([
+        'task',
+        'approve-step',
+        draft.id,
+        '--action',
+        actionId,
+      ]);
+      expect(confirm).not.toHaveBeenCalled();
+    },
+  );
 
   it('opens the live worker terminal externally before a Codex session id exists', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -414,6 +546,7 @@ describe('Preact control plane', () => {
     render(<App />);
     const review = await screen.findByRole('button', { name: 'Review' });
 
+    expect(screen.queryByRole('region', { name: 'review step details' })).toBeNull();
     fireEvent.click(review);
     const details = screen.getByRole('region', { name: 'review step details' });
 
@@ -423,6 +556,9 @@ describe('Preact control plane', () => {
     expect(within(details).getByText('Available action')).toBeTruthy();
     expect(within(details).getByText('Approval')).toBeTruthy();
     expect(within(details).getByText('Side effects')).toBeTruthy();
+
+    fireEvent.click(review);
+    expect(screen.queryByRole('region', { name: 'review step details' })).toBeNull();
   });
 
   it('orders sidebar tasks newest first with a stable id tie-breaker', async () => {
@@ -703,7 +839,7 @@ describe('project shell', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
     fireEvent.click(await screen.findByRole('button', { name: /lykar/i }));
-    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR');
+    expect(window.location.pathname).toBe('/projects/lykar');
 
     // Lykar has no tasks, so the scoped empty state appears.
     expect(await screen.findByText('No tasks yet')).toBeTruthy();
@@ -711,7 +847,7 @@ describe('project shell', () => {
   });
 
   it('resolves a project-scoped deep link directly', async () => {
-    window.history.replaceState({}, '', '/projects/PRJ-CLEW/tasks/ACC-DEEP');
+    window.history.replaceState({}, '', '/projects/clew/tasks/ACC-DEEP');
     render(<App />);
 
     expect(
@@ -719,11 +855,21 @@ describe('project shell', () => {
     ).toBeTruthy();
   });
 
+  it('keeps legacy project-id links working and canonicalizes them to the project name', async () => {
+    window.history.replaceState({}, '', '/projects/PRJ-CLEW/tasks/ACC-DEEP');
+    render(<App />);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Parallel cache migration' }),
+    ).toBeTruthy();
+    expect(window.location.pathname).toBe('/projects/clew/tasks/ACC-DEEP');
+  });
+
   it('persists the selected project and last opened task across reloads', async () => {
     const { unmount } = render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /parallel cache migration/i }));
-    expect(window.location.pathname).toBe('/projects/PRJ-CLEW/tasks/ACC-DEEP');
+    expect(window.location.pathname).toBe('/projects/clew/tasks/ACC-DEEP');
     unmount();
 
     window.history.replaceState({}, '', '/');
@@ -755,6 +901,22 @@ describe('project shell', () => {
 
     expect(await screen.findByText('No tasks yet')).toBeTruthy();
     expect(screen.getByRole('button', { name: /new task/i })).toBeTruthy();
+  });
+
+  it('does not show an unassigned task in every project', async () => {
+    const task = structuredClone(fixtureTasks[0]);
+
+    task.projectId = null;
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: [task],
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    window.history.replaceState({}, '', '/projects/lykar');
+    render(<App />);
+
+    expect(await screen.findByText('No tasks yet')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /replace auth middleware/i })).toBeNull();
   });
 
   it('issues no control-plane commands while navigating between projects and tasks', async () => {
@@ -811,6 +973,44 @@ describe('project shell', () => {
         .getByRole('button', { name: /^cancel$/i })
         .hasAttribute('disabled'),
     ).toBe(false);
+  });
+
+  it('fills the project folder from the native folder picker', async () => {
+    api.execute.mockImplementation(async (args: string[]) =>
+      args[0] === 'project' && args[1] === 'browse'
+        ? { folder: '/Users/me/dev/chosen-repo' }
+        : { fixture: true },
+    );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /add project/i }));
+    fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: /folder/i }) as HTMLInputElement).value).toBe(
+        '/Users/me/dev/chosen-repo',
+      ),
+    );
+    expect((screen.getByRole('textbox', { name: /project name/i }) as HTMLInputElement).value).toBe(
+      'chosen-repo',
+    );
+    expect(api.execute).toHaveBeenCalledWith(['project', 'browse']);
+  });
+
+  it('keeps the add-project dialog open when folder selection is canceled', async () => {
+    api.execute.mockImplementation(async (args: string[]) =>
+      args[0] === 'project' && args[1] === 'browse' ? { folder: null } : { fixture: true },
+    );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /project: clew/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /add project/i }));
+    fireEvent.click(screen.getByRole('button', { name: /browse/i }));
+
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['project', 'browse']));
+    expect((screen.getByRole('textbox', { name: /folder/i }) as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 
@@ -870,7 +1070,7 @@ describe('project overview', () => {
       projects: structuredClone(fixtureProjects),
       state: 'fixture',
     });
-    window.history.replaceState({}, '', '/projects/PRJ-LYKAR/overview');
+    window.history.replaceState({}, '', '/projects/lykar/overview');
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Lykar' });
@@ -888,7 +1088,7 @@ describe('project overview', () => {
     const overview = screen.getByText('Needs attention').closest('.overview') as HTMLElement;
     fireEvent.click(within(overview).getByRole('button', { name: /session revocation rollout/i }));
 
-    expect(window.location.pathname).toBe('/projects/PRJ-CLEW/tasks/CLW-EXEC');
+    expect(window.location.pathname).toBe('/projects/clew/tasks/CLW-EXEC');
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Session revocation rollout' }),
     ).toBeTruthy();
@@ -993,7 +1193,7 @@ describe('project awareness', () => {
     fireEvent.click(await screen.findByRole('button', { name: /attention/i }));
     fireEvent.click(await screen.findByRole('button', { name: /lykar review needed/i }));
 
-    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+    expect(window.location.pathname).toBe('/projects/lykar/tasks/LYK-WAIT');
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Lykar review needed' }),
     ).toBeTruthy();
@@ -1015,7 +1215,7 @@ describe('project awareness', () => {
     fireEvent.input(input, { target: { value: 'lyk-wait' } });
     fireEvent.keyDown(document.body, { key: 'Enter' });
 
-    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+    expect(window.location.pathname).toBe('/projects/lykar/tasks/LYK-WAIT');
   });
 
   it('selects a palette entry with the pointer', async () => {
@@ -1034,7 +1234,7 @@ describe('project awareness', () => {
     fireEvent.input(input, { target: { value: 'lykar review needed' } });
     fireEvent.click(within(dialog).getByRole('button', { name: /lykar review needed/i }));
 
-    expect(window.location.pathname).toBe('/projects/PRJ-LYKAR/tasks/LYK-WAIT');
+    expect(window.location.pathname).toBe('/projects/lykar/tasks/LYK-WAIT');
   });
 
   it('closes the palette with Escape', async () => {

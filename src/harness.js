@@ -100,7 +100,19 @@ function unixSocketPath(endpoint) {
   return endpoint.slice('unix://'.length);
 }
 
-function waitForUnixSocket(path, child, timeoutMs, signal) {
+export function codexLaunchError(error, command = 'codex') {
+  if (error?.code !== 'ENOENT') return error;
+  const normalized = new Error(
+    `Codex executable was not found (${command}). Install Codex or set CLEW_CODEX_BIN to its absolute path, then restart the Clew daemon.`,
+    { cause: error },
+  );
+
+  normalized.code = 'CODEX_EXECUTABLE_NOT_FOUND';
+
+  return normalized;
+}
+
+function waitForUnixSocket(path, child, timeoutMs, signal, command = 'codex') {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const finish = (error = null) => {
@@ -115,7 +127,7 @@ function waitForUnixSocket(path, child, timeoutMs, signal) {
       if (Date.now() - startedAt >= timeoutMs)
         finish(new Error(`Codex app-server did not create its live socket: ${path}`));
     };
-    const onError = (error) => finish(error);
+    const onError = (error) => finish(codexLaunchError(error, command));
     const onExit = (code) =>
       finish(new Error(`Codex app-server exited before its live socket was ready (${code})`));
     const onAbort = () => finish(new HarnessInterruptedError('Codex'));
@@ -219,7 +231,7 @@ function readInteractiveThread({ command, cwd, name, spawnImpl, timeoutMs = 10_0
     );
 
     child.stdin.on('error', (error) => finish(error));
-    child.on('error', (error) => finish(error));
+    child.on('error', (error) => finish(codexLaunchError(error, command)));
     child.on('exit', (code) => {
       if (!settled) finish(new Error(`Codex thread reader exited with code ${code}`));
     });
@@ -506,7 +518,13 @@ export class CodexHarness {
         stdio: ['ignore', 'ignore', 'inherit'],
       });
       try {
-        await waitForUnixSocket(liveSocketPath, serverChild, this.startupTimeoutMs, signal);
+        await waitForUnixSocket(
+          liveSocketPath,
+          serverChild,
+          this.startupTimeoutMs,
+          signal,
+          this.command,
+        );
       } catch (error) {
         serverChild.kill();
         throw error;
@@ -802,7 +820,7 @@ export class CodexHarness {
         settleRequest(
           resolve,
           reject,
-          new Error(`failed to start Codex app-server: ${error.message}`),
+          codexLaunchError(error, this.command),
           null,
           HARNESS_EVENT_TYPE.HARNESS_FAILED,
         ),
@@ -944,7 +962,7 @@ export class CodexHarness {
     let monitor = null;
 
     try {
-      await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal);
+      await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal, this.command);
       const prompt = interactivePrompt(executionBrief);
       const commonArgs = [
         '--remote',

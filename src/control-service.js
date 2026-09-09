@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { URL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import {
   isVersionAtLeast,
   isSupportedVersion,
@@ -33,6 +34,7 @@ import { GitChangeInspectionService } from './change-inspection.js';
 import { analyzeTask } from './task-analysis.js';
 import { buildFinalizationReport } from './finalization.js';
 import { createProjectId, detectProject } from './project.js';
+import { pickFolder } from './folder-picker.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -77,7 +79,7 @@ const TASK_COMMANDS = new Set([
   'thread',
   'usage',
 ]);
-const PROJECT_COMMANDS = new Set(['add', 'list', 'show']);
+const PROJECT_COMMANDS = new Set(['add', 'browse', 'list', 'show']);
 const SESSION_COMMANDS = new Set(['capabilities', 'open']);
 
 function getOptionValue(args, name, fallback = undefined) {
@@ -224,6 +226,7 @@ export class ClewService {
     terminalManager = null,
     runnerGateway = null,
     editorLauncher = null,
+    folderPicker = pickFolder,
   }) {
     this.cwd = resolve(cwd);
     this.store = store;
@@ -231,6 +234,7 @@ export class ClewService {
     this.terminalManager = terminalManager;
     this.runnerGateway = runnerGateway;
     this.editorLauncher = editorLauncher;
+    this.folderPicker = folderPicker;
   }
 
   supports(args) {
@@ -360,6 +364,8 @@ export class ClewService {
   }
 
   project(subcommand, args) {
+    if (subcommand === 'browse')
+      return Promise.resolve(this.folderPicker()).then((folder) => ({ folder }));
     if (subcommand === 'list') return this.store.listProjects();
     if (subcommand === 'show') {
       const id = args[0];
@@ -755,6 +761,12 @@ export class ClewService {
     };
     delete input.attachments;
     const contract = validateTaskContract(input);
+    const existing = this.store.getTask(contract.id);
+
+    if (existing) {
+      if (isDeepStrictEqual(existing.contract, contract)) return existing.contract;
+      throw new Error(`task already exists with different input: ${contract.id}`);
+    }
 
     if (contract.projectId && !this.store.getProject(contract.projectId))
       throw new Error(`project not found: ${contract.projectId}`);

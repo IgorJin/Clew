@@ -404,6 +404,10 @@ lifecycle contracts → Finalization Gate → Git integration → Task Screen v3
 
 Release evidence is recorded in [`RELEASE-0.9.md`](./RELEASE-0.9.md). External deployment detection, cloud PR providers, and automatic merge/push remain outside the release boundary.
 
+## Plugin architecture proposal
+
+The proposed next integration boundary is documented in [Plugin architecture and implementation plan](./docs/PLUGIN-ARCHITECTURE.md). It covers a shared plugin registry, runtime connections for Codex/OpenCode/Claude Code, role routing, Controller/Runner compatibility, and extraction of the existing OpenTelemetry integration. Release assignment is pending; the first scope is P1–P5, followed by metrics, pricing sources, and change viewers.
+
 ## Research queue after v0.9
 
 These topics require discovery before release commitment:

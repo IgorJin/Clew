@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { execute, loadTasks, subscribeToEvents } from './api';
+import { bootstrap, execute, loadTasks, subscribeToEvents } from './api';
 
 const response = (body: unknown, status = 200) =>
   new Response(body === null ? null : JSON.stringify(body), {
@@ -13,7 +13,11 @@ function installApi({ invalidThread = false, plannedOnly = false } = {}) {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (url.endsWith('/api/v1/bootstrap')) return response(null, 204);
+      if (url.endsWith('/api/v1/bootstrap'))
+        return new Response(null, {
+          status: 204,
+          headers: { 'x-clew-runtime-version': '4' },
+        });
       if (url.endsWith('/api/v1/snapshot'))
         return response({
           version: 1,
@@ -91,7 +95,10 @@ function installApi({ invalidThread = false, plannedOnly = false } = {}) {
 }
 
 describe('control-plane client', () => {
-  beforeEach(() => installApi());
+  beforeEach(() => {
+    sessionStorage.clear();
+    installApi();
+  });
 
   it('loads task detail and the CLEW-070 thread projection', async () => {
     const result = await loadTasks();
@@ -126,6 +133,16 @@ describe('control-plane client', () => {
 
     expect(result.state).toBe('fixture');
     expect(result.tasks.length).toBeGreaterThan(0);
+  });
+
+  it('rejects a daemon without the matching runtime version', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+
+    await expect(bootstrap()).resolves.toBe(false);
+    expect(sessionStorage.getItem('clew-incompatible')).toBe('1');
   });
 
   it('rejects an invalid thread cursor as an incompatible daemon', async () => {
@@ -193,6 +210,11 @@ describe('control-plane client', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
 
+        if (url.endsWith('/api/v1/bootstrap'))
+          return new Response(null, {
+            status: 204,
+            headers: { 'x-clew-runtime-version': '4' },
+          });
         if (url.endsWith('/api/v1/snapshot'))
           return response({
             version: 1,
@@ -254,6 +276,11 @@ describe('control-plane client', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
 
+        if (url.endsWith('/api/v1/bootstrap'))
+          return new Response(null, {
+            status: 204,
+            headers: { 'x-clew-runtime-version': '4' },
+          });
         if (url.endsWith('/api/v1/snapshot'))
           return response({
             version: 1,
