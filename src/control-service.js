@@ -889,6 +889,7 @@ export class ClewService {
         capabilities: createSessionSurface({
           kind: getOptionValue(args, '--surface', 'plain'),
           codexBin: this.config.codexBin,
+          trustedWorkspaceRoot: this.config.worktreeRoot,
         }).capabilities(harness),
       };
     }
@@ -910,6 +911,7 @@ export class ClewService {
     const surface = createSessionSurface({
       kind: getOptionValue(args, '--surface', 'plain'),
       codexBin: this.config.codexBin,
+      trustedWorkspaceRoot: this.config.worktreeRoot,
     });
 
     return openSessionForRun(this.store, request, surface);

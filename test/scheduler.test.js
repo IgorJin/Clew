@@ -406,6 +406,7 @@ test('resumes the worker session with structured review feedback', async () => {
         return reviews === 1
           ? {
               verdict: 'request_changes',
+              sessionId: 'review-session-1',
               findings: [
                 {
                   severity: 'blocking',
@@ -414,7 +415,7 @@ test('resumes the worker session with structured review feedback', async () => {
                 },
               ],
             }
-          : { verdict: 'pass', findings: [] };
+          : { verdict: 'pass', findings: [], sessionId: 'review-session-2' };
       },
     }),
   });
@@ -428,6 +429,10 @@ test('resumes the worker session with structured review feedback', async () => {
     'Add the missing edge case',
   );
   assert.equal(calls[1].executionBrief.task.goal, 'Implement carefully');
+  assert.deepEqual(
+    new Set(store.listAgentSessions('T-FEEDBACK').map((session) => session.session_id)),
+    new Set(['review-session-1', 'review-session-2']),
+  );
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -1199,7 +1204,7 @@ test('normalizes a native reviewer output behind the reviewer boundary', async (
     run: async (input) => {
       request = input;
 
-      return { output: { verdict: 'pass', findings: [] } };
+      return { output: { verdict: 'pass', findings: [] }, sessionId: 'review-thread-1' };
     },
   });
   const result = await reviewer.review({
@@ -1215,6 +1220,7 @@ test('normalizes a native reviewer output behind the reviewer boundary', async (
   });
 
   assert.equal(result.verdict, 'pass');
+  assert.equal(result.sessionId, 'review-thread-1');
   assert.equal(request.cwd, '/review-worktree');
   assert.equal(request.task.goal, 'Review');
   assert.equal(request.executionBrief.role, 'reviewer');

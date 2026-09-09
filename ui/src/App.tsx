@@ -1423,10 +1423,18 @@ function AgentGrid({
         );
         const isRunning = isWorkerRole
           ? run?.status === 'RUNNING' || (isCurrentRun && task.runStatus === 'RUNNING')
-          : false;
+          : role === 'reviewer'
+            ? task.state === 'REVIEWING'
+            : role === 'architect'
+              ? task.state === 'DRAFT' && Boolean(agentSession)
+              : false;
         const isCompleted = isWorkerRole
           ? run?.status === 'COMPLETED' || (isCurrentRun && task.runStatus === 'COMPLETED')
-          : false;
+          : role === 'reviewer'
+            ? task.reviewed === true && task.state !== 'REVIEWING'
+            : role === 'architect'
+              ? Boolean(task.architecture)
+              : false;
         const hasSession = isWorkerRole
           ? !!(run?.sessionId || (isCurrentRun && task.sessionId) || isRunning)
           : !!agentSession;
@@ -1444,7 +1452,23 @@ function AgentGrid({
             )
           : Boolean(agentSession);
         const expanded = expandedAgent === key && terminalAvailable && Boolean(terminalId);
-        const statusClass = isRunning ? 'running' : isCompleted ? 'completed' : 'idle';
+        const hasOpenReviewFindings = role === 'reviewer' && task.findings > 0;
+        const statusClass = isRunning
+          ? 'running'
+          : hasOpenReviewFindings
+            ? 'error'
+            : isCompleted
+              ? 'completed'
+              : 'idle';
+        const statusLabel = isRunning
+          ? 'running'
+          : hasOpenReviewFindings
+            ? `${task.findings} open`
+            : isCompleted
+              ? 'done'
+              : hasSession
+                ? 'available'
+                : 'idle';
 
         return (
           <div className={`agent-card${expanded ? ' expanded' : ''}`} key={key}>
@@ -1453,9 +1477,7 @@ function AgentGrid({
                 <span className="agent-role-icon">{agentIcon(role)}</span>
                 {label}
               </span>
-              <span className={`agent-status ${statusClass}`}>
-                {isRunning ? 'running' : isCompleted ? 'done' : hasSession ? 'available' : 'idle'}
-              </span>
+              <span className={`agent-status ${statusClass}`}>{statusLabel}</span>
             </div>
             <div className="agent-meta">
               {isWorkerRole ? (
@@ -1467,13 +1489,22 @@ function AgentGrid({
                 ) : (
                   <span>No runs</span>
                 )
+              ) : role === 'reviewer' && task.state === 'REVIEWING' ? (
+                <span>Reviewing the latest worker revision</span>
+              ) : role === 'reviewer' && task.reviewed ? (
+                <span>
+                  {task.findings > 0
+                    ? `Review requested corrections · ${task.findings} open finding${task.findings === 1 ? '' : 's'}`
+                    : 'Review passed'}
+                  {agentSession && <span> · {agentSession.harness} session available</span>}
+                </span>
               ) : agentSession ? (
                 <>
                   {agentSession.harness} · session available
                   {agentSession.workspace && <span> · {agentSession.workspace}</span>}
                 </>
               ) : (
-                <span>Plan not created yet</span>
+                <span>{role === 'reviewer' ? 'Review not started' : 'Plan not created yet'}</span>
               )}
             </div>
             <div className="agent-actions">

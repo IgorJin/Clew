@@ -85,22 +85,24 @@ export class RunnerExecutionPort {
     return Object.freeze({ execute: true, terminal: { access: 'runner_local' } });
   }
 
-  createHarness(name) {
+  createHarness(name, trustedWorkspaceRoot = null) {
     if (this.harnessFactory) return this.harnessFactory(name);
     if (name === 'fake') return new FakeHarness();
     if (name === 'codex')
       return new CodexHarness({
         command: this.adapterConfig.codexBin ?? 'codex',
         openDesktop: this.adapterConfig.openCodexDesktop ?? false,
+        trustedWorkspaceRoot,
       });
     if (name === 'opencode')
       return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
     throw new Error(`unsupported Runner harness: ${name}`);
   }
 
-  createReviewer(name) {
+  createReviewer(name, trustedWorkspaceRoot = null) {
     if (name === 'fake') return new FakeReviewer();
-    if (name === 'codex') return new CodexReviewer(this.createHarness('codex'));
+    if (name === 'codex')
+      return new CodexReviewer(this.createHarness('codex', trustedWorkspaceRoot));
     throw new Error(`unsupported Runner reviewer: ${name}`);
   }
 
@@ -164,7 +166,7 @@ export class RunnerExecutionPort {
 
       if (workspaceManager && dependencyRevisions.length)
         workspaceManager.integrateCommits(workspace.path, dependencyRevisions);
-      const harness = this.createHarness(harnessName);
+      const harness = this.createHarness(harnessName, workspaceManager?.root ?? null);
       const result = await harness.run({
         task,
         executionBrief: requirements.executionBrief,
@@ -189,7 +191,10 @@ export class RunnerExecutionPort {
       );
       const evidence = safeEvidence(result.verification);
       const review = requirements.review
-        ? await this.createReviewer(requirements.reviewHarness ?? harnessName).review({
+        ? await this.createReviewer(
+            requirements.reviewHarness ?? harnessName,
+            workspaceManager?.root ?? null,
+          ).review({
             task,
             evidence,
             revision,

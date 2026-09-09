@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import WebSocket from 'ws';
@@ -224,13 +224,18 @@ test('active worker is observed before its sole writer is handed to the interact
 
 test('persisted Codex sessions can be reopened after their worker run finishes', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'clew-terminal-reopen-'));
+  const worktreeRoot = join(directory, 'worktrees');
+  const workspace = join(worktreeRoot, 'TASK-1-worker');
   const socketPath = join(directory, 'codex.sock');
   const terminal = new FakeTerminal();
   const server = new EventEmitter();
   const spawned = [];
 
+  mkdirSync(workspace, { recursive: true });
+
   server.kill = () => spawned.push('server-killed');
   const manager = new TerminalSessionManager({
+    trustedWorkspaceRoot: worktreeRoot,
     spawnPty: () => terminal,
     spawnProcess: (command, args) => {
       spawned.push([command, args]);
@@ -246,13 +251,22 @@ test('persisted Codex sessions can be reopened after their worker run finishes',
     sessionId: 'thread-finished',
     command: 'codex',
     args: ['resume', '--remote', `unix://${socketPath}`, 'thread-finished'],
-    cwd: directory,
+    cwd: workspace,
     endpoint: `unix://${socketPath}`,
     socketPath,
   });
 
   assert.equal(manager.has('run-finished'), true);
-  assert.deepEqual(spawned[0], ['codex', ['app-server', '--listen', `unix://${socketPath}`]]);
+  assert.deepEqual(spawned[0], [
+    'codex',
+    [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+      'app-server',
+      '--listen',
+      `unix://${socketPath}`,
+    ],
+  ]);
   terminal.onDataCallback('reopened');
   const client = new FakeClient();
 

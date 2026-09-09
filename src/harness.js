@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 import { extractUsage } from './usage.js';
 import { CodexTurnMonitor } from './codex-turn-monitor.js';
 import { compileHarnessPrompt, ensureExecutionBrief } from './execution-brief.js';
+import { buildCodexProjectTrustArgs } from './session-surface.js';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -112,6 +113,12 @@ export function codexLaunchError(error, command = 'codex') {
   return normalized;
 }
 
+function codexArgs(command, cwd, args, trustedWorkspaceRoot = null) {
+  return basename(command) === 'codex'
+    ? [...buildCodexProjectTrustArgs(cwd, trustedWorkspaceRoot), ...args]
+    : args;
+}
+
 function waitForUnixSocket(path, child, timeoutMs, signal, command = 'codex') {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -199,12 +206,23 @@ function interactiveResult(thread, cwd) {
   };
 }
 
-function readInteractiveThread({ command, cwd, name, spawnImpl, timeoutMs = 10_000 }) {
+function readInteractiveThread({
+  command,
+  cwd,
+  name,
+  spawnImpl,
+  trustedWorkspaceRoot = null,
+  timeoutMs = 10_000,
+}) {
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(command, ['app-server'], {
-      cwd,
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
+    const child = spawnImpl(
+      command,
+      codexArgs(command, cwd, ['app-server'], trustedWorkspaceRoot),
+      {
+        cwd,
+        stdio: ['pipe', 'pipe', 'inherit'],
+      },
+    );
     let buffer = '';
     let nextId = 1;
     let settled = false;
@@ -458,6 +476,7 @@ export class CodexHarness {
     model = null,
     openDesktop = false,
     terminalManager = null,
+    trustedWorkspaceRoot = null,
     spawnImpl = spawn,
   } = {}) {
     this.command = command;
@@ -468,6 +487,7 @@ export class CodexHarness {
     this.model = model;
     this.openDesktop = openDesktop;
     this.terminalManager = terminalManager;
+    this.trustedWorkspaceRoot = trustedWorkspaceRoot;
     this.spawn = spawnImpl;
   }
 
@@ -513,10 +533,19 @@ export class CodexHarness {
     if (liveEndpoint) {
       liveSocketPath = unixSocketPath(liveEndpoint);
       rmSync(liveSocketPath, { force: true });
-      serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
-        cwd,
-        stdio: ['ignore', 'ignore', 'inherit'],
-      });
+      serverChild = this.spawn(
+        this.command,
+        codexArgs(
+          this.command,
+          cwd,
+          [...this.args, '--listen', liveEndpoint],
+          this.trustedWorkspaceRoot,
+        ),
+        {
+          cwd,
+          stdio: ['ignore', 'ignore', 'inherit'],
+        },
+      );
       try {
         await waitForUnixSocket(
           liveSocketPath,
@@ -529,15 +558,28 @@ export class CodexHarness {
         serverChild.kill();
         throw error;
       }
-      child = this.spawn(this.command, ['app-server', 'proxy', '--sock', liveSocketPath], {
-        cwd,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
+      child = this.spawn(
+        this.command,
+        codexArgs(
+          this.command,
+          cwd,
+          ['app-server', 'proxy', '--sock', liveSocketPath],
+          this.trustedWorkspaceRoot,
+        ),
+        {
+          cwd,
+          stdio: ['pipe', 'pipe', 'inherit'],
+        },
+      );
     } else
-      child = this.spawn(this.command, this.args, {
-        cwd,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
+      child = this.spawn(
+        this.command,
+        codexArgs(this.command, cwd, this.args, this.trustedWorkspaceRoot),
+        {
+          cwd,
+          stdio: ['pipe', 'pipe', 'inherit'],
+        },
+      );
     const correlationId = `codex-${randomUUID()}`;
     let nextRequestId = 1;
     const pendingRequests = new Map();
@@ -884,11 +926,15 @@ export class CodexHarness {
 
             pendingRequests.set(nameRequestId, () => {});
             if (this.openDesktop) {
-              const desktop = this.spawn(this.command, ['app', cwd], {
-                cwd,
-                detached: true,
-                stdio: 'ignore',
-              });
+              const desktop = this.spawn(
+                this.command,
+                codexArgs(this.command, cwd, ['app', cwd], this.trustedWorkspaceRoot),
+                {
+                  cwd,
+                  detached: true,
+                  stdio: 'ignore',
+                },
+              );
 
               desktop.on?.('error', () => {});
               desktop.unref?.();
@@ -954,10 +1000,19 @@ export class CodexHarness {
     const nativeResumeSessionId = resumeSessionId?.startsWith('codex-') ? null : resumeSessionId;
 
     rmSync(socketPath, { force: true });
-    const serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
-      cwd,
-      stdio: ['ignore', 'ignore', 'inherit'],
-    });
+    const serverChild = this.spawn(
+      this.command,
+      codexArgs(
+        this.command,
+        cwd,
+        [...this.args, '--listen', liveEndpoint],
+        this.trustedWorkspaceRoot,
+      ),
+      {
+        cwd,
+        stdio: ['ignore', 'ignore', 'inherit'],
+      },
+    );
 
     let monitor = null;
 
@@ -976,9 +1031,14 @@ export class CodexHarness {
         'on-request',
         ...(model ? ['-m', model] : []),
       ];
-      const terminalArgs = nativeResumeSessionId
-        ? ['resume', ...commonArgs, nativeResumeSessionId, prompt]
-        : [...commonArgs, prompt];
+      const terminalArgs = codexArgs(
+        this.command,
+        cwd,
+        nativeResumeSessionId
+          ? ['resume', ...commonArgs, nativeResumeSessionId, prompt]
+          : [...commonArgs, prompt],
+        this.trustedWorkspaceRoot,
+      );
       const correlationId = `codex-${randomUUID()}`;
 
       monitor = new CodexTurnMonitor({
@@ -1037,11 +1097,15 @@ export class CodexHarness {
       });
       onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId: correlationId, turnId: null });
       if (this.openDesktop) {
-        const desktop = this.spawn(this.command, ['app', cwd], {
-          cwd,
-          detached: true,
-          stdio: 'ignore',
-        });
+        const desktop = this.spawn(
+          this.command,
+          codexArgs(this.command, cwd, ['app', cwd], this.trustedWorkspaceRoot),
+          {
+            cwd,
+            detached: true,
+            stdio: 'ignore',
+          },
+        );
 
         desktop.on?.('error', () => {});
         desktop.unref?.();
@@ -1055,6 +1119,7 @@ export class CodexHarness {
         cwd,
         name: `[Clew] ${task.id} · ${stageId} — ${task.title}`,
         spawnImpl: this.spawn,
+        trustedWorkspaceRoot: this.trustedWorkspaceRoot,
         timeoutMs: Math.max(this.startupTimeoutMs * 2, 30_000),
       });
       const result = interactiveResult(thread, cwd);

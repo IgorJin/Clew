@@ -131,6 +131,23 @@ test('resolves role-specific model configuration with environment precedence', (
   }
 });
 
+test('uses Luna for Codex review by default without changing worker and architect models', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-default-review-model-'));
+
+  try {
+    const config = loadConfig(dir, { CLEW_USER_CONFIG: join(dir, 'missing.json') });
+
+    assert.deepEqual(config.models, {
+      worker: null,
+      architect: null,
+      reviewer: 'gpt-5.6-luna',
+      qa: null,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('loads standalone Runner config without consulting project config', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-runner-config-'));
   const userConfig = join(dir, 'user.json');

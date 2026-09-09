@@ -23,7 +23,11 @@ import { ControllerRunnerGateway } from './controller-runner-gateway.js';
 import { Observability } from './observability.js';
 import { TerminalSessionManager } from './terminal-manager.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
-import { assertWorkspace, buildCodexResumeArgs } from './session-surface.js';
+import {
+  assertWorkspace,
+  buildCodexProjectTrustArgs,
+  buildCodexResumeArgs,
+} from './session-surface.js';
 import { isPublicThreadEvent } from './thread.js';
 import {
   validateApiEnvelope,
@@ -227,7 +231,9 @@ export class LocalDaemon {
       this.observability.onEvent(event);
       this.broadcastEvents();
     });
-    this.terminalManager = new TerminalSessionManager();
+    this.terminalManager = new TerminalSessionManager({
+      trustedWorkspaceRoot: config.worktreeRoot,
+    });
     this.control = new ClewService({
       cwd: this.cwd,
       store: this.store,
@@ -640,7 +646,11 @@ export class LocalDaemon {
             taskId: agentSession.task_id,
             sessionId: agentSession.session_id,
             command: this.config?.codexBin ?? 'codex',
-            args: buildCodexResumeArgs({ sessionId: agentSession.session_id }),
+            args: buildCodexResumeArgs({
+              sessionId: agentSession.session_id,
+              workspace,
+              trustedWorkspaceRoot: this.config?.worktreeRoot ?? null,
+            }),
             cwd: workspace,
           });
         this.terminalManager.attach(client, agentSession.id);
@@ -666,7 +676,13 @@ export class LocalDaemon {
           taskId: run.task_id,
           sessionId: run.session_id,
           command: this.config?.codexBin ?? 'codex',
-          args: ['resume', '--remote', endpoint, run.session_id],
+          args: [
+            ...buildCodexProjectTrustArgs(run.workspace, this.config?.worktreeRoot ?? null),
+            'resume',
+            '--remote',
+            endpoint,
+            run.session_id,
+          ],
           cwd: run.workspace,
           endpoint,
           socketPath: endpoint.slice('unix://'.length),

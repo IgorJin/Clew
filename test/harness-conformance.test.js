@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -285,6 +285,8 @@ test('Codex harness exposes a live app-server endpoint and opens the active thre
 
 test('daemon Codex harness makes the TUI the sole worker and reads its result after finish', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'clew-harness-interactive-'));
+  const worktreeRoot = join(directory, 'worktrees');
+  const workspace = join(worktreeRoot, 'TASK-worker');
   const socketPath = join(directory, 'codex.sock');
   const endpoint = `unix://${socketPath}`;
   const calls = [];
@@ -292,6 +294,8 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
   const terminalStarts = [];
   const identities = [];
   const events = [];
+
+  mkdirSync(workspace, { recursive: true });
   const spawnImpl = (command, args, options) => {
     calls.push({ command, args, options });
     const child = new EventEmitter();
@@ -358,8 +362,9 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
     close: () => true,
   };
   const harness = new CodexHarness({
-    command: 'codex-fixture',
+    command: 'codex',
     terminalManager,
+    trustedWorkspaceRoot: worktreeRoot,
     spawnImpl,
     startupTimeoutMs: 100,
   });
@@ -369,17 +374,26 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
       task: fixtureTask,
       stageId: 'worker',
       runId: 'run-interactive',
-      cwd: directory,
+      cwd: workspace,
       liveEndpoint: endpoint,
       onEvent: (event) => events.push(event),
     });
 
     assert.equal(terminalStarts.length, 1);
-    assert.equal(terminalStarts[0].command, 'codex-fixture');
+    assert.equal(terminalStarts[0].command, 'codex');
+    assert.deepEqual(terminalStarts[0].args.slice(0, 2), [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+    ]);
     assert.ok(terminalStarts[0].args.includes('--remote'));
     assert.ok(terminalStarts[0].args.includes(endpoint));
     assert.match(terminalStarts[0].args.at(-1), /Work interactively in this terminal/);
     assert.deepEqual(calls[1].args, ['app-server']);
+    assert.deepEqual(calls[2].args, [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+      'app-server',
+    ]);
     assert.equal(
       requests.some(({ method }) => method === 'thread/start'),
       false,

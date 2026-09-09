@@ -508,6 +508,27 @@ describe('Preact control plane', () => {
     expect(terminal.textContent).toContain('CLEW-071:architect:arch-session-1');
   });
 
+  it('shows recorded reviewer findings even when no terminal session was persisted', async () => {
+    const tasks = structuredClone(fixtureTasks);
+
+    tasks[0].state = 'EXECUTING';
+    tasks[0].reviewed = true;
+    tasks[0].findings = 2;
+    tasks[0].agentSessions = tasks[0].agentSessions.filter(
+      (session) => session.role !== 'reviewer',
+    );
+    api.loadTasks.mockResolvedValueOnce({
+      tasks,
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
+    render(<App />);
+
+    expect(await screen.findByText('2 open')).toBeTruthy();
+    expect(screen.getByText('Review requested corrections · 2 open findings')).toBeTruthy();
+    expect(screen.queryByText('Plan not created yet')).toBeNull();
+  });
+
   it('shows when a completed worker turn is waiting for operator input', async () => {
     const waitingTasks = structuredClone(fixtureTasks);
 

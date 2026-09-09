@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { validateOpenSessionRequest, validateOpenSessionResult } from './control-plane.js';
 import { createCodexLiveEndpoint } from './runtime.js';
 
@@ -38,10 +38,42 @@ export function assertWorkspace(workspace) {
   return resolve(workspace);
 }
 
-export function buildCodexResumeArgs({ sessionId, model = null } = {}) {
+/**
+ * Worker worktrees are created and controlled by Clew. Pass a one-shot Codex
+ * project trust override so the interactive CLI does not stop on its trust
+ * question for every newly-created worktree. This does not modify the user's
+ * persistent Codex config and does not change Clew's own sandbox policy.
+ */
+export function buildCodexProjectTrustArgs(workspace, trustedWorkspaceRoot = null) {
+  const resolved = assertWorkspace(workspace);
+
+  if (typeof trustedWorkspaceRoot !== 'string' || !isAbsolute(trustedWorkspaceRoot)) return [];
+  if (!existsSync(trustedWorkspaceRoot) || !statSync(trustedWorkspaceRoot).isDirectory()) return [];
+  const canonicalRoot = realpathSync(trustedWorkspaceRoot);
+  const canonicalWorkspace = realpathSync(resolved);
+  const pathWithinRoot = relative(canonicalRoot, canonicalWorkspace);
+
+  // The repository itself, arbitrary planning directories, and paths escaping
+  // through symlinks must retain the user's Codex trust decision. Only a child
+  // worktree under Clew's explicitly configured worktree root is eligible.
+  if (!pathWithinRoot || pathWithinRoot.startsWith('..') || isAbsolute(pathWithinRoot)) return [];
+
+  return ['--config', `projects.${JSON.stringify(canonicalWorkspace)}.trust_level="trusted"`];
+}
+
+export function buildCodexResumeArgs({
+  sessionId,
+  model = null,
+  workspace = null,
+  trustedWorkspaceRoot = null,
+} = {}) {
   if (typeof sessionId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{1,127}$/.test(sessionId))
     throw new Error('sessionId contains unsafe characters');
-  const args = ['resume', sessionId];
+  const args = [
+    ...(workspace ? buildCodexProjectTrustArgs(workspace, trustedWorkspaceRoot) : []),
+    'resume',
+    sessionId,
+  ];
 
   if (model !== null) {
     if (typeof model !== 'string' || !model.trim() || /[\0\r\n]/.test(model))
@@ -119,9 +151,10 @@ export function openWorkspaceInEditor({ editorBin = 'code', workspace, launcher 
 }
 
 export class LiveThreadTerminalSurface {
-  constructor({ codexBin = 'codex', launcher = null } = {}) {
+  constructor({ codexBin = 'codex', launcher = null, trustedWorkspaceRoot = null } = {}) {
     this.codexBin = codexBin;
     this.launcher = launcher;
+    this.trustedWorkspaceRoot = trustedWorkspaceRoot;
   }
 
   capabilities() {
@@ -154,7 +187,13 @@ export class LiveThreadTerminalSurface {
     } catch (error) {
       return Promise.resolve(unavailable(normalized, error.message, 'WORKSPACE_INVALID'));
     }
-    const args = ['resume', '--remote', normalized.liveEndpoint, normalized.sessionId];
+    const args = [
+      ...buildCodexProjectTrustArgs(workspace, this.trustedWorkspaceRoot),
+      'resume',
+      '--remote',
+      normalized.liveEndpoint,
+      normalized.sessionId,
+    ];
     const child =
       this.launcher?.(this.codexBin, args, {
         cwd: workspace,
@@ -201,9 +240,10 @@ export class NoneSurface {
 }
 
 export class PlainTerminalSurface {
-  constructor({ codexBin = 'codex', launcher = null } = {}) {
+  constructor({ codexBin = 'codex', launcher = null, trustedWorkspaceRoot = null } = {}) {
     this.codexBin = codexBin;
     this.launcher = launcher;
+    this.trustedWorkspaceRoot = trustedWorkspaceRoot;
   }
 
   capabilities(harness = 'codex') {
@@ -238,6 +278,8 @@ export class PlainTerminalSurface {
       args = buildCodexResumeArgs({
         sessionId: normalized.sessionId,
         model: normalized.model ?? null,
+        workspace,
+        trustedWorkspaceRoot: this.trustedWorkspaceRoot,
       });
     } catch (error) {
       return Promise.resolve(unavailable(normalized, error.message, 'SESSION_ID_INVALID'));
@@ -280,10 +322,14 @@ export class PlainTerminalSurface {
   }
 }
 
-export function createSessionSurface({ kind = 'plain', codexBin } = {}) {
+export function createSessionSurface({
+  kind = 'plain',
+  codexBin,
+  trustedWorkspaceRoot = null,
+} = {}) {
   if (kind === 'none') return new NoneSurface();
-  if (kind === 'plain') return new PlainTerminalSurface({ codexBin });
-  if (kind === 'live') return new LiveThreadTerminalSurface({ codexBin });
+  if (kind === 'plain') return new PlainTerminalSurface({ codexBin, trustedWorkspaceRoot });
+  if (kind === 'live') return new LiveThreadTerminalSurface({ codexBin, trustedWorkspaceRoot });
   throw new Error(`unsupported session surface: ${kind}`);
 }
 

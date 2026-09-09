@@ -60,7 +60,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   editorBin: 'code',
   changeViewer: null,
   worktreeRoot: '.clew/worktrees',
-  models: Object.freeze({ worker: null, architect: null, reviewer: null, qa: null }),
+  models: Object.freeze({
+    worker: null,
+    architect: null,
+    reviewer: 'gpt-5.6-luna',
+    qa: null,
+  }),
   pricing: Object.freeze({ sources: [] }),
   integration: Object.freeze({
     enabled: true,

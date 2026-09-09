@@ -378,12 +378,12 @@ export class Scheduler {
       let review = null;
 
       if (needsReview) {
-        const reviewer = this.createReviewerAdapter(
+        const reviewerName =
           requestedReviewHarness ??
-            (harnessName === HARNESS_NAME.FAKE
-              ? HARNESS_NAME.FAKE
-              : (profile.reviewHarness ?? HARNESS_NAME.CODEX)),
-        );
+          (harnessName === HARNESS_NAME.FAKE
+            ? HARNESS_NAME.FAKE
+            : (profile.reviewHarness ?? HARNESS_NAME.CODEX));
+        const reviewer = this.createReviewerAdapter(reviewerName);
         const persistedReview = this.store
           .listEvents(taskId)
           .filter((event) => event.type === 'REVIEW_RECORDED')
@@ -399,8 +399,10 @@ export class Scheduler {
             cwd: workspace.path,
           }));
 
-        if (!persistedReview)
+        if (!persistedReview) {
+          this.recordReviewerSession(taskId, review, workspace.path, reviewerName);
           this.store.appendEvent(taskId, 'REVIEW_RECORDED', { ...review, runId, stageId });
+        }
         if (review.verdict === REVIEW_VERDICT.PASS)
           this.store.setTaskState(taskId, readyStateForTask(row.contract));
         else {
@@ -578,7 +580,8 @@ export class Scheduler {
       let review = stageResult.review;
 
       if (!review && harnessName === HARNESS_NAME.FAKE) {
-        const reviewer = this.createReviewerAdapter(requestedReviewHarness ?? HARNESS_NAME.FAKE);
+        const reviewerName = requestedReviewHarness ?? HARNESS_NAME.FAKE;
+        const reviewer = this.createReviewerAdapter(reviewerName);
 
         review = await reviewer.review({
           task: row.contract,
@@ -586,6 +589,7 @@ export class Scheduler {
           revision: stageResult.revision,
           cwd: stageResult.workspace.path,
         });
+        this.recordReviewerSession(taskId, review, stageResult.workspace.path, reviewerName);
       }
       if (!review) throw new Error('paired Runner completed without the required review result');
       this.store.appendEvent(taskId, 'REVIEW_RECORDED', {
@@ -1162,10 +1166,10 @@ export class Scheduler {
     let review = integrationResult.review;
 
     if (!review) {
-      const reviewer = this.createReviewerAdapter(
+      const reviewerName =
         requestedReviewHarness ??
-          (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness),
-      );
+        (harnessName === HARNESS_NAME.FAKE ? HARNESS_NAME.FAKE : profile.reviewHarness);
+      const reviewer = this.createReviewerAdapter(reviewerName);
 
       review = await reviewer.review({
         task: row.contract,
@@ -1173,6 +1177,7 @@ export class Scheduler {
         revision: integrationResult.revision,
         cwd: integrationResult.workspace.path,
       });
+      this.recordReviewerSession(taskId, review, integrationResult.workspace.path, reviewerName);
     }
 
     this.store.appendEvent(taskId, 'REVIEW_RECORDED', {
@@ -1752,6 +1757,7 @@ export class Scheduler {
         command: this.adapterConfig.codexBin,
         openDesktop: this.adapterConfig.openCodexDesktop,
         terminalManager: this.adapterConfig.terminalManager,
+        trustedWorkspaceRoot: this.workspaceManager.root ?? null,
       });
     if (harnessName === HARNESS_NAME.OPENCODE)
       return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
@@ -1863,9 +1869,21 @@ export class Scheduler {
           new CodexHarness({
             command: this.adapterConfig.codexBin,
             model: this.adapterConfig.models?.reviewer,
+            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
           }),
         )
       : new FakeReviewer();
+  }
+
+  recordReviewerSession(taskId, review, workspace, harness) {
+    if (!review?.sessionId) return;
+    this.store.saveAgentSession({
+      taskId,
+      role: 'reviewer',
+      harness,
+      sessionId: review.sessionId,
+      workspace,
+    });
   }
 
   createArchitectAdapter(architectName) {
@@ -1876,6 +1894,7 @@ export class Scheduler {
           new CodexHarness({
             command: this.adapterConfig.codexBin,
             model: this.adapterConfig.models?.architect,
+            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
           }),
         )
       : new FakeArchitect();

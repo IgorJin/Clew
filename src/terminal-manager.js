@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
 import pty from 'node-pty';
 import WebSocket from 'ws';
+import { buildCodexProjectTrustArgs } from './session-surface.js';
 
 const MAX_REPLAY_BYTES = 1_000_000;
 
@@ -37,10 +38,12 @@ export class TerminalSessionManager {
     spawnPty = pty.spawn,
     spawnProcess = spawn,
     maxReplayBytes = MAX_REPLAY_BYTES,
+    trustedWorkspaceRoot = null,
   } = {}) {
     this.spawnPty = spawnPty;
     this.spawnProcess = spawnProcess;
     this.maxReplayBytes = maxReplayBytes;
+    this.trustedWorkspaceRoot = trustedWorkspaceRoot;
     this.sessions = new Map();
     this.pending = new Map();
   }
@@ -212,7 +215,12 @@ export class TerminalSessionManager {
     rmSync(options.socketPath, { force: true });
     const serverChild = this.spawnProcess(
       options.command,
-      ['app-server', '--listen', options.endpoint],
+      [
+        ...buildCodexProjectTrustArgs(options.cwd, this.trustedWorkspaceRoot),
+        'app-server',
+        '--listen',
+        options.endpoint,
+      ],
       {
         cwd: options.cwd,
         stdio: ['ignore', 'ignore', 'inherit'],
