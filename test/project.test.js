@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { ClewService } from '../src/control-service.js';
 import { validateProject } from '../src/domain.js';
+import { applyMigrations, CURRENT_SCHEMA_VERSION } from '../src/migrations.js';
 import { detectProject } from '../src/project.js';
 import { Store } from '../src/store.js';
 
@@ -211,13 +212,87 @@ test('legacy databases without project columns upgrade transparently', () => {
   }
 });
 
+test('project migration assigns legacy unscoped tasks to the oldest project', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-project-scope-migration-'));
+  const file = join(dir, 'clew.sqlite');
+  const database = new DatabaseSync(file);
+  const at = '2026-01-01T00:00:00.000Z';
+
+  applyMigrations(database, { through: 22 });
+  database
+    .prepare(
+      'INSERT INTO projects (id,name,local_path,repository_root,default_branch,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+    )
+    .run('PRJ-FIRST', 'First', '/tmp/first', '/tmp/first', 'main', at, at);
+  database
+    .prepare(
+      'INSERT INTO projects (id,name,local_path,repository_root,default_branch,created_at,updated_at) VALUES (?,?,?,?,?,?,?)',
+    )
+    .run('PRJ-SECOND', 'Second', '/tmp/second', '/tmp/second', 'main', at, at);
+  database
+    .prepare(
+      'INSERT INTO tasks (id,contract,state,created_at,updated_at,project_id) VALUES (?,?,?,?,?,NULL)',
+    )
+    .run(
+      'LEGACY-SCOPE',
+      JSON.stringify({ id: 'LEGACY-SCOPE', title: 'Legacy', goal: 'Preserve scope' }),
+      'DRAFT',
+      at,
+      at,
+    );
+  database.close();
+
+  const store = new Store(file);
+
+  try {
+    assert.equal(CURRENT_SCHEMA_VERSION, 23);
+    assert.equal(store.getTask('LEGACY-SCOPE').project_id, 'PRJ-FIRST');
+    assert.equal(store.getTask('LEGACY-SCOPE').contract.projectId, 'PRJ-FIRST');
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('adding the first project claims existing unscoped tasks', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-project-first-scope-'));
+  const store = new Store(join(dir, 'clew.sqlite'));
+
+  try {
+    store.createTask({ id: 'UNSCOPED-1', title: 'Unscoped', goal: 'Attach on project add' });
+    store.createProject({
+      id: 'PRJ-FIRST',
+      name: 'First',
+      localPath: '/tmp/first',
+      repositoryRoot: '/tmp/first',
+      defaultBranch: 'main',
+    });
+
+    assert.equal(store.getTask('UNSCOPED-1').project_id, 'PRJ-FIRST');
+    assert.equal(store.getTask('UNSCOPED-1').contract.projectId, 'PRJ-FIRST');
+  } finally {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('project lifecycle flows through the shared service boundary', async () => {
-  const { cwd, store, service } = makeService();
+  const { cwd, store } = makeService();
+  const service = new ClewService({
+    cwd,
+    store,
+    config: DEFAULT_CONFIG,
+    folderPicker: async () => '/tmp/chosen-repository',
+  });
 
   try {
     assert.equal(service.supports(['project', 'add']), true);
+    assert.equal(service.supports(['project', 'browse']), true);
     assert.equal(service.supports(['project', 'list']), true);
     assert.equal(service.supports(['project', 'show']), true);
+    assert.deepEqual(await service.execute(['project', 'browse']), {
+      folder: '/tmp/chosen-repository',
+    });
     assert.deepEqual(await service.execute(['project', 'list']), []);
     await assert.rejects(() => service.execute(['project', 'show', 'PRJ-X']), /project not found/);
   } finally {

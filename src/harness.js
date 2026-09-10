@@ -1,11 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 import { extractUsage } from './usage.js';
-import { CodexTurnMonitor } from './codex-turn-monitor.js';
+import {
+  CodexTurnMonitor,
+  stripWorkerStatusMarker,
+  WORKER_STATUS_MARKER,
+} from './codex-turn-monitor.js';
 import { compileHarnessPrompt, ensureExecutionBrief } from './execution-brief.js';
+import { buildCodexProjectTrustArgs } from './session-surface.js';
 
 export const HARNESS_EVENT_TYPE = Object.freeze({
   SESSION_STARTED: 'SESSION_STARTED',
@@ -24,6 +29,7 @@ export const HARNESS_EVENT_TYPE = Object.freeze({
   HARNESS_EVENT: 'HARNESS_EVENT',
   HARNESS_OUTPUT: 'HARNESS_OUTPUT',
   TURN_RUNNING: 'TURN_RUNNING',
+  TURN_COMPLETED: 'TURN_COMPLETED',
   TURN_WAITING: 'TURN_WAITING',
   TURN_FAILED: 'TURN_FAILED',
   TURN_INTERRUPTED: 'TURN_INTERRUPTED',
@@ -100,7 +106,25 @@ function unixSocketPath(endpoint) {
   return endpoint.slice('unix://'.length);
 }
 
-function waitForUnixSocket(path, child, timeoutMs, signal) {
+export function codexLaunchError(error, command = 'codex') {
+  if (error?.code !== 'ENOENT') return error;
+  const normalized = new Error(
+    `Codex executable was not found (${command}). Install Codex or set CLEW_CODEX_BIN to its absolute path, then restart the Clew daemon.`,
+    { cause: error },
+  );
+
+  normalized.code = 'CODEX_EXECUTABLE_NOT_FOUND';
+
+  return normalized;
+}
+
+function codexArgs(command, cwd, args, trustedWorkspaceRoot = null) {
+  return basename(command) === 'codex'
+    ? [...buildCodexProjectTrustArgs(cwd, trustedWorkspaceRoot), ...args]
+    : args;
+}
+
+function waitForUnixSocket(path, child, timeoutMs, signal, command = 'codex') {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const finish = (error = null) => {
@@ -115,7 +139,7 @@ function waitForUnixSocket(path, child, timeoutMs, signal) {
       if (Date.now() - startedAt >= timeoutMs)
         finish(new Error(`Codex app-server did not create its live socket: ${path}`));
     };
-    const onError = (error) => finish(error);
+    const onError = (error) => finish(codexLaunchError(error, command));
     const onExit = (code) =>
       finish(new Error(`Codex app-server exited before its live socket was ready (${code})`));
     const onAbort = () => finish(new HarnessInterruptedError('Codex'));
@@ -129,7 +153,14 @@ function waitForUnixSocket(path, child, timeoutMs, signal) {
 }
 
 function interactivePrompt(executionBrief) {
-  return `${compileHarnessPrompt(executionBrief, { harness: 'codex' })}\n\nWork interactively in this terminal. Ask for approval when required.`;
+  return `${compileHarnessPrompt(executionBrief, { harness: 'codex' })}
+
+Work interactively in this terminal. Ask for approval when required.
+
+Your final response must end with exactly one machine-readable status line:
+- ${WORKER_STATUS_MARKER.COMPLETE} — the requested work is finished and ready for verification, including when no file changes were necessary.
+- ${WORKER_STATUS_MARKER.NEEDS_INPUT} — progress is blocked on an answer from the operator.
+Do not use needs_input for a normal completion summary or optional follow-up.`;
 }
 
 function agentMessageText(item) {
@@ -182,17 +213,29 @@ function interactiveResult(thread, cwd) {
     sessionId: thread.id,
     turnId: turn?.id ?? null,
     verification,
-    output: finalMessage ?? 'Interactive Codex worker completed by the operator.',
+    output:
+      stripWorkerStatusMarker(finalMessage) || 'Interactive Codex worker completed automatically.',
     usage: turn?.usage ?? null,
   };
 }
 
-function readInteractiveThread({ command, cwd, name, spawnImpl, timeoutMs = 10_000 }) {
+function readInteractiveThread({
+  command,
+  cwd,
+  name,
+  spawnImpl,
+  trustedWorkspaceRoot = null,
+  timeoutMs = 10_000,
+}) {
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(command, ['app-server'], {
-      cwd,
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
+    const child = spawnImpl(
+      command,
+      codexArgs(command, cwd, ['app-server'], trustedWorkspaceRoot),
+      {
+        cwd,
+        stdio: ['pipe', 'pipe', 'inherit'],
+      },
+    );
     let buffer = '';
     let nextId = 1;
     let settled = false;
@@ -219,7 +262,7 @@ function readInteractiveThread({ command, cwd, name, spawnImpl, timeoutMs = 10_0
     );
 
     child.stdin.on('error', (error) => finish(error));
-    child.on('error', (error) => finish(error));
+    child.on('error', (error) => finish(codexLaunchError(error, command)));
     child.on('exit', (code) => {
       if (!settled) finish(new Error(`Codex thread reader exited with code ${code}`));
     });
@@ -446,6 +489,7 @@ export class CodexHarness {
     model = null,
     openDesktop = false,
     terminalManager = null,
+    trustedWorkspaceRoot = null,
     spawnImpl = spawn,
   } = {}) {
     this.command = command;
@@ -456,6 +500,7 @@ export class CodexHarness {
     this.model = model;
     this.openDesktop = openDesktop;
     this.terminalManager = terminalManager;
+    this.trustedWorkspaceRoot = trustedWorkspaceRoot;
     this.spawn = spawnImpl;
   }
 
@@ -501,25 +546,53 @@ export class CodexHarness {
     if (liveEndpoint) {
       liveSocketPath = unixSocketPath(liveEndpoint);
       rmSync(liveSocketPath, { force: true });
-      serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
-        cwd,
-        stdio: ['ignore', 'ignore', 'inherit'],
-      });
+      serverChild = this.spawn(
+        this.command,
+        codexArgs(
+          this.command,
+          cwd,
+          [...this.args, '--listen', liveEndpoint],
+          this.trustedWorkspaceRoot,
+        ),
+        {
+          cwd,
+          stdio: ['ignore', 'ignore', 'inherit'],
+        },
+      );
       try {
-        await waitForUnixSocket(liveSocketPath, serverChild, this.startupTimeoutMs, signal);
+        await waitForUnixSocket(
+          liveSocketPath,
+          serverChild,
+          this.startupTimeoutMs,
+          signal,
+          this.command,
+        );
       } catch (error) {
         serverChild.kill();
         throw error;
       }
-      child = this.spawn(this.command, ['app-server', 'proxy', '--sock', liveSocketPath], {
-        cwd,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
+      child = this.spawn(
+        this.command,
+        codexArgs(
+          this.command,
+          cwd,
+          ['app-server', 'proxy', '--sock', liveSocketPath],
+          this.trustedWorkspaceRoot,
+        ),
+        {
+          cwd,
+          stdio: ['pipe', 'pipe', 'inherit'],
+        },
+      );
     } else
-      child = this.spawn(this.command, this.args, {
-        cwd,
-        stdio: ['pipe', 'pipe', 'inherit'],
-      });
+      child = this.spawn(
+        this.command,
+        codexArgs(this.command, cwd, this.args, this.trustedWorkspaceRoot),
+        {
+          cwd,
+          stdio: ['pipe', 'pipe', 'inherit'],
+        },
+      );
     const correlationId = `codex-${randomUUID()}`;
     let nextRequestId = 1;
     const pendingRequests = new Map();
@@ -802,7 +875,7 @@ export class CodexHarness {
         settleRequest(
           resolve,
           reject,
-          new Error(`failed to start Codex app-server: ${error.message}`),
+          codexLaunchError(error, this.command),
           null,
           HARNESS_EVENT_TYPE.HARNESS_FAILED,
         ),
@@ -866,11 +939,15 @@ export class CodexHarness {
 
             pendingRequests.set(nameRequestId, () => {});
             if (this.openDesktop) {
-              const desktop = this.spawn(this.command, ['app', cwd], {
-                cwd,
-                detached: true,
-                stdio: 'ignore',
-              });
+              const desktop = this.spawn(
+                this.command,
+                codexArgs(this.command, cwd, ['app', cwd], this.trustedWorkspaceRoot),
+                {
+                  cwd,
+                  detached: true,
+                  stdio: 'ignore',
+                },
+              );
 
               desktop.on?.('error', () => {});
               desktop.unref?.();
@@ -936,15 +1013,24 @@ export class CodexHarness {
     const nativeResumeSessionId = resumeSessionId?.startsWith('codex-') ? null : resumeSessionId;
 
     rmSync(socketPath, { force: true });
-    const serverChild = this.spawn(this.command, [...this.args, '--listen', liveEndpoint], {
-      cwd,
-      stdio: ['ignore', 'ignore', 'inherit'],
-    });
+    const serverChild = this.spawn(
+      this.command,
+      codexArgs(
+        this.command,
+        cwd,
+        [...this.args, '--listen', liveEndpoint],
+        this.trustedWorkspaceRoot,
+      ),
+      {
+        cwd,
+        stdio: ['ignore', 'ignore', 'inherit'],
+      },
+    );
 
     let monitor = null;
 
     try {
-      await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal);
+      await waitForUnixSocket(socketPath, serverChild, this.startupTimeoutMs, signal, this.command);
       const prompt = interactivePrompt(executionBrief);
       const commonArgs = [
         '--remote',
@@ -958,9 +1044,14 @@ export class CodexHarness {
         'on-request',
         ...(model ? ['-m', model] : []),
       ];
-      const terminalArgs = nativeResumeSessionId
-        ? ['resume', ...commonArgs, nativeResumeSessionId, prompt]
-        : [...commonArgs, prompt];
+      const terminalArgs = codexArgs(
+        this.command,
+        cwd,
+        nativeResumeSessionId
+          ? ['resume', ...commonArgs, nativeResumeSessionId, prompt]
+          : [...commonArgs, prompt],
+        this.trustedWorkspaceRoot,
+      );
       const correlationId = `codex-${randomUUID()}`;
 
       monitor = new CodexTurnMonitor({
@@ -968,8 +1059,9 @@ export class CodexHarness {
         cwd,
         threadId: nativeResumeSessionId,
         spawnImpl: this.spawn,
+        ignoreInitialCompleted: Boolean(nativeResumeSessionId),
         onUpdate: (update) => {
-          this.terminalManager.updateInteraction(runId, update);
+          this.terminalManager.updateInteraction?.(runId, update);
           if (update.status === 'running')
             onEvent({
               type: HARNESS_EVENT_TYPE.TURN_RUNNING,
@@ -984,7 +1076,16 @@ export class CodexHarness {
               output: update.output,
               itemId: update.itemId,
             });
-          else if (update.status === 'failed')
+          else if (update.status === 'completed') {
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_COMPLETED,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+              output: update.output,
+              itemId: update.itemId,
+            });
+            this.terminalManager.finish?.(runId);
+          } else if (update.status === 'failed')
             onEvent({
               type: HARNESS_EVENT_TYPE.TURN_FAILED,
               sessionId: update.sessionId,
@@ -1019,11 +1120,15 @@ export class CodexHarness {
       });
       onEvent({ type: HARNESS_EVENT_TYPE.TURN_STARTED, sessionId: correlationId, turnId: null });
       if (this.openDesktop) {
-        const desktop = this.spawn(this.command, ['app', cwd], {
-          cwd,
-          detached: true,
-          stdio: 'ignore',
-        });
+        const desktop = this.spawn(
+          this.command,
+          codexArgs(this.command, cwd, ['app', cwd], this.trustedWorkspaceRoot),
+          {
+            cwd,
+            detached: true,
+            stdio: 'ignore',
+          },
+        );
 
         desktop.on?.('error', () => {});
         desktop.unref?.();
@@ -1037,6 +1142,7 @@ export class CodexHarness {
         cwd,
         name: `[Clew] ${task.id} · ${stageId} — ${task.title}`,
         spawnImpl: this.spawn,
+        trustedWorkspaceRoot: this.trustedWorkspaceRoot,
         timeoutMs: Math.max(this.startupTimeoutMs * 2, 30_000),
       });
       const result = interactiveResult(thread, cwd);

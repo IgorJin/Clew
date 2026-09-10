@@ -77,7 +77,11 @@ export class CodexReviewer {
     const report = result.output?.output ?? result.output;
 
     try {
-      return validateReviewResult({ ...report, revision });
+      return validateReviewResult({
+        ...report,
+        revision,
+        ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      });
     } catch {
       return {
         verdict: REVIEW_VERDICT.NEEDS_HUMAN,

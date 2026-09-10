@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 22;
+export const CURRENT_SCHEMA_VERSION = 23;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -495,6 +495,29 @@ const MIGRATIONS = Object.freeze([
 
       if (!columns.some((column) => column.name === 'project_id'))
         db.exec('ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT NULL');
+    },
+  },
+  {
+    version: 23,
+    apply(db) {
+      const firstProject = db
+        .prepare('SELECT id FROM projects ORDER BY created_at ASC, id ASC LIMIT 1')
+        .get();
+
+      if (firstProject) {
+        const tasks = db.prepare('SELECT id,contract FROM tasks WHERE project_id IS NULL').all();
+        const update = db.prepare('UPDATE tasks SET project_id=?,contract=? WHERE id=?');
+
+        for (const task of tasks) {
+          const contract = JSON.parse(task.contract);
+
+          update.run(
+            firstProject.id,
+            JSON.stringify({ ...contract, projectId: firstProject.id }),
+            task.id,
+          );
+        }
+      }
     },
   },
 ]);

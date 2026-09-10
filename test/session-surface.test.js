@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/store.js';
@@ -8,6 +8,7 @@ import {
   LiveThreadTerminalSurface,
   NoneSurface,
   PlainTerminalSurface,
+  buildCodexProjectTrustArgs,
   buildCodexResumeArgs,
   openSessionForRun,
   openWorkspaceInEditor,
@@ -16,9 +17,14 @@ import { createCodexLiveEndpoint, createRuntimeNamespace } from '../src/runtime.
 
 test('live terminal attaches Codex TUI to the active worker app-server', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-live-session-'));
+  const worktreeRoot = join(dir, 'worktrees');
+  const workspace = join(worktreeRoot, 'LIVE-1-worker');
+
+  mkdirSync(workspace, { recursive: true });
   const calls = [];
   const surface = new LiveThreadTerminalSurface({
     codexBin: '/usr/local/bin/codex',
+    trustedWorkspaceRoot: worktreeRoot,
     launcher: (bin, args, options) => {
       calls.push({ bin, args, options });
 
@@ -43,7 +49,7 @@ test('live terminal attaches Codex TUI to the active worker app-server', async (
     attempt: 1,
     status: 'RUNNING',
     harness: 'codex',
-    workspace: dir,
+    workspace,
     profile: 'quick',
     policy: {},
     runtimeNamespace,
@@ -65,12 +71,14 @@ test('live terminal attaches Codex TUI to the active worker app-server', async (
   assert.equal(result.state, 'opened');
   assert.equal(result.sessionId, 'thread-live-1');
   assert.deepEqual(calls[0].args, [
+    '--config',
+    `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
     'resume',
     '--remote',
     createCodexLiveEndpoint(runtimeNamespace),
     'thread-live-1',
   ]);
-  assert.equal(calls[0].options.cwd, dir);
+  assert.equal(calls[0].options.cwd, workspace);
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -122,11 +130,39 @@ test('Codex resume arguments use argv safely and preserve model context', () => 
     '--model',
     'gpt-test',
   ]);
+  const directory = mkdtempSync(join(tmpdir(), 'clew-codex-trust-'));
+  const worktreeRoot = join(directory, 'worktrees');
+  const workspace = join(worktreeRoot, 'task-worker');
+
+  mkdirSync(workspace, { recursive: true });
+
+  assert.deepEqual(buildCodexProjectTrustArgs(workspace), []);
+  assert.deepEqual(buildCodexProjectTrustArgs(directory, worktreeRoot), []);
+  assert.deepEqual(buildCodexProjectTrustArgs(workspace, worktreeRoot), [
+    '--config',
+    `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+  ]);
+  assert.deepEqual(
+    buildCodexResumeArgs({ sessionId: 'thread-1', workspace, trustedWorkspaceRoot: worktreeRoot }),
+    [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+      'resume',
+      'thread-1',
+    ],
+  );
+  const outside = join(directory, 'outside');
+  const escaped = join(worktreeRoot, 'escaped');
+
+  mkdirSync(outside);
+  symlinkSync(outside, escaped);
+  assert.deepEqual(buildCodexProjectTrustArgs(escaped, worktreeRoot), []);
   assert.throws(() => buildCodexResumeArgs({ sessionId: 'thread;rm -rf /' }), /unsafe/);
   assert.throws(
     () => buildCodexResumeArgs({ sessionId: 'thread-1', model: 'bad\nmodel' }),
     /invalid/,
   );
+  rmSync(directory, { recursive: true, force: true });
 });
 
 test('plain terminal surface opens the exact persisted Codex session without creating a run', async () => {
@@ -136,6 +172,7 @@ test('plain terminal surface opens the exact persisted Codex session without cre
   mkdirSync(workspace);
   const calls = [];
   const surface = new PlainTerminalSurface({
+    trustedWorkspaceRoot: dir,
     launcher: (bin, args, options) => {
       calls.push({ bin, args, options });
 
@@ -180,7 +217,12 @@ test('plain terminal surface opens the exact persisted Codex session without cre
   assert.equal(result.state, 'resumed');
   assert.equal(result.sessionId, 'thread-1');
   assert.equal(calls[0].options.cwd, workspace);
-  assert.deepEqual(calls[0].args, ['resume', 'thread-1']);
+  assert.deepEqual(calls[0].args, [
+    '--config',
+    `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+    'resume',
+    'thread-1',
+  ]);
   assert.equal(store.listRuns('SESSION-1').length, before);
   store.close();
   rmSync(dir, { recursive: true, force: true });

@@ -78,6 +78,20 @@ function section(text, heading) {
   return match?.[1] ?? null;
 }
 
+function evidenceResults(evidence) {
+  return evidence
+    .split('\n')
+    .filter((line) => /^\|\s*AC-\d+\s*\|/.test(line))
+    .map((line) => {
+      const cells = line
+        .split('|')
+        .slice(1)
+        .map((cell) => cell.trim());
+
+      return cells.at(-1) === '' ? (cells.at(-2) ?? '') : (cells.at(-1) ?? '');
+    });
+}
+
 const cardFiles = [
   ...readdirSync(taskDir).filter((file) => /^CLEW-\d{3}\.md$/.test(file)),
   ...(existsSync(`${taskDir}/done`)
@@ -123,7 +137,11 @@ for (const card of cards) {
       if (!new RegExp(`\\|\\s*AC-${index}\\s*\\|`).test(evidence))
         throw new Error(`${card.file}: AC-${index} is missing from Acceptance evidence`);
     if (card.status === 'done') {
-      if (/\b(?:pending|missing|failed|not covered)\b/i.test(evidence))
+      if (
+        evidenceResults(evidence).some((result) =>
+          /\b(?:pending|missing|failed|not covered)\b/i.test(result),
+        )
+      )
         throw new Error(`${card.file}: done task has incomplete acceptance evidence`);
       if (!/Verdict:\s*pass\b/i.test(review))
         throw new Error(`${card.file}: done task requires a passing review verdict`);

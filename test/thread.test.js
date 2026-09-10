@@ -102,6 +102,21 @@ test('projects an interactive completed turn as an operator-waiting response', (
   assert.equal(items[1].runId, 'run-1');
 });
 
+test('projects automatic interactive completion before verification', () => {
+  const items = projectTaskThread({
+    events: [
+      event(1, 'HARNESS_TURN_COMPLETED', {
+        runId: 'run-1',
+        sessionId: 'thread-1',
+        turnId: 'turn-1',
+      }),
+    ],
+  });
+
+  assert.equal(items[0].kind, 'worker_turn_completed');
+  assert.match(items[0].summary, /verification is starting/i);
+});
+
 test('persists redacted operator messages and exposes a separate diagnostic view', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-thread-'));
   const store = new Store(join(dir, 'clew.sqlite'));

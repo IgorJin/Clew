@@ -7,6 +7,26 @@ const NATIVE_STATUS = Object.freeze({
   INTERRUPTED: 'interrupted',
 });
 
+export const WORKER_STATUS_MARKER = Object.freeze({
+  COMPLETE: 'CLEW_WORKER_STATUS: complete',
+  NEEDS_INPUT: 'CLEW_WORKER_STATUS: needs_input',
+});
+
+export function completedTurnStatus(output) {
+  return typeof output === 'string' && output.includes(WORKER_STATUS_MARKER.NEEDS_INPUT)
+    ? 'waiting_for_operator'
+    : 'completed';
+}
+
+export function stripWorkerStatusMarker(output) {
+  if (typeof output !== 'string') return output;
+
+  return output
+    .replace(/^CLEW_WORKER_STATUS:\s*(?:complete|needs_input)\s*$/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function messageText(item) {
   if (typeof item?.text === 'string') return item.text;
   if (!Array.isArray(item?.content)) return null;
@@ -27,21 +47,23 @@ function latestAgentMessage(turn) {
 
 function normalizedStatus(status) {
   if (status === NATIVE_STATUS.IN_PROGRESS) return 'running';
-  if (status === NATIVE_STATUS.COMPLETED) return 'waiting_for_operator';
+  if (status === NATIVE_STATUS.COMPLETED) return 'completed';
   if (status === NATIVE_STATUS.FAILED) return 'failed';
   if (status === NATIVE_STATUS.INTERRUPTED) return 'interrupted';
 
   return 'starting';
 }
 
-function observedTuiStatus(status) {
+function observedTuiStatus(status, output) {
   // A second app-server process can report an externally-owned, currently
   // running TUI turn as interrupted until the writer persists completion.
   // While the TUI is alive those terminal statuses are provisional; PTY exit
   // remains the authoritative failure/interruption signal for the harness.
   if (status === NATIVE_STATUS.FAILED || status === NATIVE_STATUS.INTERRUPTED) return 'running';
 
-  return normalizedStatus(status);
+  return status === NATIVE_STATUS.COMPLETED
+    ? completedTurnStatus(output)
+    : normalizedStatus(status);
 }
 
 /**
@@ -57,6 +79,7 @@ export class CodexTurnMonitor {
     spawnImpl = spawn,
     pollIntervalMs = 1_000,
     requestTimeoutMs = 5_000,
+    ignoreInitialCompleted = false,
     onUpdate = () => {},
     onDiagnostic = () => {},
   } = {}) {
@@ -66,6 +89,7 @@ export class CodexTurnMonitor {
     this.spawn = spawnImpl;
     this.pollIntervalMs = pollIntervalMs;
     this.requestTimeoutMs = requestTimeoutMs;
+    this.ignoreInitialCompleted = ignoreInitialCompleted;
     this.onUpdate = onUpdate;
     this.onDiagnostic = onDiagnostic;
     this.child = null;
@@ -76,6 +100,7 @@ export class CodexTurnMonitor {
     this.stopped = false;
     this.polling = false;
     this.lastKey = null;
+    this.initialSnapshotObserved = false;
   }
 
   start() {
@@ -194,9 +219,20 @@ export class CodexTurnMonitor {
       const nativeStatus = turn?.status ?? null;
       const item = latestAgentMessage(turn);
       const output = item ? messageText(item) : null;
-      const status = observedTuiStatus(nativeStatus);
-      const itemKey = status === 'waiting_for_operator' ? (item?.id ?? '') : '';
+      const status = observedTuiStatus(nativeStatus, output);
+      const itemKey = ['completed', 'waiting_for_operator'].includes(status)
+        ? (item?.id ?? '')
+        : '';
       const key = `${thread.id ?? this.threadId}:${turn?.id ?? 'none'}:${status}:${itemKey}`;
+
+      if (!this.initialSnapshotObserved) {
+        this.initialSnapshotObserved = true;
+        if (this.ignoreInitialCompleted && ['completed', 'waiting_for_operator'].includes(status)) {
+          this.lastKey = key;
+
+          return;
+        }
+      }
 
       if (key !== this.lastKey) {
         this.lastKey = key;

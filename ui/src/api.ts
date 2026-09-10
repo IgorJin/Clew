@@ -15,6 +15,10 @@ export type ConnectionState =
 
 type JsonObject = Record<string, unknown>;
 
+// Must match DAEMON_RUNTIME_VERSION in src/daemon.js. A mismatch means the daemon
+// process predates the UI bundle and must be restarted before commands are allowed.
+export const DAEMON_RUNTIME_VERSION = 4;
+
 const PROFILE_ROLES: Record<string, AgentRole[]> = {
   quick: ['worker'],
   standard: ['worker', 'reviewer'],
@@ -236,6 +240,8 @@ function threadPage(value: unknown): Task['thread'] {
 }
 
 async function command(args: string[]): Promise<unknown> {
+  if (sessionStorage.getItem('clew-incompatible') === '1')
+    throw new Error('Daemon version mismatch; run `clew daemon restart`');
   const token = sessionStorage.getItem('clew-token');
   const response = await fetch('/api/v1/command', {
     method: 'POST',
@@ -249,7 +255,7 @@ async function command(args: string[]): Promise<unknown> {
       requestId: crypto.randomUUID(),
       kind: 'command',
       name: 'service.execute',
-      payload: { args },
+      payload: { args, clientRuntimeVersion: DAEMON_RUNTIME_VERSION },
     }),
   });
   const body = object(await response.json(), 'API envelope');
@@ -399,6 +405,13 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
             harness: string(session.harness, 'session harness'),
             sessionId: string(session.session_id, 'session session_id'),
             workspace: session.workspace ? string(session.workspace, 'session workspace') : null,
+            terminalAccess:
+              typeof session.workspace === 'string' &&
+              session.workspace.startsWith('runner-workspace:')
+                ? 'runner_local'
+                : typeof session.workspace === 'string'
+                  ? 'controller_local'
+                  : 'unavailable',
             createdAt: string(session.created_at, 'session created_at'),
           };
         })
@@ -428,7 +441,17 @@ function mapTask(showValue: unknown, threadValue: unknown, historyValue: unknown
 export async function bootstrap(): Promise<boolean> {
   try {
     const response = await fetch('/api/v1/bootstrap', { credentials: 'include' });
-    const accepted = response.status === 204;
+    const accepted =
+      response.status === 204 &&
+      response.headers.get('x-clew-runtime-version') === String(DAEMON_RUNTIME_VERSION);
+    if (response.status === 204 && !accepted) {
+      sessionStorage.removeItem('clew-session');
+      sessionStorage.removeItem('clew-token');
+      sessionStorage.setItem('clew-incompatible', '1');
+
+      return false;
+    }
+    if (accepted) sessionStorage.removeItem('clew-incompatible');
     if (accepted) sessionStorage.setItem('clew-session', '1');
     return accepted;
   } catch {
@@ -458,14 +481,16 @@ export async function loadTasks(): Promise<{
   if (forced === 'empty') return { tasks: [], projects: [], state: 'fixture' };
   if (forced === 'disconnected' || forced === 'incompatible')
     return { tasks: fixtureTasks, projects: fixtureProjects, state: forced };
-  if (!sessionStorage.getItem('clew-token') && !sessionStorage.getItem('clew-session')) {
-    const connected = await bootstrap();
-    if (!connected)
-      return import.meta.env.DEV
-        ? { tasks: fixtureTasks, projects: fixtureProjects, state: 'fixture' }
-        : { tasks: [], projects: [], state: 'disconnected' };
-  }
   try {
+    const connected = await bootstrap();
+    if (!connected) {
+      const state =
+        sessionStorage.getItem('clew-incompatible') === '1' ? 'incompatible' : 'disconnected';
+
+      if (import.meta.env.DEV && state !== 'incompatible')
+        return { tasks: fixtureTasks, projects: fixtureProjects, state: 'fixture' };
+      return { tasks: [], projects: [], state };
+    }
     const payload = await loadSnapshot();
     const tasks = (payload.tasks as unknown[]).map((value) => {
       const snapshot = object(value, 'task snapshot');
@@ -508,7 +533,9 @@ export function subscribeToEvents(
     if (stopped) return;
     onState('reconnecting');
     if (!(await bootstrap())) {
-      onState('disconnected');
+      const incompatible = sessionStorage.getItem('clew-incompatible') === '1';
+      if (incompatible) stopped = true;
+      onState(incompatible ? 'incompatible' : 'disconnected');
       scheduleReconnect();
 
       return;

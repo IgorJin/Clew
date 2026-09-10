@@ -141,12 +141,14 @@ function printHelp() {
   console.log('  clew cleanup [--retention-days N]');
   console.log('  clew telemetry install | status');
   console.log('  clew pricing sync [--source NAME] [--url URL] [--provider NAME]');
-  console.log('  clew daemon start [--port PORT] | status | stop | logs [--lines N] [--follow]');
+  console.log(
+    '  clew daemon start [--port PORT] | restart | status | stop | logs [--lines N] [--follow]',
+  );
   console.log('  clew runner serve | status');
   console.log('  clew api task list|show ID|...');
   console.log('  clew task thread ID [--after CURSOR] [--limit N] [--follow]');
   console.log('  clew task message ID --message TEXT [--actor ACTOR]');
-  console.log('  clew project add PATH [--name NAME] [--id ID] | list | show ID');
+  console.log('  clew project add PATH [--name NAME] [--id ID] | browse | list | show ID');
   console.log(
     '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|live|none]',
   );
@@ -265,6 +267,15 @@ export async function main(args) {
   if (command === 'daemon') {
     if (subcommand === 'status') return printJson(await daemonStatus(cwd));
     if (subcommand === 'stop') return printJson(await stopDaemon(cwd));
+    if (subcommand === 'restart') {
+      await stopDaemon(cwd);
+      const port = Number(getOptionValue(rest, '--port', DEFAULT_DAEMON_PORT));
+
+      if (!Number.isInteger(port) || port < 1 || port > 65535)
+        throw new Error('--port must be an integer between 1 and 65535');
+
+      return printJson(await startDaemonProcess(cwd, { port }));
+    }
     if (subcommand === 'logs') return printDaemonLogs(rest);
     if (subcommand === 'start') {
       const port = Number(getOptionValue(rest, '--port', DEFAULT_DAEMON_PORT));
@@ -289,7 +300,7 @@ export async function main(args) {
       process.once('SIGHUP', shutdown);
       await new Promise(() => {});
     }
-    throw new Error('usage: clew daemon start|status|stop|logs');
+    throw new Error('usage: clew daemon start|restart|status|stop|logs');
   }
   if (command === 'api')
     return printJson(await daemonRequest(cwd, [subcommand, ...rest].filter(Boolean)));

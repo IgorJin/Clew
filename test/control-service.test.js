@@ -111,6 +111,48 @@ test('MVP exposes one durable next step and requires an explicit approval', asyn
   }
 });
 
+test('task creation is idempotent for a stable client-generated id', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'clew-service-create-idempotency-'));
+  const store = new Store(join(cwd, '.clew', 'clew.sqlite'));
+  const service = new ClewService({ cwd, store, config: DEFAULT_CONFIG });
+  const args = [
+    'task',
+    'create',
+    '--id',
+    'CREATE-ONCE',
+    '--title',
+    'Create once',
+    '--description',
+    'Do not duplicate this task',
+    '--accept',
+    'Only one durable task exists',
+  ];
+
+  try {
+    const first = await service.execute(args);
+    const repeated = await service.execute(args);
+
+    assert.deepEqual(repeated, first);
+    assert.equal(store.listTasks().filter((task) => task.id === 'CREATE-ONCE').length, 1);
+    assert.equal(
+      store.listEvents('CREATE-ONCE').filter((event) => event.type === 'TASK_CREATED').length,
+      1,
+    );
+    await assert.rejects(
+      () =>
+        service.execute([
+          ...args.slice(0, args.indexOf('--title') + 1),
+          'Different title',
+          ...args.slice(args.indexOf('--description')),
+        ]),
+      /task already exists with different input/,
+    );
+  } finally {
+    store.close();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('task open-changes opens the latest run workspace in Cursor by default', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'clew-service-open-changes-'));
   const store = new Store(join(cwd, '.clew', 'clew.sqlite'));

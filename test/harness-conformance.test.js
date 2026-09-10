@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -9,6 +9,7 @@ import { ReadableStream } from 'node:stream/web';
 import { TextEncoder } from 'node:util';
 import {
   APPROVAL_DECISION,
+  codexLaunchError,
   CodexHarness,
   FakeHarness,
   HARNESS_EVENT_TYPE,
@@ -22,6 +23,25 @@ const fixtureTask = Object.freeze({
   title: 'Harness conformance',
   goal: 'Exercise the normalized harness lifecycle',
   acceptance: [{ id: 'AC-1', criterion: 'the lifecycle is correlated' }],
+});
+
+test('Codex launch errors replace raw ENOENT with actionable configuration guidance', async () => {
+  const missing = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+  const normalized = codexLaunchError(missing, '/missing/codex');
+
+  assert.equal(normalized.code, 'CODEX_EXECUTABLE_NOT_FOUND');
+  assert.match(normalized.message, /set CLEW_CODEX_BIN/i);
+  assert.doesNotMatch(normalized.message, /ENOENT/);
+
+  const harness = new CodexHarness({ command: '/definitely/missing/clew-codex', timeoutMs: 100 });
+
+  await assert.rejects(
+    harness.run({ task: fixtureTask, cwd: process.cwd(), onEvent: () => {} }),
+    (error) =>
+      error.code === 'CODEX_EXECUTABLE_NOT_FOUND' &&
+      /set CLEW_CODEX_BIN/i.test(error.message) &&
+      !/ENOENT/.test(error.message),
+  );
 });
 
 function createJsonResponse(data, status = 200) {
@@ -265,6 +285,8 @@ test('Codex harness exposes a live app-server endpoint and opens the active thre
 
 test('daemon Codex harness makes the TUI the sole worker and reads its result after finish', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'clew-harness-interactive-'));
+  const worktreeRoot = join(directory, 'worktrees');
+  const workspace = join(worktreeRoot, 'TASK-worker');
   const socketPath = join(directory, 'codex.sock');
   const endpoint = `unix://${socketPath}`;
   const calls = [];
@@ -272,6 +294,10 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
   const terminalStarts = [];
   const identities = [];
   const events = [];
+  let finishWorker;
+  let finishCalls = 0;
+
+  mkdirSync(workspace, { recursive: true });
   const spawnImpl = (command, args, options) => {
     calls.push({ command, args, options });
     const child = new EventEmitter();
@@ -305,7 +331,10 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
         requests.push(message);
         if (message.method === 'initialize') send({ id: message.id, result: {} });
         else if (message.method === 'thread/list')
-          send({ id: message.id, result: { data: [{ id: 'thread-interactive' }] } });
+          send({
+            id: message.id,
+            result: { data: [{ id: 'thread-interactive', cwd: workspace }] },
+          });
         else if (message.method === 'thread/name/set') send({ id: message.id, result: {} });
         else if (message.method === 'thread/read')
           send({
@@ -313,9 +342,11 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
             result: {
               thread: {
                 id: 'thread-interactive',
+                cwd: workspace,
                 turns: [
                   {
                     id: 'turn-interactive',
+                    status: 'completed',
                     items: [
                       { type: 'commandExecution', command: 'npm test', exitCode: 0 },
                       { type: 'agentMessage', text: 'Implemented interactively.' },
@@ -332,14 +363,22 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
   };
   const terminalManager = {
     start: (options) => terminalStarts.push(options),
-    waitForFinish: async () => ({ exitCode: 0 }),
+    updateInteraction: () => true,
+    waitForFinish: () => new Promise((resolve) => (finishWorker = resolve)),
+    finish: () => {
+      finishCalls += 1;
+      finishWorker?.({ exitCode: 0 });
+
+      return true;
+    },
     setSessionIdentity: (id, sessionId) => identities.push({ id, sessionId }),
     release: () => true,
     close: () => true,
   };
   const harness = new CodexHarness({
-    command: 'codex-fixture',
+    command: 'codex',
     terminalManager,
+    trustedWorkspaceRoot: worktreeRoot,
     spawnImpl,
     startupTimeoutMs: 100,
   });
@@ -349,17 +388,28 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
       task: fixtureTask,
       stageId: 'worker',
       runId: 'run-interactive',
-      cwd: directory,
+      cwd: workspace,
       liveEndpoint: endpoint,
       onEvent: (event) => events.push(event),
     });
 
     assert.equal(terminalStarts.length, 1);
-    assert.equal(terminalStarts[0].command, 'codex-fixture');
+    assert.equal(terminalStarts[0].command, 'codex');
+    assert.deepEqual(terminalStarts[0].args.slice(0, 2), [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+    ]);
     assert.ok(terminalStarts[0].args.includes('--remote'));
     assert.ok(terminalStarts[0].args.includes(endpoint));
     assert.match(terminalStarts[0].args.at(-1), /Work interactively in this terminal/);
+    assert.match(terminalStarts[0].args.at(-1), /CLEW_WORKER_STATUS: complete/);
+    assert.match(terminalStarts[0].args.at(-1), /CLEW_WORKER_STATUS: needs_input/);
     assert.deepEqual(calls[1].args, ['app-server']);
+    assert.deepEqual(calls[2].args, [
+      '--config',
+      `projects.${JSON.stringify(realpathSync(workspace))}.trust_level="trusted"`,
+      'app-server',
+    ]);
     assert.equal(
       requests.some(({ method }) => method === 'thread/start'),
       false,
@@ -374,12 +424,13 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
     );
     assert.deepEqual(
       requests.filter(({ method }) => method?.startsWith('thread/')).map(({ method }) => method),
-      ['thread/list', 'thread/name/set', 'thread/read'],
+      ['thread/list', 'thread/read', 'thread/list', 'thread/name/set', 'thread/read'],
     );
     assert.deepEqual(identities, [{ id: 'run-interactive', sessionId: 'thread-interactive' }]);
     assert.equal(result.sessionId, 'thread-interactive');
     assert.equal(result.turnId, 'turn-interactive');
     assert.equal(result.output, 'Implemented interactively.');
+    assert.equal(finishCalls, 1);
     assert.equal(events.at(-1).type, HARNESS_EVENT_TYPE.HARNESS_COMPLETED);
   } finally {
     rmSync(directory, { recursive: true, force: true });

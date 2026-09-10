@@ -1,9 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, loadControllerRunnerConfig, loadRunnerConfig } from '../src/config.js';
+import {
+  loadConfig,
+  loadControllerRunnerConfig,
+  loadRunnerConfig,
+  resolveCodexExecutable,
+} from '../src/config.js';
+
+test('resolves Codex from explicit paths, PATH, and the macOS app bundle fallback', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-codex-bin-'));
+  const bin = join(dir, 'bin');
+  const executable = join(bin, 'codex');
+
+  try {
+    mkdirSync(bin);
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n');
+    chmodSync(executable, 0o755);
+
+    assert.equal(
+      resolveCodexExecutable('codex', {
+        env: { PATH: bin },
+        platform: 'linux',
+        home: dir,
+      }),
+      executable,
+    );
+    assert.equal(resolveCodexExecutable(executable, { env: { PATH: '' } }), executable);
+    assert.equal(
+      resolveCodexExecutable('codex', {
+        env: { PATH: '' },
+        platform: 'darwin',
+        home: dir,
+        isExecutable: (candidate) =>
+          candidate === '/Applications/ChatGPT.app/Contents/Resources/codex',
+      }),
+      '/Applications/ChatGPT.app/Contents/Resources/codex',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('keeps a missing Codex command unresolved for actionable launch diagnostics', () => {
+  assert.equal(
+    resolveCodexExecutable('codex', {
+      env: { PATH: '' },
+      platform: 'linux',
+      home: '/missing',
+      isExecutable: () => false,
+    }),
+    'codex',
+  );
+});
 
 test('resolves user, project, and environment config precedence', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-config-'));
@@ -73,6 +124,23 @@ test('resolves role-specific model configuration with environment precedence', (
       worker: 'env-worker',
       architect: 'env-architect',
       reviewer: 'project-reviewer',
+      qa: null,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('uses Luna for Codex review by default without changing worker and architect models', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-default-review-model-'));
+
+  try {
+    const config = loadConfig(dir, { CLEW_USER_CONFIG: join(dir, 'missing.json') });
+
+    assert.deepEqual(config.models, {
+      worker: null,
+      architect: null,
+      reviewer: 'gpt-5.6-luna',
       qa: null,
     });
   } finally {
