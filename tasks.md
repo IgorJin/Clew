@@ -4,7 +4,7 @@
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Clew v0.9.0 Task Finalization Workflow is complete; follow-up discovery is tracked in [`ROADMAP.md`](./ROADMAP.md)
+**Active target:** Clew v0.10.0 Keyboard-first controls mini-release; detailed cards are tracked in [`tasks/`](./tasks/README.md)
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -18,6 +18,25 @@ Detailed cards and canonical status fields for the active roadmap horizon are ma
 - Sizes are relative: **S** (small), **M** (medium), **L** (large/spike with uncertainty).
 - A spike produces a reproducible fixture, findings, and a go/change/stop decision; throwaway code alone is not a result.
 - Tasks should land as independently reviewable changes. IDs are stable and may later become GitHub issue identifiers.
+
+## v0.10 plan — Keyboard-first controls
+
+v0.10 is a focused UI mini-release. It adds deterministic task shortcuts, context-aware task actions, Command key hints, and a keyboard/browser acceptance gate. The already implemented settings-modal slice (`CLEW-099`) ships alongside it without expanding plugin execution scope.
+
+| ID       | Pri | Size | Work package                                     | Depends on    | Done when                                                                                                                                         |
+| -------- | --- | ---- | ------------------------------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CLEW-099 | P1  | S    | Settings modal with Agent chapter                | —             | Existing UI-only connection preference passes review and remains explicit about its unverified, unapplied state.                                  |
+| CLEW-101 | P0  | M    | Shortcut registry and numbered task navigation   | —             | One scoped registry drives `Cmd/Option+1…0` against the rendered task order without stealing input or terminal keys.                              |
+| CLEW-102 | P0  | M    | Contextual task, changes, and terminal shortcuts | 101           | `Cmd+Enter`, changes, and terminal chords reuse the exact button handlers, preserve run/session selection, and never turn Continue into Finish.   |
+| CLEW-103 | P1  | M    | Command key hints and shortcut discovery         | 101           | Holding Command reveals stable accessible badges without layout shift or stuck overlay state, including the first ten tasks and task actions.     |
+| CLEW-104 | P0  | M    | v0.10 keyboard acceptance and release            | 099, 102, 103 | Browser/terminal/accessibility matrices, full checks, installed-package acceptance, release notes, versioning, and publication evidence all pass. |
+
+Execution order:
+
+```text
+CLEW-099 ──────────────────────┐
+CLEW-101 → (CLEW-102 + CLEW-103) → CLEW-104
+```
 
 ## v0.1 completion record
 

@@ -404,11 +404,55 @@ lifecycle contracts → Finalization Gate → Git integration → Task Screen v3
 
 Release evidence is recorded in [`RELEASE-0.9.md`](./RELEASE-0.9.md). External deployment detection, cloud PR providers, and automatic merge/push remain outside the release boundary.
 
+## v0.10 — Keyboard-first controls
+
+**Outcome:** An operator can switch among the first ten visible Tasks, continue work, inspect changes, and reach embedded or external terminals without leaving the keyboard. Holding Command reveals the shortcuts available in the current context.
+
+This is a focused UI mini-release. The existing UI-only Agent settings slice ships with it but does not connect plugins to execution.
+
+### [CLEW-099](./tasks/CLEW-099.md) — Settings modal with Agent chapter
+
+Complete review of the existing UI-only connection preference and preserve its explicit unverified/not-applied boundary.
+
+### [CLEW-101](./tasks/CLEW-101.md) — Shortcut registry and numbered task navigation
+
+Create one scoped shortcut registry and map `Cmd/Option+1…0` to the first ten Tasks in the current rendered sidebar order, including browser-conflict handling and input/terminal scope rules.
+
+### [CLEW-102](./tasks/CLEW-102.md) — Contextual task, changes, and terminal shortcuts
+
+Add `Cmd+Enter`, internal/external Changes shortcuts, and embedded/external terminal shortcuts through the existing action handlers. Present one Continue action while keeping Finish worker explicit.
+
+### [CLEW-103](./tasks/CLEW-103.md) — Command key hints and shortcut discovery
+
+Show accessible key badges while Command is held, reset the overlay safely, and expose the same registry through shortcut help.
+
+### [CLEW-104](./tasks/CLEW-104.md) — v0.10 acceptance and release
+
+Own browser-reserved-key validation, embedded-terminal conflicts, accessibility and layout acceptance, full repository checks, installed-package verification, versioning, and release evidence.
+
+### v0.10 execution order and release gate
+
+```text
+CLEW-099 ──────────────────────┐
+CLEW-101 → (CLEW-102 + CLEW-103) → CLEW-104
+```
+
+Release gate:
+
+1. Number shortcuts always match the visible filtered and sorted Task list; unavailable positions do nothing.
+2. Inputs, dialogs, browser behavior, and xterm retain their expected keyboard semantics.
+3. Continue chooses resume or fresh execution through existing policy and can never trigger Finish worker, merge, or release.
+4. Internal and external Changes target the same selected run; terminal shortcuts target the same selected session and respect Controller/Runner locality.
+5. Key hints are discoverable, accessible, responsive, and cannot remain stuck after blur or application switching.
+6. UI tests, backend regressions, production build, installed-package acceptance, and release documentation pass.
+
 ## Plugin architecture proposal
 
 The proposed next integration boundary is documented in [Plugin architecture and implementation plan](./docs/PLUGIN-ARCHITECTURE.md). It covers a shared plugin registry, runtime connections for Codex/OpenCode/Claude Code, role routing, Controller/Runner compatibility, and extraction of the existing OpenTelemetry integration. Release assignment is pending; the first scope is P1–P5, followed by metrics, pricing sources, and change viewers.
 
-## Research queue after v0.9
+## Research queue after v0.10
+
+The six product directions reviewed on 2026-09-10 are tracked in [Development directions](./docs/DEVELOPMENT-DIRECTIONS.md), with links to the plugin proposal and research placeholders. This records intent without assigning releases or implementation commitments.
 
 These topics require discovery before release commitment:
 

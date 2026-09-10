@@ -104,4 +104,4 @@ None.
 
 Not completed.
 
-Release assignment (`v0.10`) is provisional: no `v0.10` section exists in `ROADMAP.md` yet. This card is the plugin-settings UI slice and may be reassigned when the plugin stages are scheduled.
+Included in the v0.10 Keyboard-first controls mini-release as an already-built adjacent UI slice. It remains UI-only and does not expand the release into plugin availability or execution wiring.

@@ -82,6 +82,10 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-093](./CLEW-093.md)      | v0.9    | done       | 087–092       | —                   |
 | [CLEW-099](./CLEW-099.md)      | v0.10   | in_review  | —             | —                   |
 | [CLEW-100](./CLEW-100.md)      | v0.9    | in_review  | —             | —                   |
+| [CLEW-101](./CLEW-101.md)      | v0.10   | ready      | —             | —                   |
+| [CLEW-102](./CLEW-102.md)      | v0.10   | planned    | CLEW-101      | v0.10-keyboard-ui   |
+| [CLEW-103](./CLEW-103.md)      | v0.10   | planned    | CLEW-101      | v0.10-keyboard-ui   |
+| [CLEW-104](./CLEW-104.md)      | v0.10   | planned    | 099, 102, 103 | —                   |
 
 ## Execution waves
 
@@ -99,6 +103,7 @@ Next v0.7: CLEW-080 → CLEW-076 → CLEW-081
 Completed interactive response slice: CLEW-078 → CLEW-079 → CLEW-077
 Completed v0.8: CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091; CLEW-090 superseded
 Completed v0.9: CLEW-093 (lifecycle → finalization gate → Git integration → Task Screen v3 → responsive acceptance)
+Next v0.10 mini-release: CLEW-099 + (CLEW-101 → CLEW-102 + CLEW-103) → CLEW-104
 ```
 
 The Wave 2 tasks deliberately own separate primary areas to reduce merge conflicts. Their shared contracts and fixtures must land in `CLEW-068` first.

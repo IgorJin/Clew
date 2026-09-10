@@ -4,6 +4,8 @@
 
 Цель: внутренние сервисы Clew работают через стабильные интерфейсы интеграций. Плагины реализуют эти интерфейсы для конкретных CLI, API и внешних систем. Добавление ещё одного исполнителя агента не требует менять scheduler, reviewer, architect и модель состояния задач.
 
+Продуктовое направление (сверка 2026-09-10): пользователь подключает разные сервисы как отдельные плагины и собирает из этих блоков workflow под себя. Эта архитектура задаёт основу интеграций; UX настройки плагинов и конструктора workflow ещё предстоит описать. Формат конструктора и границы пользовательской настройки пока не определены. См. [сводку направлений](./DEVELOPMENT-DIRECTIONS.md).
+
 Первый объём: общая инфраструктура плагинов, Codex CLI, OpenCode CLI/server, Claude Code CLI, единый выбор исполнителя для ролей и выделение существующего OpenTelemetry-экспорта. Далее — метрики, каталоги цен, редакторы и другие подключения. Это проектирование; описанные новые API и настройки ещё не реализованы.
 
 ## 1. Основа в текущем коде
@@ -221,21 +223,44 @@ Registry существует на каждом хосте. Runtime-плагин
 
 Это точки расширения по мере появления потребности. Реализовывать все интерфейсы заранее не требуется.
 
-| Приоритет                  | Extension point                  | Возможные реализации                                 | Что остаётся в ядре                                                      |
-| -------------------------- | -------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| Первый объём               | `AgentRuntime`                   | Codex, OpenCode, Claude Code; fake для тестов        | Роли, orchestration, approvals, validation                               |
-| Первый объём               | `TelemetrySink`                  | OTel/OTLP, тестовый sink                             | Семантика, correlation, privacy, canonical данные                        |
-| Следом                     | `PricingSource`                  | Существующий HTTP JSON-каталог, локальный каталог    | Snapshots, расчёт, provenance, политика stale данных                     |
-| Следом                     | `ChangeViewer`                   | Существующие Cursor, VS Code, explicit worktree-path | Выбор run/workspace, допустимость открытия                               |
-| По интеграционному запросу | `IssueSource` / `IssuePublisher` | GitHub Issues, Linear, Jira                          | Task Contract; чтение и запись разрешаются отдельно                      |
-| По интеграционному запросу | `RepositoryHosting`              | GitHub/GitLab PR, Checks, CI status                  | Локальный Git/worktree, финализация и разрешение на merge/push           |
-| По развитию evidence       | `EvidenceSource`                 | CI, JUnit, Playwright reports, внешнее review        | Привязка к revision, проверка подлинности/происхождения, acceptance gate |
-| По интеграционному запросу | `NotificationSink`               | Webhook, мессенджер, desktop notification            | Правила уведомлений; delivery outbox и idempotency                       |
-| Позже                      | `ArtifactStore`                  | Local filesystem, S3-compatible storage              | Метаданные, checksum, ownership и retention policy                       |
-| Позже                      | `EnvironmentProvider`            | Контейнер или удалённая execution environment        | Lease, workspace ownership, разрешения и жизненный цикл                  |
-| Позже                      | `ContextSource` / `ToolProvider` | Документация, поиск, MCP-инструменты                 | Выбор контекста, происхождение, права доступа                            |
+| Приоритет                  | Extension point                  | Возможные реализации                                                                      | Что остаётся в ядре                                                      |
+| -------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Первый объём               | `AgentRuntime`                   | Codex, OpenCode, Claude Code; fake для тестов                                             | Роли, orchestration, approvals, validation                               |
+| Первый объём               | `TelemetrySink`                  | OTel/OTLP, тестовый sink                                                                  | Семантика, correlation, privacy, canonical данные                        |
+| Следом                     | `PricingSource`                  | Существующий HTTP JSON-каталог, локальный каталог                                         | Snapshots, расчёт, provenance, политика stale данных                     |
+| Следом                     | `TerminalLauncher`               | Terminal.app, iTerm2, Ghostty, Windows Terminal                                           | Выбор session/run, безопасные argv/cwd, права и владение PTY             |
+| Следом                     | `WorkspaceOpener`                | Cursor, VS Code, IDE JetBrains                                                            | Выбор workspace, execution-host policy и допустимость открытия           |
+| Следом                     | `ChangeViewer`                   | Встроенный diff, GitHub Desktop, Fork, Tower, Sublime Merge, Kaleidoscope, Beyond Compare | Выбор run и точного диапазона изменений, read-only policy                |
+| По интеграционному запросу | `IssueSource` / `IssuePublisher` | GitHub Issues, Linear, Jira                                                               | Task Contract; чтение и запись разрешаются отдельно                      |
+| По интеграционному запросу | `RepositoryHosting`              | GitHub/GitLab PR, Checks, CI status                                                       | Локальный Git/worktree, финализация и разрешение на merge/push           |
+| По развитию evidence       | `EvidenceSource`                 | CI, JUnit, Playwright reports, внешнее review                                             | Привязка к revision, проверка подлинности/происхождения, acceptance gate |
+| По интеграционному запросу | `NotificationSink`               | Webhook, мессенджер, desktop notification                                                 | Правила уведомлений; delivery outbox и idempotency                       |
+| Позже                      | `ArtifactStore`                  | Local filesystem, S3-compatible storage                                                   | Метаданные, checksum, ownership и retention policy                       |
+| Позже                      | `EnvironmentProvider`            | Контейнер или удалённая execution environment                                             | Lease, workspace ownership, разрешения и жизненный цикл                  |
+| Позже                      | `ContextSource` / `ToolProvider` | Документация, поиск, MCP-инструменты                                                      | Выбор контекста, происхождение, права доступа                            |
 
 Один GitHub-плагин может предоставлять issue intake, repository hosting и evidence source как разные порты. Один и тот же registry может обслуживать их без превращения всех операций в общий RPC payload.
+
+### Desktop-поверхности
+
+Внешний терминал, IDE и просмотр изменений — три разных подключения:
+
+- `TerminalLauncher` открывает интерактивную native-сессию в выбранном терминале. Runtime-плагин знает, как возобновить Codex/OpenCode/Claude Code, а launcher знает, как безопасно запустить argv в Terminal.app, iTerm2, Ghostty или другой программе на execution host.
+- `WorkspaceOpener` открывает конкретный worktree в IDE или редакторе. Первый набор может сохранить существующие Cursor и VS Code и добавить IDE JetBrains. Это не означает показ точного task diff.
+- `ChangeViewer` получает baseline/result revision, workspace и безопасное описание файлов и открывает именно изменения выбранного run. Возможности объявляются явно: `working-copy`, `revision-range`, `patch`, `file-pair`, `merge-conflict`.
+
+Разделение важно для чистого worktree: Git-клиент, которому передали только путь, может не показать уже закоммиченные изменения. Для обещания «открыть изменения» adapter должен поддерживать диапазон baseline → result или принять подготовленный patch. Если доступно только открытие repository/worktree, UI называет действие «Open workspace», а не «Open changes».
+
+Наиболее узнаваемые кандидаты для адаптеров:
+
+- [GitHub Desktop](https://docs.github.com/en/desktop/overview/about-github-desktop) — бесплатный open-source Git GUI для macOS и Windows;
+- [Fork](https://git-fork.com/) — Git-клиент для macOS и Windows;
+- [Tower](https://www.git-tower.com/features/all-features/) — Git-клиент с worktrees, branch compare и встроенным diff;
+- [Sublime Merge](https://www.sublimemerge.com/) — кроссплатформенный Git-клиент с side-by-side diff и line staging;
+- [Kaleidoscope](https://kaleidoscope.app/) — специализированный macOS diff/merge viewer с Git changesets;
+- [Beyond Compare](https://www.scootersoftware.com/) — кроссплатформенный инструмент сравнения и merge.
+
+Рекомендуемый порядок после выделения интерфейсов: сохранить встроенный diff и Cursor/VS Code как совместимый baseline; добавить один полноценный Git GUI adapter (Fork или Tower на macOS, GitHub Desktop как бесплатный массовый вариант); затем специализированный diff adapter для Kaleidoscope. Конкретный порядок требует smoke-проверки запуска точного revision range, а не только открытия каталога.
 
 Не выносить сейчас в плагины SQLite/event store, Task state machine, проверку критериев, approvals и completion policy. Для них важнее единый набор инвариантов. UI строится из безопасного каталога connections/capabilities и декларативных настроек, без исполнения предоставленного плагином кода.
 
@@ -248,7 +273,7 @@ Registry существует на каждом хосте. Runtime-плагин
 | P3. Claude Code                        | Compatibility spike; CLI adapter; результаты, usage, interrupt, explicit-session resume; role matrix           | Claude подключается через собственный модуль и регистрацию без изменений доменных сервисов; live smoke подтверждает заявленные возможности |
 | P4. Persistence и paired               | Binding snapshots, migration старых runs, Runner v2 inventory/lease fields, restart/recovery                   | Local и paired дают эквивалентные канонические результаты; crash/повтор сообщения не создаёт дублирующий run                               |
 | P5. Второе семейство                   | Выделение OTel traces в plugin, test sink, статус подключения и legacy config bridge                           | Одна инфраструктура обслуживает runtime и telemetry; отказ/отключение экспорта не влияет на execution и историю                            |
-| P6. Метрики и существующие подключения | Metrics projector, OTLP metrics, PricingSource и ChangeViewer                                                  | Метрики не удваиваются после replay; pricing/viewer меняются без правок вызывающих сервисов                                                |
+| P6. Метрики и существующие подключения | Metrics projector, OTLP metrics, PricingSource, TerminalLauncher, WorkspaceOpener и ChangeViewer               | Метрики не удваиваются после replay; терминал, IDE, pricing и viewer меняются без правок вызывающих сервисов                               |
 
 Порядок: P1 → P2 → P3 → P4 → P5. P1–P5 — первый завершённый объём; P6 — следующая итерация. Возможности будущих систем из раздела 9 не блокируют эти этапы. Детальные task cards создаются при назначении релиза, с criterion-specific evidence согласно [процессу задач](../tasks/README.md).
 

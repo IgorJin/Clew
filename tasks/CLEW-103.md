@@ -1,0 +1,104 @@
+---
+id: CLEW-103
+title: Command key hints and shortcut discovery
+status: planned
+release: v0.10
+priority: P1
+size: M
+depends_on: [CLEW-101]
+parallel_group: v0.10-keyboard-ui
+owner: null
+updated: 2026-09-10
+evidence_policy: v1
+---
+
+# CLEW-103 — Command key hints and shortcut discovery
+
+## Objective
+
+Make keyboard control discoverable by showing compact shortcut badges over the relevant visible controls while Command is held, and expose the same registry through a keyboard-help surface.
+
+## User outcome
+
+An operator can hold Command and immediately see which number opens each of the first ten Tasks and which keys invoke Continue, Changes, terminal access, and the command palette. The overlay remains visually stable and disappears reliably.
+
+## Context
+
+Shortcut discovery is part of the requested Ghostty-like interaction. CLEW-101 provides the canonical metadata and availability predicates. The hints must reflect actual handlers and rendered Task order; hand-authored badges would drift from behavior.
+
+## Scope
+
+- detect a deliberate Command hold and reveal the overlay after a short threshold around 180 ms;
+- show `1…9, 0` beside the matching visible Task rows;
+- show registry-derived badges beside Continue/Start/Focus terminal, internal/external Changes, embedded/external terminal, and command-palette controls;
+- render disabled hints with a concise availability reason without enabling the action;
+- anchor badges over element edges without layout shift, obscuring labels, or changing pointer targets;
+- close/reset on Command keyup, Escape, window blur, `visibilitychange`, navigation, modal changes, and component unmount;
+- expose a Keyboard shortcuts help entry from the command palette for touch and assistive discovery;
+- supply accessible names/descriptions and respect reduced-motion and narrow-width layouts.
+
+## Out of scope
+
+- inventing direct global shortcuts for destructive or rare actions outside the v0.10 map;
+- changing control-plane commands or Task lifecycle;
+- making disabled actions executable through the overlay;
+- replacing standard Tab/Shift+Tab navigation and native button activation.
+
+## Deliverables
+
+- Command-hold state hook/controller;
+- reusable key-hint badge and anchored overlay styles;
+- sidebar and Task-action integration driven by the registry;
+- keyboard-help surface;
+- UI, accessibility, responsive-layout, and stuck-state regression tests.
+
+## Acceptance criteria
+
+1. Holding Command reveals the correct current badges; a normal fast shortcut does not create a distracting persistent flash.
+2. Sidebar numbers match the same rendered Task positions used by CLEW-101 across filters, sorting, Project changes, and fewer than ten Tasks.
+3. Every v0.10 shortcut-enabled visible control shows its actual registry chord and availability; no displayed hint lacks a matching handler.
+4. The overlay causes no measurable layout shift, does not cover essential labels or controls, and remains usable at desktop and narrow supported widths.
+5. Keyup, Escape, blur, visibility change, navigation, modal transitions, and unmount always clear overlay state.
+6. Keyboard help, screen-reader text, focus behavior, contrast, and reduced-motion behavior meet the existing UI accessibility baseline.
+
+## Acceptance evidence
+
+| Criterion | Automated evidence                                     | Logical scenarios                                                | Result  |
+| --------- | ------------------------------------------------------ | ---------------------------------------------------------------- | ------- |
+| AC-1      | hold-threshold/flicker UI tests                        | short chord; deliberate hold; repeated Meta; modifier order      | pending |
+| AC-2      | sidebar key-hint mapping tests                         | 1st; 9th; 10th; fewer than ten; filters; Project switch; refresh | pending |
+| AC-3      | registry-to-badge consistency tests                    | enabled; disabled reason; action added/removed; no orphan badge  | pending |
+| AC-4      | component/layout assertions plus CLEW-104 visual smoke | desktop; narrow; long Task title; scroll; dropdown/modal overlap | pending |
+| AC-5      | overlay reset lifecycle tests                          | keyup; Escape; blur; hidden tab; navigation; modal; unmount      | pending |
+| AC-6      | accessibility tests and manual CLEW-104 acceptance     | labels; help; focus; contrast; reduced motion; VoiceOver         | pending |
+
+## Verification
+
+- run focused UI tests for overlay timing, mappings, lifecycle resets, and accessibility;
+- inspect desktop and narrow layouts with long labels and scroll;
+- test application switching while Command remains physically held;
+- run `npm run ui:check` and lint before review.
+
+## Review record
+
+- Verdict: pending
+- Reviewer: unassigned
+- Findings: Not reviewed.
+
+## Dependencies and parallelization
+
+Depends on CLEW-101 registry metadata. May run in parallel with CLEW-102. It consumes action definitions without owning their command semantics.
+
+## Risks
+
+- modifier keyup can be lost when the browser window loses focus;
+- overlays can obscure compact controls or become noisy during ordinary shortcuts;
+- duplicated visual chord strings can drift from actual platform dispatch.
+
+## Blockers
+
+None.
+
+## Completion record
+
+Not completed.
