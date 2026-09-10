@@ -1,7 +1,7 @@
 ---
 id: CLEW-104
 title: v0.10 keyboard controls acceptance and release
-status: in_progress
+status: in_review
 release: v0.10
 priority: P0
 size: M
@@ -62,14 +62,14 @@ CLEW-101–103 introduce a shared keyboard surface over existing UI and daemon a
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence and artifact                           | Logical scenarios                                                                                   | Result  |
-| --------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------- |
-| AC-1      | browser smoke record in `RELEASE-0.10.md`                 | Safari; Chrome; Firefox; Cmd reserved/delivered; Option fallback; 1st/10th Task                     | pending |
-| AC-2      | full UI suite plus daemon reconnect/restart tests         | filters; Projects; ordering; state changes; multiple runs/sessions; duplicate activation            | pending |
-| AC-3      | scope regression suite plus manual xterm flow             | input; textarea; modal; palette; xterm; IME; repeat; click/key equivalence                          | pending |
-| AC-4      | UI/backend integration and installed smoke                | exact change run; committed worktree; selected session; external app; unavailable; runner-local     | pending |
-| AC-5      | accessibility tests and visual/manual record              | keyboard-only; VoiceOver; contrast; reduced motion; narrow; blur; app switch                        | pending |
-| AC-6      | `npm run check`, installed acceptance, package inspection | existing database; saved preferences; current UI bundle; docs; version; changelog; release artifact | pending |
+| Criterion | Automated evidence and artifact                              | Logical scenarios                                                                                              | Result  |
+| --------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------- |
+| AC-1      | browser smoke record in `RELEASE-0.10.md`                    | Safari; Chrome; Firefox; Cmd reserved/delivered; Option fallback; 1st/10th Task                                | manual  |
+| AC-2      | full UI suite (99 tests) plus daemon reconnect/restart tests | filters; Projects; ordering; state changes; multiple runs/sessions; duplicate activation                       | pass    |
+| AC-3      | scope regression suite; live xterm flow reserved manual      | input; textarea; modal; palette; xterm; IME; repeat; click/key equivalence                                     | partial |
+| AC-4      | UI/backend integration and installed smoke                   | exact change run; committed worktree; selected session; external app; unavailable; runner-local                | pass    |
+| AC-5      | hint/help/reset tests; VoiceOver/visual reserved manual      | reduced motion; blur; app switch; keyboard-only (partial); VoiceOver; contrast; narrow                         | partial |
+| AC-6      | `npm run check`, installed acceptance, package inspection    | no migration in v0.10; saved preferences; current UI bundle; docs; version 0.10.0; changelog; release artifact | pass    |
 
 ## Verification
 
@@ -82,9 +82,9 @@ CLEW-101–103 introduce a shared keyboard surface over existing UI and daemon a
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pending (release candidate ready for independent review; manual matrix outstanding)
+- Reviewer: implementation author (code review pass), 2026-09-10; independent reviewer: unassigned
+- Findings: Author review of CLEW-101–103 found and fixed 13 issues (recorded on those cards): mutation gating, stale hint/help metadata, chooser/help dismissal, active-terminal focus, platform chord labels, resolver collision order, and shared `AgentGrid` helpers. CLEW-099 re-verified after the keyboard work with no new findings. Automated gates all green: `npm run check` (240 backend, 99 UI), `npm run acceptance:installed` for `clew-0.10.0.tgz`, tarball inspection (version 0.10.0, current UI bundle with keyboard code, `RELEASE-0.10.md`, `docs/KEYBOARD-CONTROLS.md`). No schema or migration changes in v0.10, so the v0.9 database upgrade path is unaffected by construction. Outstanding before `done`: real-browser shortcut matrix, live-terminal flow, VoiceOver/visual pass (record in `RELEASE-0.10.md`), independent third-party review, tag, and publication.
 
 ## Dependencies and parallelization
 
@@ -102,4 +102,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Not completed. Automated release preparation is done (version 0.10.0, changelog, README, `RELEASE-0.10.md`, full gate, installed acceptance, package inspection). Remaining: manual browser/terminal/accessibility matrix, independent review, tag, publication.

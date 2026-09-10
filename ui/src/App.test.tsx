@@ -1998,7 +1998,7 @@ describe('task shortcuts (CLEW-102)', () => {
     render(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
 
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true, shiftKey: true });
     await waitFor(() =>
       expect(api.execute).toHaveBeenCalledWith([
         'session',
@@ -2016,6 +2016,88 @@ describe('task shortcuts (CLEW-102)', () => {
         'live',
       ]),
     );
+  });
+
+  it('uses deliverable terminal chords and accepts the Ctrl variant', async () => {
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-1',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+      runs: [runningWorkerRun()],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    const byId = new Map(listShortcuts().map((entry) => [entry.id, entry]));
+
+    expect(byId.get('task.terminal.focus')?.chord).toBe(`${primaryModifierLabel()}'`);
+    expect(byId.get('task.terminal.external')?.chord).toBe(`${primaryModifierLabel()}⇧'`);
+
+    expect(screen.queryByLabelText('Live Codex terminal')).toBeNull();
+    fireEvent.keyDown(document.body, { key: "'", ctrlKey: true });
+    expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
+  });
+
+  it('allows Cmd, Shift, and the key to be pressed in sequence (AC-1)', async () => {
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-1',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+      runs: [runningWorkerRun()],
+    });
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      fireEvent.keyDown(document.body, { key: 'Meta', metaKey: true });
+      try {
+        await waitFor(
+          () => expect(container.querySelectorAll('.key-hint').length).toBeGreaterThan(0),
+          { timeout: 400 },
+        );
+        break;
+      } catch {
+        fireEvent.keyUp(document.body, { key: 'Meta' });
+      }
+      if (attempt === 4) throw new Error('key hints did not appear');
+    }
+
+    fireEvent.keyDown(document.body, { key: 'Shift', metaKey: true, shiftKey: true });
+    expect(container.querySelectorAll('.key-hint').length).toBeGreaterThan(0);
+
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'session',
+        'open',
+        'CLEW-071',
+        '--stage',
+        'worker',
+        '--role',
+        'worker',
+        '--harness',
+        'codex',
+        '--surface',
+        'live',
+        '--mode',
+        'live',
+      ]),
+    );
+    expect(container.querySelectorAll('.key-hint')).toHaveLength(0);
   });
 
   it('uses a chooser for multiple terminals and remembers the choice (AC-4)', async () => {
@@ -2058,7 +2140,7 @@ describe('task shortcuts (CLEW-102)', () => {
     render(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
 
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true });
     const chooser = await screen.findByRole('dialog', { name: /choose terminal/i });
 
     fireEvent.click(within(chooser).getByRole('button', { name: /frontend/i }));
@@ -2067,7 +2149,7 @@ describe('task shortcuts (CLEW-102)', () => {
     fireEvent.click(screen.getByRole('button', { name: /collapse worker · frontend terminal/i }));
     await waitFor(() => expect(screen.queryByLabelText('Live Codex terminal')).toBeNull());
 
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true });
     expect(screen.queryByRole('dialog', { name: /choose terminal/i })).toBeNull();
     expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
   });
@@ -2112,8 +2194,8 @@ describe('task shortcuts (CLEW-102)', () => {
     const externalBefore = externalChanges();
 
     fireEvent.keyDown(document.body, { key: 'e', metaKey: true });
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true, shiftKey: true });
 
     expect(screen.queryByRole('dialog', { name: /changes for worker/i })).toBeNull();
     expect(screen.queryByLabelText('Live Codex terminal')).toBeNull();
@@ -2161,7 +2243,7 @@ describe('task shortcuts (CLEW-102)', () => {
     render(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
 
-    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    fireEvent.keyDown(document.body, { key: "'", metaKey: true });
     const chooser = await screen.findByRole('dialog', { name: /choose terminal/i });
     const closeButton = within(chooser).getByRole('button', { name: /close terminal chooser/i });
 
@@ -2258,8 +2340,9 @@ describe('command key hints (CLEW-103)', () => {
     const numbers = [...container.querySelectorAll('.task-row .key-hint')].map(
       (node) => node.textContent,
     );
+    const modifier = primaryModifierLabel();
 
-    expect(numbers).toEqual(['1', '2', '3', '4', '5']);
+    expect(numbers).toEqual(['1', '2', '3', '4', '5'].map((digit) => `${modifier}${digit}`));
   });
 
   it('matches sidebar numbers after a status filter (AC-2)', async () => {
@@ -2271,7 +2354,7 @@ describe('command key hints (CLEW-103)', () => {
     const rows = [...container.querySelectorAll('.task-row')];
     const numbers = rows.map((row) => row.querySelector('.key-hint')?.textContent);
 
-    expect(numbers).toEqual(['1']);
+    expect(numbers).toEqual([`${primaryModifierLabel()}1`]);
   });
 
   it('only shows badges backed by a registered action (AC-3)', async () => {
@@ -2279,13 +2362,13 @@ describe('command key hints (CLEW-103)', () => {
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
 
     await holdCommand(container);
-    const known = new Set(listShortcuts().map((entry) => entry.hint));
+    const known = new Set(listShortcuts().map((entry) => entry.chord));
 
     for (const node of hintNodes(container)) expect(known.has(node.textContent ?? '')).toBe(true);
 
     const first = listShortcuts().find((entry) => entry.id === 'task.open.1');
 
-    expect(first?.hint).toBe('1');
+    expect(first?.chord).toBe(`${primaryModifierLabel()}1`);
     expect(first?.enabled).toBe(true);
   });
 

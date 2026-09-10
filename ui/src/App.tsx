@@ -777,7 +777,7 @@ function KeyHint({
   position,
 }: {
   metadata?: ShortcutMetadata;
-  position?: 'corner' | 'start' | 'end';
+  position?: 'corner' | 'start' | 'end' | 'row';
 }) {
   if (!metadata) return null;
   const disabled = !metadata.enabled;
@@ -788,7 +788,7 @@ function KeyHint({
       aria-hidden="true"
       title={disabled ? metadata.disabledReason : metadata.label}
     >
-      {metadata.hint}
+      {metadata.chord}
     </span>
   );
 }
@@ -991,7 +991,7 @@ function ProjectSidebar({
             </span>
             <Wave state={entry.state} />
             {index < 10 && (
-              <KeyHint metadata={hints?.get(`task.open.${index + 1}`)} position="corner" />
+              <KeyHint metadata={hints?.get(`task.open.${index + 1}`)} position="row" />
             )}
           </button>
         ))}
@@ -3229,7 +3229,6 @@ export default function App() {
         id: `task.open.${ordinal}`,
         label: `Open task ${ordinal}`,
         chord: `${primary}${key}`,
-        hint: key,
         fallbackChords: [`${alternate}${key}`],
         combos: [
           { key, primary: true },
@@ -3252,7 +3251,6 @@ export default function App() {
       id: 'palette.open',
       label: 'Open command palette',
       chord: `${primary}K`,
-      hint: 'K',
       fallbackChords: primary === '⌘' ? ['Ctrl+K'] : [],
       combos: [
         { key: 'k', primary: true },
@@ -3267,7 +3265,6 @@ export default function App() {
       id: string,
       label: string,
       chord: string,
-      hint: string,
       fallbackChords: string[],
       combos: KeyCombo[],
       key: keyof TaskShortcutBindings,
@@ -3275,7 +3272,6 @@ export default function App() {
       id,
       label,
       chord,
-      hint,
       fallbackChords,
       combos,
       scopes: ['task'],
@@ -3291,7 +3287,6 @@ export default function App() {
         'task.continue',
         'Continue task',
         `${primary}↵`,
-        '↵',
         primary === '⌘' ? ['Ctrl+Enter'] : [],
         [
           { key: 'Enter', primary: true },
@@ -3303,7 +3298,6 @@ export default function App() {
         'task.changes.internal',
         'View changes',
         `${primary}E`,
-        'E',
         primary === '⌘' ? ['Ctrl+E'] : [],
         [
           { key: 'e', primary: true },
@@ -3315,7 +3309,6 @@ export default function App() {
         'task.changes.external',
         'Open changes externally',
         `${primary}⇧E`,
-        '⇧E',
         primary === '⌘' ? ['Ctrl+Shift+E'] : [],
         [
           { key: 'e', primary: true, shift: true },
@@ -3326,24 +3319,22 @@ export default function App() {
       taskBinding(
         'task.terminal.focus',
         'Focus terminal',
-        `${primary}\``,
-        '`',
-        primary === '⌘' ? ['Ctrl+`'] : [],
+        `${primary}'`,
+        primary === '⌘' ? ["Ctrl+'"] : [],
         [
-          { key: '`', primary: true },
-          { code: 'Backquote', primary: true },
+          { key: "'", primary: true },
+          { code: 'Quote', primary: true },
         ],
         'terminalFocus',
       ),
       taskBinding(
         'task.terminal.external',
         'Open session externally',
-        `${primary}⇧\``,
-        '⇧`',
-        primary === '⌘' ? ['Ctrl+Shift+`'] : [],
+        `${primary}⇧'`,
+        primary === '⌘' ? ["Ctrl+Shift+'"] : [],
         [
-          { key: '`', primary: true, shift: true },
-          { code: 'Backquote', primary: true, shift: true },
+          { key: "'", primary: true, shift: true },
+          { code: 'Quote', primary: true, shift: true },
         ],
         'terminalExternal',
       ),

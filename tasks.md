@@ -1,6 +1,6 @@
 # Clew — implementation backlog
 
-**Status:** v0.9.0 release complete; completed detailed cards are archived in [`tasks/done/`](./tasks/done/)
+**Status:** v0.10.0 release candidate in review; completed detailed cards are archived in [`tasks/done/`](./tasks/done/)
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 

@@ -4,6 +4,15 @@
 
 No changes yet.
 
+## 0.10.0
+
+- Added a scoped UI shortcut registry with stable action IDs, chords, scopes, availability predicates, and handler metadata.
+- Added numbered task navigation for the first ten rendered tasks (`Cmd/Ctrl+1…0`) with a browser-safe `Option/Alt+1…0` fallback.
+- Added contextual task shortcuts that reuse the pointer handlers: `Cmd/Ctrl+Enter` Continue/Focus terminal, `Cmd/Ctrl+E` internal diff, `Cmd/Ctrl+Shift+E` external viewer, `Cmd/Ctrl+\`` embedded terminal, and `Cmd/Ctrl+Shift+\`` external session opening.
+- Added a multi-target terminal chooser with per-task remembered selection and a separate explicit `Finish worker` action, so Continue can never finish a worker.
+- Added Command-hold key-hint badges driven by registry metadata plus a `Keyboard shortcuts` help surface reachable from the command palette.
+- Migrated `Cmd/Ctrl+K` command-palette control to the shared registry without behavioral regression.
+
 ## 0.9.0
 
 - Added the Task Screen v3 workflow with task-level actions, current-stage context, agent runtime controls, and responsive desktop/mobile layouts.

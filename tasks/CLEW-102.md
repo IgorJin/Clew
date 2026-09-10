@@ -20,7 +20,7 @@ Add context-aware shortcuts for Continue, internal/external change inspection, a
 
 ## User outcome
 
-On a Task screen, an operator can continue work with `Cmd+Enter`, inspect the selected run with `Cmd+E` or `Cmd+Shift+E`, and reach the relevant terminal with `Cmd+\`` or `Cmd+Shift+\``. The same state and diagnostics appear whether the action starts from a key or a button.
+On a Task screen, an operator can continue work with `Cmd+Enter`, inspect the selected run with `Cmd+E` or `Cmd+Shift+E`, and reach the relevant terminal with `Cmd+'` or `Cmd+Shift+'`. The same state and diagnostics appear whether the action starts from a key or a button.
 
 ## Context
 
@@ -34,7 +34,7 @@ The current header button multiplexes next-step approval, worker continuation, a
 - when the next step requires approval, open the existing product confirmation modal; preserve single-submit protection;
 - keep `Finish worker`, `Finish work`, merge, and release outside Continue and without the same shortcut;
 - register `Cmd/Ctrl+E` for the internal diff modal and `Cmd/Ctrl+Shift+E` for the external viewer, targeting the exact currently selected change run;
-- register `Cmd/Ctrl+\`` to expand/focus the embedded terminal and `Cmd/Ctrl+Shift+\`` to invoke external session opening;
+- register `Cmd+'` to expand/focus the embedded terminal and `Cmd+Shift+'` to invoke external session opening (`Cmd+\`` is reserved by macOS window management and never reaches the browser, so the terminal chords use the apostrophe key);
 - use a compact chooser when multiple eligible active sessions exist and remember the last choice per Task for the current UI session;
 - return actionable unavailable states for missing changes, session, viewer, controller-local access, and Runner-local access.
 
@@ -81,9 +81,9 @@ The current header button multiplexes next-step approval, worker continuation, a
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
+- Reviewer: implementation author, 2026-09-10
+- Findings: Five issues found and fixed. (1) Change/terminal keyboard actions ignored `canMutate`, so `Cmd+E`, `` Cmd+` ``, and `Cmd+Shift+\`` could open the diff modal or fire viewer/session commands while the banner says every operator action is disabled; all task bindings now gate on `canMutate` with the disconnected reason, matching the pointer buttons. (2) Embedded-terminal focus accepted any available terminal instead of running ones; focus targets are now restricted to running sessions (`focusTerminalTargets`), while external opening keeps recorded sessions. (3) The terminal chooser was written but never rendered (dead `terminalChooser`state); it is now a focused component with shared Escape/initial-focus dismissal. (4) Continue's disabled path consumed the key without explanation in some states; disabled`task.continue`now surfaces its reason via`onDisabled`. (5) `AgentGrid`availability logic was duplicated for terminal targeting; it is now shared through`buildAgentCards`/`agentCardState`/`openSessionArgs`. Verified: `npm run check`green (240 backend, 99 UI),`tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
 
 ## Dependencies and parallelization
 

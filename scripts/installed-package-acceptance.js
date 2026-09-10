@@ -151,6 +151,8 @@ try {
     'package/RELEASE-0.6.md',
     'package/RELEASE-0.8.md',
     'package/RELEASE-0.9.md',
+    'package/RELEASE-0.10.md',
+    'package/docs/KEYBOARD-CONTROLS.md',
     'package/docs/GIT-WORKFLOW.md',
     'package/docs/adr/0002-diff-viewer.md',
     'package/migrations/021_run_git_provenance.sql',

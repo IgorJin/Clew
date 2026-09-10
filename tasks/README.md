@@ -85,7 +85,7 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-101](./CLEW-101.md)      | v0.10   | in_review  | —             | —                   |
 | [CLEW-102](./CLEW-102.md)      | v0.10   | in_review  | CLEW-101      | v0.10-keyboard-ui   |
 | [CLEW-103](./CLEW-103.md)      | v0.10   | in_review  | CLEW-101      | v0.10-keyboard-ui   |
-| [CLEW-104](./CLEW-104.md)      | v0.10   | planned    | 099, 102, 103 | —                   |
+| [CLEW-104](./CLEW-104.md)      | v0.10   | in_review  | 099, 102, 103 | —                   |
 
 ## Execution waves
 

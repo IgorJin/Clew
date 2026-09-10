@@ -80,9 +80,9 @@ Clew already provides `Cmd/Ctrl+K` through an app-global listener, but keyboard 
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
+- Reviewer: implementation author, 2026-09-10
+- Findings: Four issues found and fixed. (1) Out-of-range numbered positions resolved to a disabled action but shared the disabled-explanation path, risking consumed input; resolution now prefers the first enabled match and leaves unmatched/disabled number keys to default behavior since digit actions carry no `onDisabled`. (2) The singleton registry snapshot used for hints/help could lag one render behind task transitions; badges and help are now derived from the current shortcut definitions via `indexShortcuts`/`describeShortcut`, and the per-task binding ref is reset outside the task view. (3) Chord labels were macOS-only (`⌘…`, `⌥…`) while matching also accepts Ctrl/Alt; chord and fallback labels are now platform-aware via `primaryModifierLabel`/`optionModifierLabel`. (4) `resolveShortcut` returned the first disabled match even if an enabled action shared the chord; it now scans for an enabled match first and reports the earliest disabled one only as fallback. Verified: `npm run check` green (240 backend, 99 UI), `tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
 
 ## Dependencies and parallelization
 

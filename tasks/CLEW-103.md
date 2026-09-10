@@ -81,9 +81,9 @@ Shortcut discovery is part of the requested Ghostty-like interaction. CLEW-101 p
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
+- Reviewer: implementation author, 2026-09-10
+- Findings: Four issues found and fixed. (1) The keyboard help and key-hint badges read the singleton registry snapshot, which could lag task transitions by one render; both now derive from the current shortcut definitions, and the per-task binding ref resets outside the task view (overview help shows an explicit "open a task" reason). (2) The shortcut help showed only primary chords, hiding the documented `Option/Alt` fallback; fallback chords are now listed per action. (3) The terminal chooser and shortcut help had no Escape handling or initial focus, unlike the settings/finalization modals; both use a shared `useModalDismiss` hook. (4) Chord/fallback strings were macOS-only; they are now platform-aware. Verified: `npm run check` green (240 backend, 99 UI), `tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
 
 ## Dependencies and parallelization
 

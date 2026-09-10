@@ -14,7 +14,6 @@ export type Shortcut = {
   id: string;
   label: string;
   chord: string;
-  hint?: string;
   fallbackChords?: string[];
   combos: KeyCombo[];
   scopes: ShortcutScope[];
@@ -59,7 +58,6 @@ export type ShortcutMetadata = {
   id: string;
   label: string;
   chord: string;
-  hint: string;
   fallbackChords: string[];
   scopes: ShortcutScope[];
   enabled: boolean;
@@ -123,7 +121,6 @@ export function describeShortcut(shortcut: Shortcut): ShortcutMetadata {
     id: shortcut.id,
     label: shortcut.label,
     chord: shortcut.chord,
-    hint: shortcut.hint ?? shortcut.chord,
     fallbackChords: shortcut.fallbackChords ?? [],
     scopes: [...shortcut.scopes],
     enabled: shortcut.enabled ? shortcut.enabled() : true,

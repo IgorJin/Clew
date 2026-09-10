@@ -85,6 +85,7 @@ The operator clicks the gear icon, opens the settings modal, switches to the `Ag
 - Verdict: pass
 - Reviewer: counterexample-oriented review, 2026-09-09
 - Findings: One issue found and fixed during review: the committed production bundle `ui/dist` (served by the daemon) had gone stale relative to `ui/src`; `npm run build --prefix ui` was re-run and the new bundle verified to contain the settings modal. Two non-blocking UX notes were then also addressed: (1) the modal now traps Tab focus (pattern matches `FinalizationGate`); (2) the Escape handler moved to a document-capture listener with `stopPropagation`, so an open settings modal closes without also closing the command palette underneath. Remaining accepted trade-offs, consistent with repo precedent (CLEW-098 review): (3) in private-browsing mode the selection lives only until the modal unmounts — the documented `writePreference` trade-off; (4) the checkmark icon next to "Selected" marks selection state, not readiness — acceptable because the chapter notice explicitly disclaims verification. AC-1 through AC-6 hold: 60/60 UI tests (including a focus-trap test), backend suite green, eslint and `tsc --noEmit` clean. `done` still requires merge to `main`.
+- Re-verified 2026-09-10 after CLEW-101–103 landed: settings modal source untouched by the keyboard work, its tests still pass, `ui/dist` rebuilt and repacked (v0.10 bundle verified to contain the modal), and the new scope rules keep task shortcuts out of the modal. No new findings.
 
 ## Dependencies and parallelization
 

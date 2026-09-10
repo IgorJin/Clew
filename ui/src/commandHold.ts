@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 export const COMMAND_HOLD_THRESHOLD_MS = 180;
 
+const MODIFIER_KEYS = new Set(['Meta', 'Shift', 'Control', 'Alt', 'AltGraph']);
+
 export function useCommandHold(threshold = COMMAND_HOLD_THRESHOLD_MS) {
   const [active, setActive] = useState(false);
   const activeRef = useRef(false);
@@ -27,6 +29,9 @@ export function useCommandHold(threshold = COMMAND_HOLD_THRESHOLD_MS) {
         }, threshold);
         return;
       }
+      // Pure modifier presses must not dismiss the overlay: chords like
+      // Cmd, then Shift, then a key are pressed as a progressive sequence.
+      if (MODIFIER_KEYS.has(event.key)) return;
       if (event.metaKey || activeRef.current) clear();
     };
     const onKeyUp = (event: KeyboardEvent) => {
