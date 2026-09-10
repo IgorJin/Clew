@@ -82,8 +82,8 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-093](./CLEW-093.md)      | v0.9    | done       | 087–092       | —                   |
 | [CLEW-099](./CLEW-099.md)      | v0.10   | in_review  | —             | —                   |
 | [CLEW-100](./CLEW-100.md)      | v0.9    | in_review  | —             | —                   |
-| [CLEW-101](./CLEW-101.md)      | v0.10   | ready      | —             | —                   |
-| [CLEW-102](./CLEW-102.md)      | v0.10   | planned    | CLEW-101      | v0.10-keyboard-ui   |
+| [CLEW-101](./CLEW-101.md)      | v0.10   | in_review  | —             | —                   |
+| [CLEW-102](./CLEW-102.md)      | v0.10   | in_review  | CLEW-101      | v0.10-keyboard-ui   |
 | [CLEW-103](./CLEW-103.md)      | v0.10   | planned    | CLEW-101      | v0.10-keyboard-ui   |
 | [CLEW-104](./CLEW-104.md)      | v0.10   | planned    | 099, 102, 103 | —                   |
 

@@ -38,6 +38,14 @@ import type {
   ThreadItem,
 } from './types';
 import { TerminalPane } from './TerminalPane';
+import {
+  isTerminalElement,
+  isTextEntryElement,
+  useShortcuts,
+  type KeyCombo,
+  type Shortcut,
+  type ShortcutScope,
+} from './shortcuts';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -565,15 +573,18 @@ function GlobalAttention({
 }
 
 function CommandPalette({
+  open,
   projects,
   tasks,
   onSelect,
+  onClose,
 }: {
+  open: boolean;
   projects: Project[];
   tasks: Task[];
   onSelect: (projectId: string, taskId: string | null) => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -619,19 +630,15 @@ function CommandPalette({
   activeIndexRef.current = activeIndex;
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setOpen((v) => !v);
-
-        return;
-      }
       if (!openRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        setOpen(false);
+        onCloseRef.current();
       } else if (event.key === 'ArrowDown') {
         event.preventDefault();
         setActiveIndex((i) => Math.min(i + 1, itemsRef.current.length - 1));
@@ -642,7 +649,7 @@ function CommandPalette({
         event.preventDefault();
         const entry = itemsRef.current[activeIndexRef.current];
 
-        setOpen(false);
+        onCloseRef.current();
         onSelectRef.current(entry.projectId, entry.taskId);
       }
     };
@@ -686,7 +693,7 @@ function CommandPalette({
               key={`${entry.projectId}-${entry.taskId ?? 'proj'}`}
               className={`palette-item${i === activeIndex ? ' active' : ''}`}
               onClick={() => {
-                setOpen(false);
+                onClose();
                 onSelect(entry.projectId, entry.taskId);
               }}
               onMouseEnter={() => setActiveIndex(i)}
@@ -1345,20 +1352,22 @@ function DiffViewer({
   );
 }
 
-function AgentGrid({
-  task,
-  canMutate,
-  act,
-  expandedAgent,
-  onToggleExpand,
-}: {
-  task: Task;
-  canMutate: boolean;
-  act: (args: string[], success: string) => void;
-  expandedAgent: string | null;
-  onToggleExpand: (agent: string) => void;
-}) {
-  const cards = task.roles.flatMap<AgentCard>((role) => {
+type AgentCardState = {
+  isWorkerRole: boolean;
+  isCurrentRun: boolean;
+  isRunning: boolean;
+  isCompleted: boolean;
+  hasSession: boolean;
+  terminalId: string | undefined;
+  terminalAvailable: boolean;
+  canOpenExternally: boolean;
+  hasOpenReviewFindings: boolean;
+  statusClass: string;
+  statusLabel: string;
+};
+
+function buildAgentCards(task: Task): AgentCard[] {
+  return task.roles.flatMap<AgentCard>((role) => {
     if (role !== 'worker')
       return [
         {
@@ -1385,69 +1394,173 @@ function AgentGrid({
       agentSession: undefined,
     }));
   });
+}
+
+function agentCardState(task: Task, card: AgentCard): AgentCardState {
+  const { role, run, agentSession } = card;
+  const isWorkerRole = role === 'worker';
+  const currentRunIsNotInSnapshot = Boolean(
+    task.runId && !task.runs.some((candidate) => candidate.id === task.runId),
+  );
+  const isCurrentRun = Boolean(
+    run &&
+    (run.id === task.runId ||
+      ((!task.runId || currentRunIsNotInSnapshot) &&
+        run.stageId === (task.sessionStageId ?? 'worker'))),
+  );
+  const isRunning = isWorkerRole
+    ? run?.status === 'RUNNING' || (isCurrentRun && task.runStatus === 'RUNNING')
+    : role === 'reviewer'
+      ? task.state === 'REVIEWING'
+      : role === 'architect'
+        ? task.state === 'DRAFT' && Boolean(agentSession)
+        : false;
+  const isCompleted = isWorkerRole
+    ? run?.status === 'COMPLETED' || (isCurrentRun && task.runStatus === 'COMPLETED')
+    : role === 'reviewer'
+      ? task.reviewed === true && task.state !== 'REVIEWING'
+      : role === 'architect'
+        ? Boolean(task.architecture)
+        : false;
+  const hasSession = isWorkerRole
+    ? !!(run?.sessionId || (isCurrentRun && task.sessionId) || isRunning)
+    : !!agentSession;
+  const terminalId = isWorkerRole
+    ? isCurrentRun
+      ? (task.runId ?? run?.id)
+      : run?.id
+    : agentSession?.id;
+  const terminalAvailable = isWorkerRole
+    ? Boolean(
+        terminalId &&
+        (run?.terminalAvailable || (isCurrentRun && task.terminalAvailable)) &&
+        (run?.terminalAccess ?? (isCurrentRun ? task.terminalAccess : 'unavailable')) !==
+          'runner_local',
+      )
+    : Boolean(agentSession && agentSession.terminalAccess === 'controller_local');
+  const canOpenExternally = isWorkerRole ? hasSession : terminalAvailable;
+  const hasOpenReviewFindings = role === 'reviewer' && task.findings > 0;
+  const statusClass = isRunning
+    ? 'running'
+    : hasOpenReviewFindings
+      ? 'error'
+      : isCompleted
+        ? 'completed'
+        : 'idle';
+  const statusLabel = isRunning
+    ? 'running'
+    : hasOpenReviewFindings
+      ? `${task.findings} open`
+      : isCompleted
+        ? 'done'
+        : hasSession
+          ? 'available'
+          : 'idle';
+
+  return {
+    isWorkerRole,
+    isCurrentRun,
+    isRunning,
+    isCompleted,
+    hasSession,
+    terminalId,
+    terminalAvailable,
+    canOpenExternally,
+    hasOpenReviewFindings,
+    statusClass,
+    statusLabel,
+  };
+}
+
+function openSessionArgs(task: Task, card: AgentCard, state: AgentCardState): string[] {
+  const { role, run, agentSession } = card;
+
+  if (state.isWorkerRole)
+    return [
+      'session',
+      'open',
+      task.id,
+      '--stage',
+      run?.stageId ?? role,
+      '--role',
+      role,
+      '--harness',
+      run?.harness ?? 'codex',
+      ...(state.isRunning ? ['--surface', 'live', '--mode', 'live'] : []),
+    ];
+
+  return [
+    'session',
+    'open',
+    task.id,
+    '--role',
+    role,
+    '--harness',
+    agentSession?.harness ?? 'codex',
+  ];
+}
+
+type TerminalTarget = {
+  key: string;
+  label: string;
+  card: AgentCard;
+  state: AgentCardState;
+};
+
+type TaskShortcutBinding = {
+  enabled: () => boolean;
+  disabledReason: () => string | undefined;
+  onDisabled?: (reason: string) => void;
+  run: () => void;
+};
+
+type TaskShortcutBindings = {
+  continue: TaskShortcutBinding;
+  changesInternal: TaskShortcutBinding;
+  changesExternal: TaskShortcutBinding;
+  terminalFocus: TaskShortcutBinding;
+  terminalExternal: TaskShortcutBinding;
+};
+
+function terminalTargets(task: Task): TerminalTarget[] {
+  return buildAgentCards(task).map((card) => ({
+    key: card.key,
+    label: card.label,
+    card,
+    state: agentCardState(task, card),
+  }));
+}
+
+function AgentGrid({
+  task,
+  canMutate,
+  act,
+  expandedAgent,
+  onToggleExpand,
+}: {
+  task: Task;
+  canMutate: boolean;
+  act: (args: string[], success: string) => void;
+  expandedAgent: string | null;
+  onToggleExpand: (agent: string) => void;
+}) {
+  const cards = buildAgentCards(task);
 
   return (
     <div className="agent-grid">
-      {cards.map(({ key, role, label, run, agentSession }) => {
-        const isWorkerRole = role === 'worker';
-        const currentRunIsNotInSnapshot = Boolean(
-          task.runId && !task.runs.some((candidate) => candidate.id === task.runId),
-        );
-        const isCurrentRun = Boolean(
-          run &&
-          (run.id === task.runId ||
-            ((!task.runId || currentRunIsNotInSnapshot) &&
-              run.stageId === (task.sessionStageId ?? 'worker'))),
-        );
-        const isRunning = isWorkerRole
-          ? run?.status === 'RUNNING' || (isCurrentRun && task.runStatus === 'RUNNING')
-          : role === 'reviewer'
-            ? task.state === 'REVIEWING'
-            : role === 'architect'
-              ? task.state === 'DRAFT' && Boolean(agentSession)
-              : false;
-        const isCompleted = isWorkerRole
-          ? run?.status === 'COMPLETED' || (isCurrentRun && task.runStatus === 'COMPLETED')
-          : role === 'reviewer'
-            ? task.reviewed === true && task.state !== 'REVIEWING'
-            : role === 'architect'
-              ? Boolean(task.architecture)
-              : false;
-        const hasSession = isWorkerRole
-          ? !!(run?.sessionId || (isCurrentRun && task.sessionId) || isRunning)
-          : !!agentSession;
-        const terminalId = isWorkerRole
-          ? isCurrentRun
-            ? (task.runId ?? run?.id)
-            : run?.id
-          : agentSession?.id;
-        const terminalAvailable = isWorkerRole
-          ? Boolean(
-              terminalId &&
-              (run?.terminalAvailable || (isCurrentRun && task.terminalAvailable)) &&
-              (run?.terminalAccess ?? (isCurrentRun ? task.terminalAccess : 'unavailable')) !==
-                'runner_local',
-            )
-          : Boolean(agentSession && agentSession.terminalAccess === 'controller_local');
+      {cards.map((card) => {
+        const { key, role, label, run, agentSession } = card;
+        const state = agentCardState(task, card);
+        const {
+          isWorkerRole,
+          isCurrentRun,
+          terminalId,
+          terminalAvailable,
+          canOpenExternally,
+          statusClass,
+          statusLabel,
+        } = state;
         const expanded = expandedAgent === key && terminalAvailable && Boolean(terminalId);
-        const canOpenExternally = isWorkerRole ? hasSession : terminalAvailable;
-        const hasOpenReviewFindings = role === 'reviewer' && task.findings > 0;
-        const statusClass = isRunning
-          ? 'running'
-          : hasOpenReviewFindings
-            ? 'error'
-            : isCompleted
-              ? 'completed'
-              : 'idle';
-        const statusLabel = isRunning
-          ? 'running'
-          : hasOpenReviewFindings
-            ? `${task.findings} open`
-            : isCompleted
-              ? 'done'
-              : hasSession
-                ? 'available'
-                : 'idle';
 
         return (
           <div className={`agent-card${expanded ? ' expanded' : ''}`} key={key}>
@@ -1521,38 +1634,7 @@ function AgentGrid({
                       ? `${label} session is available only on the Runner`
                       : `No session available for ${label}`
                 }
-                onClick={() => {
-                  if (isWorkerRole) {
-                    act(
-                      [
-                        'session',
-                        'open',
-                        task.id,
-                        '--stage',
-                        run?.stageId ?? role,
-                        '--role',
-                        role,
-                        '--harness',
-                        run?.harness ?? 'codex',
-                        ...(isRunning ? ['--surface', 'live', '--mode', 'live'] : []),
-                      ],
-                      `${role} terminal opened`,
-                    );
-                  } else {
-                    act(
-                      [
-                        'session',
-                        'open',
-                        task.id,
-                        '--role',
-                        role,
-                        '--harness',
-                        agentSession?.harness ?? 'codex',
-                      ],
-                      `${role} terminal opened`,
-                    );
-                  }
-                }}
+                onClick={() => act(openSessionArgs(task, card, state), `${role} terminal opened`)}
               >
                 <Terminal size={12} />
                 Open externally
@@ -2499,6 +2581,13 @@ export default function App() {
     setSettingsOpen(false);
     settingsButtonRef.current?.focus();
   }, []);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [terminalChooser, setTerminalChooser] = useState<{
+    mode: 'focus' | 'external';
+    targets: TerminalTarget[];
+  } | null>(null);
+  const terminalChoiceRef = useRef<Record<string, string>>({});
+  const taskShortcutsRef = useRef<TaskShortcutBindings | null>(null);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -2849,6 +2938,166 @@ export default function App() {
     );
   }, [projectTasks, statusFilter]);
 
+  const shortcutScope = (): ShortcutScope => {
+    if (
+      paletteOpen ||
+      createOpen ||
+      finishOpen ||
+      addProjectOpen ||
+      settingsOpen ||
+      startApproval ||
+      actionConfirmation ||
+      terminalChooser ||
+      diffRunId
+    )
+      return 'modal';
+
+    const active = document.activeElement;
+
+    if (isTerminalElement(active)) return 'terminal';
+    if (isTextEntryElement(active)) return 'input';
+    if (project && task) return 'task';
+
+    return 'global';
+  };
+
+  const shortcuts = useMemo<Shortcut[]>(() => {
+    const digitKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+    const digitCodes = [
+      'Digit1',
+      'Digit2',
+      'Digit3',
+      'Digit4',
+      'Digit5',
+      'Digit6',
+      'Digit7',
+      'Digit8',
+      'Digit9',
+      'Digit0',
+    ];
+    const list: Shortcut[] = digitKeys.map((key, index) => {
+      const ordinal = index + 1;
+      const entry = sortedTasks[index] ?? null;
+
+      return {
+        id: `task.open.${ordinal}`,
+        label: `Open task ${ordinal}`,
+        chord: `⌘${key}`,
+        fallbackChords: [`⌥${key}`],
+        combos: [
+          { key, primary: true },
+          { code: digitCodes[index], primary: true },
+          { key, alt: true },
+          { code: digitCodes[index], alt: true },
+        ],
+        scopes: ['global', 'task'],
+        enabled: () => Boolean(entry),
+        disabledReason: () => (entry ? undefined : 'No visible task in this position'),
+        run: () => {
+          const current = sortedTasks[index];
+
+          if (current) selectTask(current.id);
+        },
+      };
+    });
+
+    list.push({
+      id: 'palette.open',
+      label: 'Open command palette',
+      chord: '⌘K',
+      fallbackChords: ['Ctrl+K'],
+      combos: [
+        { key: 'k', primary: true },
+        { code: 'KeyK', primary: true },
+      ],
+      scopes: ['global', 'task', 'input', 'terminal', 'modal'],
+      enabled: () => Boolean(project),
+      run: () => setPaletteOpen((value) => !value),
+    });
+
+    const taskBinding = (
+      id: string,
+      label: string,
+      chord: string,
+      fallbackChords: string[],
+      combos: KeyCombo[],
+      key: keyof TaskShortcutBindings,
+    ): Shortcut => ({
+      id,
+      label,
+      chord,
+      fallbackChords,
+      combos,
+      scopes: ['task'],
+      enabled: () => taskShortcutsRef.current?.[key].enabled() ?? false,
+      disabledReason: () => taskShortcutsRef.current?.[key].disabledReason(),
+      onDisabled: (reason: string) => taskShortcutsRef.current?.[key].onDisabled?.(reason),
+      run: () => taskShortcutsRef.current?.[key].run(),
+    });
+
+    list.push(
+      taskBinding(
+        'task.continue',
+        'Continue task',
+        '⌘↵',
+        ['Ctrl+Enter'],
+        [
+          { key: 'Enter', primary: true },
+          { code: 'Enter', primary: true },
+        ],
+        'continue',
+      ),
+      taskBinding(
+        'task.changes.internal',
+        'View changes',
+        '⌘E',
+        ['Ctrl+E'],
+        [
+          { key: 'e', primary: true },
+          { code: 'KeyE', primary: true },
+        ],
+        'changesInternal',
+      ),
+      taskBinding(
+        'task.changes.external',
+        'Open changes externally',
+        '⌘⇧E',
+        ['Ctrl+Shift+E'],
+        [
+          { key: 'e', primary: true, shift: true },
+          { code: 'KeyE', primary: true, shift: true },
+        ],
+        'changesExternal',
+      ),
+      taskBinding(
+        'task.terminal.focus',
+        'Focus terminal',
+        '⌘`',
+        ['Ctrl+`'],
+        [
+          { key: '`', primary: true },
+          { code: 'Backquote', primary: true },
+        ],
+        'terminalFocus',
+      ),
+      taskBinding(
+        'task.terminal.external',
+        'Open session externally',
+        '⌘⇧`',
+        ['Ctrl+Shift+`'],
+        [
+          { key: '`', primary: true, shift: true },
+          { code: 'Backquote', primary: true, shift: true },
+        ],
+        'terminalExternal',
+      ),
+    );
+
+    return list;
+  }, [sortedTasks, selectTask, setPaletteOpen, project]);
+
+  useShortcuts(shortcuts, shortcutScope);
+
   const runApprovedStart = async (taskId: string, actionId: string) => {
     if (startRequests.current.has(taskId)) return;
     startRequests.current.add(taskId);
@@ -3127,7 +3376,13 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
-        <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
+        <CommandPalette
+          open={paletteOpen}
+          projects={projects}
+          tasks={tasks}
+          onSelect={selectProjectAndTask}
+          onClose={() => setPaletteOpen(false)}
+        />
       </div>
     );
   }
@@ -3194,7 +3449,13 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
-        <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
+        <CommandPalette
+          open={paletteOpen}
+          projects={projects}
+          tasks={tasks}
+          onSelect={selectProjectAndTask}
+          onClose={() => setPaletteOpen(false)}
+        />
       </div>
     );
   }
@@ -3315,6 +3576,194 @@ export default function App() {
   const diffRun = task.runs.find((run) => run.id === diffRunId);
   const latestTaskRun = task.runs.at(-1);
   const changeRun = task.runs.find((run) => run.id === selectedChangeRunId) ?? latestTaskRun;
+  const waitingForOperator = task.interactionStatus === 'waiting_for_operator';
+  const changeRunAvailable = Boolean(changeRun);
+  const terminalTargetsAvailable = terminalTargets(task).some(
+    (target) => target.state.terminalAvailable && Boolean(target.state.terminalId),
+  );
+  const externalTargetsAvailable = terminalTargets(task).some(
+    (target) => target.state.canOpenExternally,
+  );
+
+  const focusTerminalTarget = (target: TerminalTarget) => {
+    terminalChoiceRef.current[task.id] = target.key;
+    setExpandedAgent(target.key);
+    window.setTimeout(() => {
+      document.querySelector<HTMLElement>('.terminal-panel .xterm-helper-textarea')?.focus();
+    }, 0);
+  };
+
+  const openExternalTarget = (target: TerminalTarget) => {
+    terminalChoiceRef.current[task.id] = target.key;
+    void act(
+      openSessionArgs(task, target.card, target.state),
+      `${target.card.role} terminal opened`,
+    );
+  };
+
+  const chooseTerminal = (mode: 'focus' | 'external') => {
+    const targets = terminalTargets(task).filter((target) =>
+      mode === 'external'
+        ? target.state.canOpenExternally
+        : target.state.terminalAvailable && Boolean(target.state.terminalId),
+    );
+
+    if (!targets.length) {
+      setNotice(
+        mode === 'external'
+          ? 'No session is available to open externally'
+          : 'No embedded terminal is available',
+      );
+      return;
+    }
+    const preferred = targets.find((target) => target.key === terminalChoiceRef.current[task.id]);
+
+    if (preferred) {
+      if (mode === 'external') openExternalTarget(preferred);
+      else focusTerminalTarget(preferred);
+      return;
+    }
+    if (targets.length === 1) {
+      if (mode === 'external') openExternalTarget(targets[0]);
+      else focusTerminalTarget(targets[0]);
+      return;
+    }
+    setTerminalChooser({ mode, targets });
+  };
+
+  const runContinue = () => {
+    if (!canMutate) {
+      setNotice('Actions are disabled while the control plane is disconnected');
+      return;
+    }
+    if (interactiveWorker) {
+      if (waitingForOperator) {
+        chooseTerminal('focus');
+        return;
+      }
+      setNotice('The worker is running without waiting for input');
+      return;
+    }
+    if (canRestartWorker) {
+      void act(
+        ['continue', task.id, '--message', 'Restart the worker and re-check the task'],
+        'Worker restart requested',
+      );
+      return;
+    }
+    if (nextStep?.status === 'PENDING') {
+      requestStart(task.id, task.title, nextStep);
+      return;
+    }
+    if (canStart) {
+      void explainNextStep();
+      return;
+    }
+    setNotice('No safe continue action is available for this task state');
+  };
+
+  taskShortcutsRef.current = {
+    continue: {
+      enabled: () =>
+        canMutate &&
+        ((interactiveWorker && waitingForOperator) ||
+          canRestartWorker ||
+          nextStep?.status === 'PENDING' ||
+          canStart),
+      disabledReason: () => {
+        if (!canMutate) return 'Actions are disabled while the control plane is disconnected';
+        if (interactiveWorker && !waitingForOperator)
+          return 'The worker is running without waiting for input';
+        return 'No safe continue action is available for this task state';
+      },
+      onDisabled: (reason: string) => setNotice(reason),
+      run: runContinue,
+    },
+    changesInternal: {
+      enabled: () => changeRunAvailable,
+      disabledReason: () => (changeRunAvailable ? undefined : 'No run is selected for inspection'),
+      run: () => {
+        if (changeRun) viewRunDiff(changeRun);
+      },
+    },
+    changesExternal: {
+      enabled: () => changeRunAvailable,
+      disabledReason: () => (changeRunAvailable ? undefined : 'No run is selected for inspection'),
+      run: () => {
+        if (changeRun) void runViewerAction(changeRun);
+      },
+    },
+    terminalFocus: {
+      enabled: () => terminalTargetsAvailable,
+      disabledReason: () =>
+        terminalTargetsAvailable ? undefined : 'No embedded terminal is available',
+      run: () => chooseTerminal('focus'),
+    },
+    terminalExternal: {
+      enabled: () => externalTargetsAvailable,
+      disabledReason: () =>
+        externalTargetsAvailable ? undefined : 'No session is available to open externally',
+      run: () => chooseTerminal('external'),
+    },
+  };
+
+  const mainAction = (() => {
+    if (interactiveWorker) {
+      if (waitingForOperator)
+        return {
+          label: 'Focus terminal',
+          icon: <SquareTerminal size={13} />,
+          enabled: terminalTargetsAvailable,
+          reason: terminalTargetsAvailable ? undefined : 'No embedded terminal is available',
+          run: () => chooseTerminal('focus'),
+        };
+      return {
+        label: 'Running',
+        icon: <RefreshCw size={13} />,
+        enabled: false,
+        reason: 'The worker is running without waiting for input',
+        run: () => {},
+      };
+    }
+    if (canRestartWorker)
+      return {
+        label: 'Continue',
+        icon: <RefreshCw size={13} />,
+        enabled: canMutate,
+        reason: canMutate
+          ? undefined
+          : 'Actions are disabled while the control plane is disconnected',
+        run: runContinue,
+      };
+    if (nextStep?.status === 'PENDING')
+      return {
+        label: 'Approve start',
+        icon: <Check size={13} />,
+        enabled: canMutate,
+        reason: canMutate
+          ? undefined
+          : 'Actions are disabled while the control plane is disconnected',
+        run: () => requestStart(task.id, task.title, nextStep),
+      };
+    if (canStart)
+      return {
+        label: 'Next step',
+        icon: <RefreshCw size={13} />,
+        enabled: canMutate,
+        reason: canMutate
+          ? undefined
+          : 'Actions are disabled while the control plane is disconnected',
+        run: () => void explainNextStep(),
+      };
+    return {
+      label: 'Continue',
+      icon: <RefreshCw size={13} />,
+      enabled: false,
+      reason: 'No safe continue action is available for this task state',
+      run: () => {},
+    };
+  })();
+
   const selectedWorkflowIndex = WORKFLOW_STEPS.findIndex((step) => step.key === selectedStep);
   const currentWorkflowIndex = workflowStepIndex(task.state);
   const selectedStepStatus =
@@ -3453,37 +3902,26 @@ export default function App() {
                   />
                   <button
                     className="button secondary"
-                    disabled={!canMutate || (!interactiveWorker && !canStart && !canRestartWorker)}
-                    onClick={() => {
-                      if (interactiveWorker)
-                        return void act(
+                    disabled={!canMutate || !mainAction.enabled}
+                    title={mainAction.reason}
+                    onClick={mainAction.run}
+                  >
+                    {mainAction.icon} {mainAction.label}
+                  </button>
+                  {interactiveWorker && (
+                    <button
+                      className="button secondary"
+                      disabled={!canMutate}
+                      onClick={() =>
+                        void act(
                           ['finish-worker', task.id, '--run', task.runId!],
                           'Worker is finishing',
-                        );
-                      if (canRestartWorker)
-                        return void act(
-                          [
-                            'continue',
-                            task.id,
-                            '--message',
-                            'Restart the worker and re-check the task',
-                          ],
-                          'Worker restart requested',
-                        );
-                      if (nextStep?.status === 'PENDING')
-                        return requestStart(task.id, task.title, nextStep);
-                      return void explainNextStep();
-                    }}
-                  >
-                    {interactiveWorker ? <Check size={13} /> : <RefreshCw size={13} />}
-                    {interactiveWorker
-                      ? 'Finish worker'
-                      : canRestartWorker
-                        ? 'Restart worker'
-                        : nextStep?.status === 'PENDING'
-                          ? 'Approve start'
-                          : 'Next step'}
-                  </button>
+                        )
+                      }
+                    >
+                      <Check size={13} /> Finish worker
+                    </button>
+                  )}
                   <button
                     className="button primary"
                     disabled={
@@ -3763,7 +4201,61 @@ export default function App() {
         />
       )}
       {settingsOpen && <SettingsModal onClose={closeSettings} />}
-      <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
+      {terminalChooser && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => setTerminalChooser(null)}
+        >
+          <section
+            className="create-task"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose terminal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-head compact">
+              <div>
+                <span className="eyebrow">Terminal</span>
+                <h2>Choose terminal</h2>
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Close terminal chooser"
+                onClick={() => setTerminalChooser(null)}
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="agent-connections" role="group" aria-label="Terminal targets">
+              {terminalChooser.targets.map((target) => (
+                <button
+                  key={target.key}
+                  type="button"
+                  className="agent-connection"
+                  onClick={() => {
+                    const mode = terminalChooser.mode;
+
+                    setTerminalChooser(null);
+                    if (mode === 'external') openExternalTarget(target);
+                    else focusTerminalTarget(target);
+                  }}
+                >
+                  <span className="agent-connection-label">{target.label}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+      <CommandPalette
+        open={paletteOpen}
+        projects={projects}
+        tasks={tasks}
+        onSelect={selectProjectAndTask}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   );
 }

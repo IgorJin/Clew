@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
+import { useState } from 'preact/hooks';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureProjects, fixtureTasks } from './fixtures';
+import { listShortcuts, useShortcuts } from './shortcuts';
 import type { Task, ThreadItem } from './types';
 
 const api = vi.hoisted(() => ({
@@ -147,7 +149,7 @@ describe('Preact control plane', () => {
   it('restarts READY work without a message panel', async () => {
     const nativeConfirm = vi.spyOn(window, 'confirm');
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /^restart worker$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^continue$/i }));
     await confirmAction();
 
     await waitFor(() =>
@@ -1515,5 +1517,545 @@ describe('settings modal (CLEW-099)', () => {
     const dialog = await screen.findByRole('dialog', { name: /settings/i });
 
     expect(dialog.innerHTML).not.toMatch(/token|secret|password|api[-_ ]?key|bearer|credential/i);
+  });
+});
+
+describe('keyboard shortcuts (CLEW-101)', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+    api.execute.mockReset();
+    api.execute.mockResolvedValue({ fixture: true });
+    api.loadTasks.mockReset();
+    api.loadTasks.mockResolvedValue({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    api.subscribeToEvents.mockClear();
+  });
+
+  function orderedTasks(
+    count: number,
+    stateFor: (index: number) => Task['state'] = () => 'READY',
+  ): Task[] {
+    const base = fixtureTasks[0];
+
+    return Array.from({ length: count }, (_, index) => ({
+      ...structuredClone(base),
+      id: `CLEW-${String(index + 1).padStart(3, '0')}`,
+      title: `Ordered task ${index + 1}`,
+      createdAt: `2026-09-01T00:00:${String(index).padStart(2, '0')}.000Z`,
+      state: stateFor(index),
+      attention: null,
+      finalization: null,
+      runs: [],
+      stages: [],
+      attempts: 0,
+      agentSessions: [],
+    }));
+  }
+
+  function renderedIds(container: Element): string[] {
+    return [...container.querySelectorAll('.task-row .task-id')].map(
+      (node) => node.textContent ?? '',
+    );
+  }
+
+  async function renderWithTasks(container: Element, count: number) {
+    await waitFor(() => expect(container.querySelectorAll('.task-row').length).toBe(count));
+  }
+
+  it('opens the rendered task at each numbered position (AC-1)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(12),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 12);
+    const ids = renderedIds(container);
+
+    expect(ids).toHaveLength(12);
+
+    for (let position = 1; position <= 10; position += 1) {
+      const key = position === 10 ? '0' : String(position);
+
+      fireEvent.keyDown(document.body, { key, metaKey: true });
+      await waitFor(() => expect(window.location.pathname).toContain(ids[position - 1]));
+    }
+  });
+
+  it('derives positions from the filtered list (AC-1)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(6, (index) => (index % 2 === 0 ? 'EXECUTING' : 'READY')),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 6);
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    await renderWithTasks(container, 3);
+    const ids = renderedIds(container);
+
+    fireEvent.keyDown(document.body, { key: '1', metaKey: true });
+    await waitFor(() => expect(window.location.pathname).toContain(ids[0]));
+  });
+
+  it('treats positions past the visible list as a no-op (AC-2)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(3),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 3);
+    const before = window.location.pathname;
+
+    fireEvent.keyDown(document.body, { key: '7', metaKey: true });
+    expect(window.location.pathname).toBe(before);
+  });
+
+  it('does nothing when the visible list is empty (AC-2)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: [],
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    render(<App />);
+    await screen.findByText('No tasks yet');
+    const before = window.location.pathname;
+
+    fireEvent.keyDown(document.body, { key: '1', metaKey: true });
+    expect(window.location.pathname).toBe(before);
+  });
+
+  it('ignores numbered navigation in inputs, editors, modals, and the terminal (AC-3)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(5),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 5);
+    const before = window.location.pathname;
+    const created: Element[] = [];
+    const attach = (element: Element) => {
+      created.push(element);
+      document.body.appendChild(element);
+
+      return element;
+    };
+
+    try {
+      const input = attach(document.createElement('input')) as HTMLInputElement;
+
+      input.focus();
+      fireEvent.keyDown(input, { key: '2', metaKey: true });
+
+      const textarea = attach(document.createElement('textarea')) as HTMLTextAreaElement;
+
+      textarea.focus();
+      fireEvent.keyDown(textarea, { key: '2', metaKey: true });
+
+      const editable = attach(document.createElement('div')) as HTMLDivElement;
+
+      editable.setAttribute('contenteditable', 'true');
+      editable.focus();
+      fireEvent.keyDown(editable, { key: '2', metaKey: true });
+
+      const xterm = attach(document.createElement('div')) as HTMLDivElement;
+
+      xterm.className = 'xterm';
+      const helper = document.createElement('textarea');
+
+      xterm.appendChild(helper);
+      helper.focus();
+      fireEvent.keyDown(helper, { key: '2', metaKey: true });
+
+      expect(window.location.pathname).toBe(before);
+
+      fireEvent.click(screen.getByRole('button', { name: /^settings$/i }));
+      await screen.findByRole('dialog', { name: /settings/i });
+      fireEvent.keyDown(document.body, { key: '2', metaKey: true });
+      expect(window.location.pathname).toBe(before);
+    } finally {
+      for (const element of created) element.remove();
+    }
+  });
+
+  it('does not dispatch during IME composition or key repeat (AC-3)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(4),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 4);
+    const before = window.location.pathname;
+
+    fireEvent.keyDown(document.body, { key: '2', metaKey: true, repeat: true });
+    fireEvent.keyDown(document.body, { key: '2', metaKey: true, isComposing: true });
+    expect(window.location.pathname).toBe(before);
+  });
+
+  it('keeps command-palette open, close, and selection behavior (AC-4)', async () => {
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, fixtureTasks.length);
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: /command palette/i });
+
+    expect((dialog.querySelector('.palette-input') as HTMLInputElement).value).toBe('');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull(),
+    );
+
+    fireEvent.keyDown(document.body, { key: 'k', ctrlKey: true });
+    const reopened = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(reopened).getByRole('textbox');
+
+    fireEvent.input(input, { target: { value: 'clew-071' } });
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    await waitFor(() => expect(window.location.pathname).toContain('CLEW-071'));
+  });
+
+  it('supports the Option fallback alongside the Command chord (AC-5)', async () => {
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: orderedTasks(3),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    const { container } = render(<App />);
+
+    await renderWithTasks(container, 3);
+    const ids = renderedIds(container);
+
+    fireEvent.keyDown(document.body, { key: '2', altKey: true });
+    await waitFor(() => expect(window.location.pathname).toContain(ids[1]));
+
+    fireEvent.keyDown(document.body, { key: '1', metaKey: true });
+    await waitFor(() => expect(window.location.pathname).toContain(ids[0]));
+  });
+
+  it('dispatches one handler per keystroke across rerenders and unmount (AC-6)', async () => {
+    const calls: number[] = [];
+
+    function Harness() {
+      const [count, setCount] = useState(0);
+
+      useShortcuts(
+        [
+          {
+            id: 'test.run',
+            label: 'Test run',
+            chord: '⌘J',
+            combos: [{ key: 'j', primary: true }],
+            scopes: ['global'],
+            run: () => {
+              calls.push(count);
+              setCount((value) => value + 1);
+            },
+          },
+        ],
+        () => 'global',
+      );
+
+      return <div>{count}</div>;
+    }
+
+    const view = render(<Harness />);
+
+    fireEvent.keyDown(document.body, { key: 'j', metaKey: true });
+    expect(calls).toHaveLength(1);
+
+    view.rerender(<Harness />);
+    fireEvent.keyDown(document.body, { key: 'j', metaKey: true });
+    expect(calls).toHaveLength(2);
+
+    view.unmount();
+    fireEvent.keyDown(document.body, { key: 'j', metaKey: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it('exposes registry metadata for key hints and help (AC-6)', async () => {
+    render(<App />);
+    await waitFor(() => expect(listShortcuts().length).toBeGreaterThanOrEqual(11));
+
+    const byId = new Map(listShortcuts().map((entry) => [entry.id, entry]));
+
+    expect(byId.get('task.open.1')?.chord).toBe('⌘1');
+    expect(byId.get('task.open.10')?.chord).toBe('⌘0');
+    expect(byId.get('task.open.10')?.fallbackChords).toEqual(['⌥0']);
+    expect(byId.get('palette.open')?.scopes).toContain('input');
+  });
+});
+
+describe('task shortcuts (CLEW-102)', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+    api.execute.mockReset();
+    api.execute.mockResolvedValue({ fixture: true });
+    api.loadTasks.mockReset();
+    api.loadTasks.mockResolvedValue({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    api.subscribeToEvents.mockClear();
+  });
+
+  function runningWorkerRun() {
+    return {
+      id: 'run-1',
+      stageId: 'worker',
+      attempt: 1,
+      status: 'RUNNING',
+      harness: 'codex',
+      sessionId: 'sess-1',
+      workspace: '/tmp/clew-workspace',
+      commitSha: null,
+      startedAt: '2026-08-28T09:43:00.000Z',
+      finishedAt: null,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local' as const,
+    };
+  }
+
+  function loadSingleTask(overrides: Partial<Task>) {
+    const task = { ...structuredClone(fixtureTasks[0]), ...overrides };
+
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: [task],
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+
+    return task;
+  }
+
+  function commands() {
+    return api.execute.mock.calls.map(([args]) => args as string[]);
+  }
+
+  it('continues a ready task with Cmd+Enter and never finishes the worker (AC-1, AC-2)', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: 'Enter', metaKey: true });
+    await confirmAction();
+
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'continue',
+        'CLEW-071',
+        '--message',
+        'Restart the worker and re-check the task',
+      ]),
+    );
+    expect(commands().some((args) => args[0] === 'finish-worker')).toBe(false);
+    expect(commands().some((args) => args[0] === 'complete')).toBe(false);
+    expect(
+      commands().some(
+        (args) =>
+          args[0] === 'task' && ['integrate', 'mark-merged', 'mark-released'].includes(args[1]),
+      ),
+    ).toBe(false);
+  });
+
+  it('focuses the waiting embedded terminal with Cmd+Enter (AC-1, AC-4)', async () => {
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-1',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+      runs: [runningWorkerRun()],
+    });
+    render(<App />);
+    await screen.findByRole('button', { name: /focus terminal/i });
+
+    expect(screen.queryByLabelText('Live Codex terminal')).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Enter', metaKey: true });
+    expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
+    expect(commands().some((args) => args[0] === 'finish-worker')).toBe(false);
+  });
+
+  it('explains when Cmd+Enter has no safe action while the worker runs (AC-1)', async () => {
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-1',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: null,
+      roles: ['worker'],
+      stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+      runs: [runningWorkerRun()],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: 'Enter', metaKey: true });
+    expect(await screen.findByText('The worker is running without waiting for input')).toBeTruthy();
+    expect(commands().some((args) => args[0] === 'continue')).toBe(false);
+  });
+
+  it('inspects the selected change run with Cmd+E and Cmd+Shift+E (AC-3)', async () => {
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'task' && args[1] === 'changes') return availableChanges(args[2]);
+      if (args[0] === 'task' && args[1] === 'open-changes') return { state: 'opened' };
+
+      return { fixture: true };
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['task', 'changes', 'run-2']));
+
+    fireEvent.keyDown(document.body, { key: 'e', metaKey: true });
+    const dialog = await screen.findByRole('dialog', { name: /changes for worker/i });
+
+    expect(dialog).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: /close diff/i }));
+
+    fireEvent.keyDown(document.body, { key: 'e', metaKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'task',
+        'open-changes',
+        'CLEW-071',
+        '--run',
+        'run-2',
+      ]),
+    );
+  });
+
+  it('opens the active session externally with Cmd+Shift+` (AC-4)', async () => {
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-1',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [{ id: 'worker', status: 'RUNNING', kind: 'worker' }],
+      runs: [runningWorkerRun()],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true, shiftKey: true });
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'session',
+        'open',
+        'CLEW-071',
+        '--stage',
+        'worker',
+        '--role',
+        'worker',
+        '--harness',
+        'codex',
+        '--surface',
+        'live',
+        '--mode',
+        'live',
+      ]),
+    );
+  });
+
+  it('uses a chooser for multiple terminals and remembers the choice (AC-4)', async () => {
+    const base = structuredClone(fixtureTasks[0]);
+    const backend = {
+      ...structuredClone(base.runs[1]),
+      id: 'run-backend',
+      stageId: 'backend',
+      status: 'RUNNING',
+      sessionId: 'sess-backend',
+      terminalAvailable: true,
+      terminalAccess: 'controller_local' as const,
+    };
+    const frontend = {
+      ...structuredClone(base.runs[1]),
+      id: 'run-frontend',
+      stageId: 'frontend',
+      status: 'RUNNING',
+      sessionId: 'sess-frontend',
+      terminalAvailable: true,
+      terminalAccess: 'controller_local' as const,
+    };
+
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-backend',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [
+        { id: 'backend', status: 'RUNNING', kind: 'worker' },
+        { id: 'frontend', status: 'RUNNING', kind: 'worker' },
+      ],
+      runs: [backend, frontend],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    const chooser = await screen.findByRole('dialog', { name: /choose terminal/i });
+
+    fireEvent.click(within(chooser).getByRole('button', { name: /frontend/i }));
+    expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /collapse worker · frontend terminal/i }));
+    await waitFor(() => expect(screen.queryByLabelText('Live Codex terminal')).toBeNull());
+
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    expect(screen.queryByRole('dialog', { name: /choose terminal/i })).toBeNull();
+    expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
+  });
+
+  it('keeps task shortcuts out of input, palette, and modal scope (AC-6)', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+    const input = within(palette).getByRole('textbox');
+
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(commands().some((args) => args[0] === 'continue')).toBe(false);
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^settings$/i }));
+    await screen.findByRole('dialog', { name: /settings/i });
+    fireEvent.keyDown(document.body, { key: 'e', metaKey: true });
+    expect(screen.queryByRole('dialog', { name: /changes for worker/i })).toBeNull();
   });
 });

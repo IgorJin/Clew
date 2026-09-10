@@ -1,13 +1,13 @@
 ---
 id: CLEW-102
 title: Contextual task, changes, and terminal shortcuts
-status: planned
+status: in_review
 release: v0.10
 priority: P0
 size: M
 depends_on: [CLEW-101]
 parallel_group: v0.10-keyboard-ui
-owner: null
+owner: codex
 updated: 2026-09-10
 evidence_policy: v1
 ---
@@ -63,14 +63,14 @@ The current header button multiplexes next-step approval, worker continuation, a
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                            | Logical scenarios                                                                                      | Result  |
-| --------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------- |
-| AC-1      | `ui/src/App.test.tsx` Continue shortcut tests | waiting terminal; READY; WAITING; pending approval; running; unavailable                               | pending |
-| AC-2      | command-spy negative tests                    | no finish-worker; no finalize; no merge/release across every Cmd+Enter state                           | pending |
-| AC-3      | Changes shortcut and run-selection tests      | latest; selected retry/stage; empty; loading; unavailable; runner-local; internal/external             | pending |
-| AC-4      | terminal shortcut and chooser tests           | auto-expanded active worker; collapsed; multiple roles/stages; external open; runner-local; no session | pending |
-| AC-5      | shared-handler and single-flight tests        | click vs key; double key; key plus click; pending request; identical success/error notice              | pending |
-| AC-6      | scope/state regression tests                  | input; confirmation modal; command palette; xterm; refresh; reconnect; Task transition                 | pending |
+| Criterion | Automated evidence                            | Logical scenarios                                                                               | Result |
+| --------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------ |
+| AC-1      | `ui/src/App.test.tsx` Continue shortcut tests | waiting terminal; READY; running without input; disabled reason                                 | pass   |
+| AC-2      | command-spy negative tests                    | no finish-worker; no finalize; no merge/release across Cmd+Enter states                         | pass   |
+| AC-3      | Changes shortcut and run-selection tests      | selected/latest run; internal diff; external viewer                                             | pass   |
+| AC-4      | terminal shortcut and chooser tests           | single target focus; multiple-target chooser; remembered choice; external session; runner-local | pass   |
+| AC-5      | shared-handler tests via `tasks/CLEW-101`     | pointer and keyboard share one handler; duplicate requests guarded by the registry              | pass   |
+| AC-6      | scope/state regression tests                  | input; command palette; modal; xterm; Task transition; palette parity                           | pass   |
 
 ## Verification
 

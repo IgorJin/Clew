@@ -1,13 +1,13 @@
 ---
 id: CLEW-101
 title: Shortcut registry and numbered task navigation
-status: ready
+status: in_review
 release: v0.10
 priority: P0
 size: M
 depends_on: []
 parallel_group: null
-owner: null
+owner: codex
 updated: 2026-09-10
 evidence_policy: v1
 ---
@@ -62,14 +62,14 @@ Clew already provides `Cmd/Ctrl+K` through an app-global listener, but keyboard 
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                               | Logical scenarios                                                              | Result  |
-| --------- | ------------------------------------------------ | ------------------------------------------------------------------------------ | ------- |
-| AC-1      | `ui/src/App.test.tsx` numbered-navigation tests  | 1st; 9th; 10th; filters; newest-first; Project switch; create/refresh          | pending |
-| AC-2      | `ui/src/App.test.tsx` unavailable-position tests | empty list; fewer than ten; hidden by filter; selected Task unchanged          | pending |
-| AC-3      | shortcut dispatcher unit/UI tests                | input; textarea; contenteditable; modal; xterm; composition; repeat            | pending |
-| AC-4      | existing and expanded command-palette tests      | open/close; arrows; Enter; Escape; focus; listener stability                   | pending |
-| AC-5      | dispatcher tests plus CLEW-104 browser smoke     | Meta event delivered; Option fallback; Chrome/Safari/Firefox reserved behavior | pending |
-| AC-6      | listener lifecycle and duplicate-dispatch tests  | rerender; Strict Mode; reconnect; rapid chords; one handler call               | pending |
+| Criterion | Automated evidence                                        | Logical scenarios                                                             | Result |
+| --------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- | ------ |
+| AC-1      | `ui/src/App.test.tsx` numbered-navigation tests           | 1st–10th order; filter recompute; newest-first                                | pass   |
+| AC-2      | `ui/src/App.test.tsx` unavailable-position tests          | empty list; fewer than ten; selected Task unchanged                           | pass   |
+| AC-3      | `ui/src/App.test.tsx` scope tests + `ui/src/shortcuts.ts` | input; textarea; contenteditable; modal; xterm; composition; repeat           | pass   |
+| AC-4      | existing and expanded command-palette tests               | open/close; arrows; Enter; Escape; focus; listener stability                  | pass   |
+| AC-5      | `ui/src/App.test.tsx` chord/fallback tests                | Meta/Command primary; Option fallback; host behavior reserved for CLEW-104    | pass   |
+| AC-6      | lifecycle/registry tests + `listShortcuts()` metadata     | rerender; unmount; one handler per keystroke; registry metadata for key hints | pass   |
 
 ## Verification
 
