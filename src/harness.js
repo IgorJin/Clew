@@ -4,7 +4,11 @@ import { basename, join } from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
 import { TextDecoder } from 'node:util';
 import { extractUsage } from './usage.js';
-import { CodexTurnMonitor } from './codex-turn-monitor.js';
+import {
+  CodexTurnMonitor,
+  stripWorkerStatusMarker,
+  WORKER_STATUS_MARKER,
+} from './codex-turn-monitor.js';
 import { compileHarnessPrompt, ensureExecutionBrief } from './execution-brief.js';
 import { buildCodexProjectTrustArgs } from './session-surface.js';
 
@@ -25,6 +29,7 @@ export const HARNESS_EVENT_TYPE = Object.freeze({
   HARNESS_EVENT: 'HARNESS_EVENT',
   HARNESS_OUTPUT: 'HARNESS_OUTPUT',
   TURN_RUNNING: 'TURN_RUNNING',
+  TURN_COMPLETED: 'TURN_COMPLETED',
   TURN_WAITING: 'TURN_WAITING',
   TURN_FAILED: 'TURN_FAILED',
   TURN_INTERRUPTED: 'TURN_INTERRUPTED',
@@ -148,7 +153,14 @@ function waitForUnixSocket(path, child, timeoutMs, signal, command = 'codex') {
 }
 
 function interactivePrompt(executionBrief) {
-  return `${compileHarnessPrompt(executionBrief, { harness: 'codex' })}\n\nWork interactively in this terminal. Ask for approval when required.`;
+  return `${compileHarnessPrompt(executionBrief, { harness: 'codex' })}
+
+Work interactively in this terminal. Ask for approval when required.
+
+Your final response must end with exactly one machine-readable status line:
+- ${WORKER_STATUS_MARKER.COMPLETE} — the requested work is finished and ready for verification, including when no file changes were necessary.
+- ${WORKER_STATUS_MARKER.NEEDS_INPUT} — progress is blocked on an answer from the operator.
+Do not use needs_input for a normal completion summary or optional follow-up.`;
 }
 
 function agentMessageText(item) {
@@ -201,7 +213,9 @@ function interactiveResult(thread, cwd) {
     sessionId: thread.id,
     turnId: turn?.id ?? null,
     verification,
-    output: finalMessage ?? 'Interactive Codex worker completed by the operator.',
+    output:
+      stripWorkerStatusMarker(finalMessage) ||
+      'Interactive Codex worker completed automatically.',
     usage: turn?.usage ?? null,
   };
 }
@@ -1046,8 +1060,9 @@ export class CodexHarness {
         cwd,
         threadId: nativeResumeSessionId,
         spawnImpl: this.spawn,
+        ignoreInitialCompleted: Boolean(nativeResumeSessionId),
         onUpdate: (update) => {
-          this.terminalManager.updateInteraction(runId, update);
+          this.terminalManager.updateInteraction?.(runId, update);
           if (update.status === 'running')
             onEvent({
               type: HARNESS_EVENT_TYPE.TURN_RUNNING,
@@ -1062,6 +1077,16 @@ export class CodexHarness {
               output: update.output,
               itemId: update.itemId,
             });
+          else if (update.status === 'completed') {
+            onEvent({
+              type: HARNESS_EVENT_TYPE.TURN_COMPLETED,
+              sessionId: update.sessionId,
+              turnId: update.turnId,
+              output: update.output,
+              itemId: update.itemId,
+            });
+            this.terminalManager.finish?.(runId);
+          }
           else if (update.status === 'failed')
             onEvent({
               type: HARNESS_EVENT_TYPE.TURN_FAILED,

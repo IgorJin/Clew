@@ -1154,10 +1154,10 @@ function ChangeActions({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const available = changes?.result?.state === 'available';
-  const label = changes?.loading
-    ? 'Changes…'
-    : available
-      ? `Changes +${changes.result!.summary.additions} −${changes.result!.summary.deletions}`
+  const label = available
+    ? `Changes +${changes.result!.summary.additions} −${changes.result!.summary.deletions}`
+    : changes?.loading
+      ? 'Changes…'
       : !run || changes?.result?.state === 'unavailable' || changes?.error
         ? 'Changes unavailable'
         : 'Changes';
@@ -1592,7 +1592,6 @@ function AgentGrid({
                     ? (run?.sessionId ?? (isCurrentRun ? task.sessionId : null) ?? null)
                     : agentSession!.sessionId
                 }
-                onClose={() => onToggleExpand(key)}
               />
             )}
           </div>
@@ -1796,6 +1795,246 @@ function StartApprovalDialog({
             disabled={busy}
           >
             {busy ? 'Starting…' : 'Start task'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type ActionConfirmation = {
+  args: string[];
+  success: string;
+  title: string;
+  summary: string;
+  effects: string[];
+  confirmLabel: string;
+};
+
+function describeAction(args: string[], task: Task) {
+  const command = args[0];
+
+  if (command === 'approve')
+    return {
+      title: 'Approve plan',
+      summary: 'Clew will approve the current execution plan.',
+      effects: [
+        'The task will be allowed to move to the execution stage.',
+        'Approving the plan does not change files in the repository.',
+      ],
+      confirmLabel: 'Approve plan',
+    };
+
+  if (command === 'approve-run') {
+    return {
+      title: 'Allow worker action',
+      summary: 'Clew will allow the worker to continue with the requested operation.',
+      effects: [
+        'The operation will run inside the worker workspace.',
+        'The worker will continue this run after the operation finishes.',
+      ],
+      confirmLabel: 'Allow action',
+    };
+  }
+
+  if (command === 'reject-run') {
+    return {
+      title: 'Reject worker action',
+      summary: 'Clew will deny the worker request and keep that operation from running.',
+      effects: ['The worker may stop or report that the run cannot continue.'],
+      confirmLabel: 'Reject action',
+    };
+  }
+
+  if (command === 'continue')
+    return {
+      title: 'Restart worker',
+      summary: 'Clew will start a new worker run for this task.',
+      effects: [
+        task.findings
+          ? `The worker will receive the ${task.findings} open review finding${task.findings === 1 ? '' : 's'} as feedback.`
+          : 'The worker will receive a fresh instruction to re-check the task.',
+        'The previous Codex session will be resumed when it is still available; otherwise a new session starts.',
+        'Verification and review will run again after the worker finishes.',
+      ],
+      confirmLabel: 'Restart worker',
+    };
+
+  if (command === 'complete')
+    return {
+      title: 'Complete task',
+      summary: 'Clew will mark this task as completed using the verified revision.',
+      effects: [
+        'No new worker run will start.',
+        'The primary checkout will not be changed.',
+      ],
+      confirmLabel: 'Complete task',
+    };
+
+  if (command === 'retry')
+    return {
+      title: 'Retry worker',
+      summary: 'Clew will queue another worker attempt for this task.',
+      effects: [
+        'The selected stage will run again in an isolated workspace.',
+        'Verification and review will run for the new attempt.',
+      ],
+      confirmLabel: 'Retry worker',
+    };
+
+  if (command === 'run')
+    return {
+      title: 'Start worker',
+      summary: 'Clew will start a worker run for this task.',
+      effects: ['A run record and an isolated workspace will be created.'],
+      confirmLabel: 'Start worker',
+    };
+
+  if (command === 'task') {
+    const action = args[1];
+
+    if (action === 'integrate') {
+      const strategy = args[args.indexOf('--strategy') + 1] ?? 'selected';
+      const strategyLabel =
+        strategy === 'squash'
+          ? 'squash-merge'
+          : strategy === 'merge'
+            ? 'merge commit'
+            : strategy === 'pr'
+              ? 'pull-request handoff'
+              : strategy === 'human'
+                ? 'human integration handoff'
+                : strategy;
+      const target = task.finalization?.git?.targetBranch ?? 'the target branch';
+
+      return {
+        title: 'Integrate task',
+        summary: `Clew will use a ${strategyLabel} to apply the verified revision to ${target}.`,
+        effects: [
+          strategy === 'pr' || strategy === 'human'
+            ? 'The task will be handed off instead of changing the branch automatically.'
+            : 'The integration will change the target branch, not the worker workspace.',
+        ],
+        confirmLabel: 'Integrate',
+      };
+    }
+
+    if (action === 'mark-merged')
+      return {
+        title: 'Mark task merged',
+        summary: 'Clew will record that the verified revision was merged outside Clew.',
+        effects: ['Clew will not perform another merge.'],
+        confirmLabel: 'Mark merged',
+      };
+
+    if (action === 'mark-released')
+      return {
+        title: 'Mark task released',
+        summary: 'Clew will record the release and close the task lifecycle.',
+        effects: ['The deployment or release has already happened outside this action.'],
+        confirmLabel: 'Mark released',
+      };
+  }
+
+  return {
+    title: 'Confirm task action',
+    summary: 'Clew will apply the requested action to this task.',
+    effects: [],
+    confirmLabel: 'Confirm',
+  };
+}
+
+function ActionConfirmationDialog({
+  action,
+  onClose,
+  onConfirm,
+}: {
+  action: ActionConfirmation;
+  onClose: () => void;
+  onConfirm: () => Promise<boolean>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const confirming = useRef(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    cancelButton.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !confirming.current) onClose();
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  const confirm = async () => {
+    if (confirming.current) return;
+    confirming.current = true;
+    setBusy(true);
+    try {
+      if (await onConfirm()) onClose();
+      else {
+        confirming.current = false;
+        setBusy(false);
+      }
+    } catch {
+      confirming.current = false;
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}
+    >
+      <section
+        className="create-task action-confirmation"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Confirm action: ${action.title}`}
+        aria-describedby="action-confirmation-description"
+      >
+        <div className="panel-head compact">
+          <div>
+            <h2 id="action-confirmation-title">{action.title}</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close"
+            onClick={onClose}
+            disabled={busy}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <p id="action-confirmation-description">{action.summary}</p>
+        {action.effects.length > 0 && (
+          <ul className="action-confirmation-effects">
+            {action.effects.map((effect) => (
+              <li key={effect}>{effect}</li>
+            ))}
+          </ul>
+        )}
+        <div className="modal-actions">
+          <button
+            ref={cancelButton}
+            type="button"
+            className="button secondary"
+            onClick={onClose}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            onClick={() => void confirm()}
+            disabled={busy}
+          >
+            {busy ? 'Applying…' : action.confirmLabel}
           </button>
         </div>
       </section>
@@ -2143,6 +2382,7 @@ export default function App() {
   const [finishOpen, setFinishOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [startApproval, setStartApproval] = useState<StartApproval | null>(null);
+  const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmation | null>(null);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -2821,7 +3061,7 @@ export default function App() {
   if (!task) return null;
 
   const canMutate = connection === 'connected' || connection === 'fixture';
-  const act = async (args: string[], success: string) => {
+  const act = async (args: string[], success: string, confirmed = false) => {
     if (!canMutate) {
       setNotice('Actions are disabled while the control plane is disconnected');
       return false;
@@ -2836,11 +3076,13 @@ export default function App() {
       'run',
     ]);
     if (
+      !confirmed &&
       (confirmationRequired.has(args[0]) ||
-        (args[0] === 'task' && ['integrate', 'mark-merged', 'mark-released'].includes(args[1]))) &&
-      !window.confirm(`Confirm ${args.join(' ')}?`)
-    )
+        (args[0] === 'task' && ['integrate', 'mark-merged', 'mark-released'].includes(args[1])))
+    ) {
+      setActionConfirmation({ args: [...args], success, ...describeAction(args, task) });
       return false;
+    }
     if (args[0] === 'run') setRunRequested(true);
     try {
       const result = await execute(args);
@@ -2876,7 +3118,7 @@ export default function App() {
   };
 
   const canStart = ['DRAFT', 'PLAN_READY', 'QUEUED'].includes(task.state);
-  const canContinue =
+  const canRestartWorker =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
   const interactiveWorker =
@@ -3060,17 +3302,17 @@ export default function App() {
                   />
                   <button
                     className="button secondary"
-                    disabled={!canMutate || (!interactiveWorker && !canStart && !canContinue)}
+                    disabled={!canMutate || (!interactiveWorker && !canStart && !canRestartWorker)}
                     onClick={() => {
                       if (interactiveWorker)
                         return void act(
                           ['finish-worker', task.id, '--run', task.runId!],
                           'Worker is finishing',
                         );
-                      if (canContinue)
+                      if (canRestartWorker)
                         return void act(
-                          ['continue', task.id, '--message', 'Continue task'],
-                          'Continuation requested',
+                          ['continue', task.id, '--message', 'Restart the worker and re-check the task'],
+                          'Worker restart requested',
                         );
                       if (nextStep?.status === 'PENDING')
                         return requestStart(task.id, task.title, nextStep);
@@ -3080,8 +3322,8 @@ export default function App() {
                     {interactiveWorker ? <Check size={13} /> : <RefreshCw size={13} />}
                     {interactiveWorker
                       ? 'Finish worker'
-                      : canContinue
-                        ? 'Continue'
+                      : canRestartWorker
+                        ? 'Restart worker'
                         : nextStep?.status === 'PENDING'
                           ? 'Approve start'
                           : 'Next step'}
@@ -3185,14 +3427,7 @@ export default function App() {
                     )}
                   {pendingHarnessApproval && (
                     <>
-                      <span className="attention-text">
-                        Worker approval ·{' '}
-                        <span className="mono">
-                          {String(
-                            pendingHarnessApproval.params.command ?? pendingHarnessApproval.method,
-                          )}
-                        </span>
-                      </span>
+                      <span className="attention-text">Worker needs permission to perform an operation</span>
                       <button
                         className="button primary small"
                         disabled={!canMutate}
@@ -3262,7 +3497,7 @@ export default function App() {
                   </strong>
                   {task.interactionStatus === 'waiting_for_operator' && (
                     <p>
-                      The worker returned a response. Continue in the terminal or finish the worker.
+                      The worker is waiting for your answer. Respond in the terminal to continue this run, or finish it to start verification.
                     </p>
                   )}
                 </div>
@@ -3352,6 +3587,13 @@ export default function App() {
           approval={startApproval}
           onClose={() => setStartApproval(null)}
           onConfirm={() => runApprovedStart(startApproval.taskId, startApproval.step.id!)}
+        />
+      )}
+      {actionConfirmation && (
+        <ActionConfirmationDialog
+          action={actionConfirmation}
+          onClose={() => setActionConfirmation(null)}
+          onConfirm={() => act(actionConfirmation.args, actionConfirmation.success, true)}
         />
       )}
       {addProjectOpen && (

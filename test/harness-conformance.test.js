@@ -294,6 +294,8 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
   const terminalStarts = [];
   const identities = [];
   const events = [];
+  let finishWorker;
+  let finishCalls = 0;
 
   mkdirSync(workspace, { recursive: true });
   const spawnImpl = (command, args, options) => {
@@ -329,7 +331,10 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
         requests.push(message);
         if (message.method === 'initialize') send({ id: message.id, result: {} });
         else if (message.method === 'thread/list')
-          send({ id: message.id, result: { data: [{ id: 'thread-interactive' }] } });
+          send({
+            id: message.id,
+            result: { data: [{ id: 'thread-interactive', cwd: workspace }] },
+          });
         else if (message.method === 'thread/name/set') send({ id: message.id, result: {} });
         else if (message.method === 'thread/read')
           send({
@@ -337,9 +342,11 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
             result: {
               thread: {
                 id: 'thread-interactive',
+                cwd: workspace,
                 turns: [
                   {
                     id: 'turn-interactive',
+                    status: 'completed',
                     items: [
                       { type: 'commandExecution', command: 'npm test', exitCode: 0 },
                       { type: 'agentMessage', text: 'Implemented interactively.' },
@@ -356,7 +363,14 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
   };
   const terminalManager = {
     start: (options) => terminalStarts.push(options),
-    waitForFinish: async () => ({ exitCode: 0 }),
+    updateInteraction: () => true,
+    waitForFinish: () => new Promise((resolve) => (finishWorker = resolve)),
+    finish: () => {
+      finishCalls += 1;
+      finishWorker?.({ exitCode: 0 });
+
+      return true;
+    },
     setSessionIdentity: (id, sessionId) => identities.push({ id, sessionId }),
     release: () => true,
     close: () => true,
@@ -388,6 +402,8 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
     assert.ok(terminalStarts[0].args.includes('--remote'));
     assert.ok(terminalStarts[0].args.includes(endpoint));
     assert.match(terminalStarts[0].args.at(-1), /Work interactively in this terminal/);
+    assert.match(terminalStarts[0].args.at(-1), /CLEW_WORKER_STATUS: complete/);
+    assert.match(terminalStarts[0].args.at(-1), /CLEW_WORKER_STATUS: needs_input/);
     assert.deepEqual(calls[1].args, ['app-server']);
     assert.deepEqual(calls[2].args, [
       '--config',
@@ -408,12 +424,13 @@ test('daemon Codex harness makes the TUI the sole worker and reads its result af
     );
     assert.deepEqual(
       requests.filter(({ method }) => method?.startsWith('thread/')).map(({ method }) => method),
-      ['thread/list', 'thread/name/set', 'thread/read'],
+      ['thread/list', 'thread/read', 'thread/list', 'thread/name/set', 'thread/read'],
     );
     assert.deepEqual(identities, [{ id: 'run-interactive', sessionId: 'thread-interactive' }]);
     assert.equal(result.sessionId, 'thread-interactive');
     assert.equal(result.turnId, 'turn-interactive');
     assert.equal(result.output, 'Implemented interactively.');
+    assert.equal(finishCalls, 1);
     assert.equal(events.at(-1).type, HARNESS_EVENT_TYPE.HARNESS_COMPLETED);
   } finally {
     rmSync(directory, { recursive: true, force: true });

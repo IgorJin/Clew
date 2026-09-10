@@ -932,6 +932,10 @@ h1 {
 }
 
 .changes-main {
+  width: 156px;
+  justify-content: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   border-radius: 6px 0 0 6px;
 }
 
@@ -2055,6 +2059,22 @@ textarea:focus {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.action-confirmation {
+  width: min(560px, 100%);
+}
+
+.action-confirmation-effects {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .finalization-modal {

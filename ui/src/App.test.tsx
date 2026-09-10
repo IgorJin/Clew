@@ -57,6 +57,13 @@ function availableChanges(runId: string, additions = 4, deletions = 2) {
   };
 }
 
+async function confirmAction() {
+  const dialog = await screen.findByRole('dialog', { name: /confirm action/i });
+  const buttons = within(dialog).getAllByRole('button');
+
+  fireEvent.click(buttons[buttons.length - 1]);
+}
+
 describe('Preact control plane', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
@@ -74,7 +81,7 @@ describe('Preact control plane', () => {
   });
 
   it('opens the finalization gate and completes the pinned revision', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     const { container } = render(<App />);
     const finishButton = await screen.findByRole('button', { name: /finish work/i });
 
@@ -82,13 +89,17 @@ describe('Preact control plane', () => {
 
     fireEvent.click(finishButton);
     fireEvent.click(await screen.findByRole('button', { name: /complete task/i }));
+    await confirmAction();
 
-    expect(api.execute).toHaveBeenCalledWith(['complete', 'CLEW-071', '--revision', 'a91c4e2']);
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith(['complete', 'CLEW-071', '--revision', 'a91c4e2']),
+    );
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(await screen.findByText('Task completed')).toBeTruthy();
   });
 
   it('uses the finalization gate for Git integration', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     const gitTask = structuredClone(fixtureTasks[0]);
 
     gitTask.state = 'READY_TO_FINISH';
@@ -117,45 +128,55 @@ describe('Preact control plane', () => {
     fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
     expect(await screen.findByRole('dialog', { name: /finish work/i })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^integrate$/i }));
+    await confirmAction();
 
-    expect(api.execute).toHaveBeenCalledWith([
-      'task',
-      'integrate',
-      'CLEW-071',
-      '--strategy',
-      'squash',
-      '--message',
-      'Integrate CLEW-071',
-    ]);
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'task',
+        'integrate',
+        'CLEW-071',
+        '--strategy',
+        'squash',
+        '--message',
+        'Integrate CLEW-071',
+      ]),
+    );
+    expect(nativeConfirm).not.toHaveBeenCalled();
   });
 
-  it('continues READY work without a message panel', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('restarts READY work without a message panel', async () => {
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /^continue$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^restart worker$/i }));
+    await confirmAction();
 
-    expect(api.execute).toHaveBeenCalledWith([
-      'continue',
-      'CLEW-071',
-      '--message',
-      'Continue task',
-    ]);
+    await waitFor(() =>
+      expect(api.execute).toHaveBeenCalledWith([
+        'continue',
+        'CLEW-071',
+        '--message',
+        'Restart the worker and re-check the task',
+      ]),
+    );
+    expect(nativeConfirm).not.toHaveBeenCalled();
     expect(screen.queryByText('Add a message')).toBeNull();
-    expect(await screen.findByText('Continuation requested')).toBeTruthy();
+    expect(await screen.findByText('Worker restart requested')).toBeTruthy();
   });
 
   it('approves a plan and exposes the durable fixture state', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /parallel cache migration/i }));
     fireEvent.click(screen.getByRole('button', { name: /approve plan/i }));
+    await confirmAction();
 
-    expect(api.execute).toHaveBeenCalledWith(['approve', 'ACC-DEEP']);
-    expect((await screen.findAllByText('Plan ready')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['approve', 'ACC-DEEP']));
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /confirm action/i })).toBeNull());
   });
 
-  it('exposes a native worker approval while the run is active', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('explains worker approval without exposing protocol details', async () => {
+    const nativeConfirm = vi.spyOn(window, 'confirm');
     const tasks = structuredClone(fixtureTasks);
     tasks[0] = {
       ...tasks[0],
@@ -182,8 +203,13 @@ describe('Preact control plane', () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole('button', { name: /^approve$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /allow worker action/i });
+    expect(dialog.textContent).not.toContain('npm test');
+    expect(dialog.textContent).not.toContain('item/commandExecution/requestApproval');
+    await confirmAction();
 
-    expect(api.execute).toHaveBeenCalledWith(['approve-run', 'approval-1']);
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['approve-run', 'approval-1']));
+    expect(nativeConfirm).not.toHaveBeenCalled();
   });
 
   it('finishes an interactive worker', async () => {
@@ -490,6 +516,8 @@ describe('Preact control plane', () => {
 
     const terminal = await screen.findByRole('region', { name: /live codex terminal/i });
     expect(terminal.textContent).toContain('run-live-1');
+    expect(screen.queryByRole('button', { name: /close terminal/i })).toBeNull();
+    expect(terminal.textContent).not.toContain('attached');
   });
 
   it('expands a stored architect session inside its agent card', async () => {
@@ -573,7 +601,7 @@ describe('Preact control plane', () => {
     const { container } = render(<App />);
 
     expect(await screen.findByText('Terminal is waiting for you')).toBeTruthy();
-    expect(screen.getByText(/worker returned a response/i)).toBeTruthy();
+    expect(screen.getByText(/waiting for your answer/i)).toBeTruthy();
     expect(screen.getByText('Waiting for operator')).toBeTruthy();
     expect(container.querySelectorAll('.status-notice')).toHaveLength(1);
     expect(container.querySelector('.terminal-waiting-banner')).toBeNull();

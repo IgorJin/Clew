@@ -138,6 +138,10 @@ const EVENT_KINDS = new Map([
   ],
   ['HARNESS_TURN_RUNNING', ['worker_running', () => 'Worker started a new turn']],
   [
+    'HARNESS_TURN_COMPLETED',
+    ['worker_turn_completed', () => 'Worker completed its turn; verification is starting'],
+  ],
+  [
     'HARNESS_TURN_FAILED',
     ['worker_turn_failed', () => 'Worker turn failed; operator attention required'],
   ],

@@ -38,7 +38,6 @@ export function TerminalPane({
   taskId,
   role,
   sessionId,
-  onClose,
 }: {
   terminalId: string;
   runId?: string | null;
@@ -46,13 +45,11 @@ export function TerminalPane({
   taskId?: string;
   role?: string;
   sessionId: string | null;
-  onClose: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<
     'connecting' | 'working' | 'handoff' | 'attached' | 'exited' | 'error'
   >('connecting');
-  const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     if (!host.current) return;
@@ -100,7 +97,6 @@ export function TerminalPane({
       socket = new WebSocket(
         `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/terminal?${query}`,
       );
-      socketRef.current = socket;
       socket.onopen = () => {
         reconnectDelay = 250;
       };
@@ -142,7 +138,6 @@ export function TerminalPane({
         }
       };
       socket.onclose = (event) => {
-        socketRef.current = null;
         if (stopped || exited || event.code === 1000) return;
         reconnectTimer = window.setTimeout(connect, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 4_000);
@@ -174,11 +169,6 @@ export function TerminalPane({
     };
   }, [agentSessionId, role, runId, taskId, terminalId]);
 
-  const closeTerminal = () => {
-    socketRef.current?.close(1000, 'terminal panel hidden');
-    onClose();
-  };
-
   return (
     <section className="terminal-panel" aria-label="Live Codex terminal">
       <div className="terminal-panel-head">
@@ -186,12 +176,9 @@ export function TerminalPane({
           <strong>Live Codex terminal</strong>
           <span>{sessionId ?? terminalId}</span>
         </div>
-        <div className="terminal-panel-actions">
+        {['connecting', 'working', 'handoff', 'exited', 'error'].includes(state) && (
           <span className={`terminal-state terminal-state-${state}`}>{state}</span>
-          <button className="text-button" onClick={closeTerminal}>
-            Close terminal
-          </button>
-        </div>
+        )}
       </div>
       <div className="terminal-host" ref={host} />
     </section>

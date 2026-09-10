@@ -2,7 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { CodexTurnMonitor } from '../src/codex-turn-monitor.js';
+import {
+  CodexTurnMonitor,
+  completedTurnStatus,
+  stripWorkerStatusMarker,
+  WORKER_STATUS_MARKER,
+} from '../src/codex-turn-monitor.js';
 
 function fakeCodexProcess(thread) {
   const child = new EventEmitter();
@@ -81,10 +86,64 @@ test('read-only monitor reports a completed turn once and never writes turn meth
   await new Promise((resolve) => setTimeout(resolve, 25));
   monitor.stop();
 
-  assert.equal(updates.filter((update) => update.status === 'waiting_for_operator').length, 1);
+  assert.equal(updates.filter((update) => update.status === 'completed').length, 1);
   assert.equal(updates.at(-1).output, 'Готово, жду вас.');
   assert.ok(calls.includes('thread/read'));
   assert.ok(calls.every((method) => ['initialize', 'thread/read'].includes(method)));
+});
+
+test('completed turns wait only for the explicit needs-input marker', () => {
+  assert.equal(completedTurnStatus('Implemented and verified.'), 'completed');
+  assert.equal(
+    completedTurnStatus(`Which target should I use?\n${WORKER_STATUS_MARKER.NEEDS_INPUT}`),
+    'waiting_for_operator',
+  );
+  assert.equal(
+    stripWorkerStatusMarker(`Implemented and verified.\n${WORKER_STATUS_MARKER.COMPLETE}`),
+    'Implemented and verified.',
+  );
+});
+
+test('interactive monitor ignores the previous completed turn when resuming a thread', async () => {
+  const thread = {
+    id: 'thread-resumed',
+    cwd: '/tmp/monitor-resumed',
+    turns: [
+      {
+        id: 'turn-previous',
+        status: 'completed',
+        items: [{ type: 'agentMessage', id: 'message-previous', text: 'Previous result.' }],
+      },
+    ],
+  };
+  const child = fakeCodexProcess(thread);
+  const updates = [];
+  const monitor = new CodexTurnMonitor({
+    cwd: thread.cwd,
+    threadId: thread.id,
+    ignoreInitialCompleted: true,
+    spawnImpl: () => child,
+    pollIntervalMs: 5,
+    requestTimeoutMs: 100,
+    onUpdate: (update) => updates.push(update),
+  });
+
+  monitor.start();
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(updates.some((update) => update.status === 'completed'), false);
+
+  thread.turns.push({ id: 'turn-current', status: 'inProgress', items: [] });
+  await waitFor(() => updates.some((update) => update.status === 'running'));
+  thread.turns.at(-1).status = 'completed';
+  thread.turns.at(-1).items.push({ type: 'agentMessage', id: 'message-current', text: 'Current result.' });
+  await waitFor(() => updates.some((update) => update.status === 'completed'));
+  monitor.stop();
+
+  assert.deepEqual(
+    updates.map((update) => update.status),
+    ['running', 'completed'],
+  );
+  assert.equal(updates.at(-1).output, 'Current result.');
 });
 
 test('read-only monitor retries discovery until the TUI creates its native thread', async () => {
@@ -170,12 +229,12 @@ test('read-only monitor treats provisional interrupted snapshots as one running 
     id: 'final-1',
     text: 'Done.',
   });
-  await waitFor(() => updates.some((update) => update.status === 'waiting_for_operator'));
+  await waitFor(() => updates.some((update) => update.status === 'completed'));
   monitor.stop();
 
   assert.deepEqual(
     updates.map((update) => update.status),
-    ['running', 'waiting_for_operator'],
+    ['running', 'completed'],
   );
   assert.equal(updates.at(-1).output, 'Done.');
 });
