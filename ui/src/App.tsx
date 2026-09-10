@@ -13,9 +13,11 @@ import {
   GitBranch,
   Inbox,
   Laptop,
+  LayoutDashboard,
   Plus,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   SquareTerminal,
   Terminal,
@@ -710,27 +712,24 @@ function ProjectSidebar({
 }) {
   return (
     <aside className="sidebar">
-      <ProjectSwitcher
-        projects={projects}
-        currentId={projectId}
-        awareness={awareness}
-        onSelect={onSelectProject}
-        onAdd={onAddProject}
-      />
-      <nav className="sidebar-nav" aria-label="Project navigation">
+      <div className="sidebar-switcher-row">
+        <ProjectSwitcher
+          projects={projects}
+          currentId={projectId}
+          awareness={awareness}
+          onSelect={onSelectProject}
+          onAdd={onAddProject}
+        />
         <button
-          className={`sidebar-nav-item${view === 'overview' ? ' active' : ''}`}
-          onClick={() => onSelectView('overview')}
+          className="icon-button view-toggle"
+          aria-label="Overview"
+          aria-pressed={view === 'overview'}
+          title={view === 'overview' ? 'Back to tasks' : 'Overview board'}
+          onClick={() => onSelectView(view === 'overview' ? 'tasks' : 'overview')}
         >
-          Overview
+          <LayoutDashboard size={14} />
         </button>
-        <button
-          className={`sidebar-nav-item${view === 'tasks' ? ' active' : ''}`}
-          onClick={() => onSelectView('tasks')}
-        >
-          Tasks
-        </button>
-      </nav>
+      </div>
       <div className="sidebar-heading">
         <span>Tasks</span>
         <button className="text-button" onClick={onCreateTask}>
@@ -831,68 +830,20 @@ export function Thread({ items }: { items: ThreadItem[] }) {
   );
 }
 
-function formatElapsed(value?: string | null): string | null {
-  if (!value) return null;
-  const start = new Date(value).getTime();
+const KANBAN_COLUMNS: { key: string; label: string; states: TaskState[] }[] = [
+  { key: 'draft', label: 'Draft', states: ['DRAFT', 'PLAN_READY'] },
+  {
+    key: 'active',
+    label: 'Active',
+    states: ['QUEUED', 'RECOVERING', 'EXECUTING', 'VERIFYING', 'REVIEWING'],
+  },
+  { key: 'waiting', label: 'Waiting', states: ['WAITING_FOR_HUMAN', 'BLOCKED'] },
+  { key: 'ready', label: 'Ready', states: ['READY', 'READY_TO_FINISH'] },
+  { key: 'done', label: 'Done', states: ['COMPLETED', 'MERGED', 'RELEASED'] },
+  { key: 'failed', label: 'Failed', states: ['FAILED', 'CANCELLED'] },
+];
 
-  if (!Number.isFinite(start)) return null;
-  const seconds = Math.max(0, Math.floor((Date.now() - start) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-
-  return `${Math.floor(hours / 24)}d`;
-}
-
-function attentionLabel(task: Task): string | null {
-  if (task.attention === 'PLAN_APPROVAL_REQUIRED') return 'Plan approval required';
-  if (task.attention === 'HUMAN_ACTION_REQUIRED') return 'Operator input required';
-  if (task.interactionStatus === 'waiting_for_operator') return 'Waiting for operator';
-  if (task.state === 'BLOCKED') return 'Blocked';
-
-  return null;
-}
-
-function lastEventAt(task: Task): string | null {
-  return task.thread.items.at(-1)?.at ?? task.runs.at(-1)?.startedAt ?? null;
-}
-
-function OverviewSection({
-  title,
-  tasks,
-  meta,
-  onSelectTask,
-}: {
-  title: string;
-  tasks: Task[];
-  meta: (task: Task) => string;
-  onSelectTask: (taskId: string) => void;
-}) {
-  if (!tasks.length) return null;
-
-  return (
-    <section className="overview-section">
-      <div className="overview-section-head">
-        <h3>{title}</h3>
-        <span className="small-muted">{tasks.length}</span>
-      </div>
-      <div className="overview-list">
-        {tasks.map((task) => (
-          <button className="overview-row" key={task.id} onClick={() => onSelectTask(task.id)}>
-            <div className="overview-row-top">
-              <span className="task-id">{task.id}</span>
-              <Status state={task.state} />
-            </div>
-            <strong>{task.title}</strong>
-            <span className="overview-row-meta">{meta(task)}</span>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
-}
+type OverviewTypeFilter = 'all' | 'quick' | 'standard' | 'deep';
 
 function Overview({
   project,
@@ -905,38 +856,16 @@ function Overview({
   onSelectTask: (taskId: string) => void;
   onCreateTask: () => void;
 }) {
-  const attention = tasks.filter((task) => statusGroup[task.state] === 'waiting');
-  const running = tasks.filter((task) => statusGroup[task.state] === 'active');
-  const ready = tasks.filter((task) => ['DRAFT', 'PLAN_READY', 'READY'].includes(task.state));
-  const completed = tasks.filter((task) => task.state === 'COMPLETED');
-  const failed = tasks.filter((task) => ['FAILED', 'CANCELLED'].includes(task.state));
+  const [attentionOnly, setAttentionOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskState>('all');
+  const [typeFilter, setTypeFilter] = useState<OverviewTypeFilter>('all');
 
-  const attentionMeta = (task: Task) => {
-    const label = attentionLabel(task) ?? task.state.toLowerCase();
-    const elapsed = formatElapsed(lastEventAt(task));
-
-    return elapsed ? `${label} · ${elapsed}` : label;
-  };
-  const runningMeta = (task: Task) => {
-    const run = task.runs.at(-1);
-    const harness = run?.harness ?? task.sessionHarness ?? 'codex';
-    const stage = run?.stageId ?? task.stages.at(-1)?.id ?? 'worker';
-    const elapsed = formatElapsed(run?.startedAt ?? lastEventAt(task));
-
-    return `${stage} · ${harness}${elapsed ? ` · ${elapsed}` : ''}`;
-  };
-  const readyMeta = (task: Task) => {
-    if (task.state === 'READY') return 'Ready';
-    if (task.state === 'PLAN_READY') return 'Plan ready';
-
-    return 'Draft';
-  };
-  const completedMeta = (task: Task) => {
-    const elapsed = formatElapsed(task.completion?.at);
-
-    return elapsed ? `completed ${elapsed} ago` : 'completed';
-  };
-  const failedMeta = (task: Task) => (task.state === 'FAILED' ? 'Failed' : 'Cancelled');
+  const filtered = tasks.filter(
+    (task) =>
+      (!attentionOnly || statusGroup[task.state] === 'waiting') &&
+      (statusFilter === 'all' || task.state === statusFilter) &&
+      (typeFilter === 'all' || task.profile === typeFilter),
+  );
 
   return (
     <div className="overview">
@@ -949,31 +878,72 @@ function Overview({
           <Plus size={12} /> New task
         </button>
       </div>
-      <OverviewSection
-        title="Needs attention"
-        tasks={attention}
-        meta={attentionMeta}
-        onSelectTask={onSelectTask}
-      />
-      <OverviewSection
-        title="Running"
-        tasks={running}
-        meta={runningMeta}
-        onSelectTask={onSelectTask}
-      />
-      <OverviewSection title="Ready" tasks={ready} meta={readyMeta} onSelectTask={onSelectTask} />
-      <OverviewSection
-        title="Recently completed"
-        tasks={completed}
-        meta={completedMeta}
-        onSelectTask={onSelectTask}
-      />
-      <OverviewSection
-        title="Failed"
-        tasks={failed}
-        meta={failedMeta}
-        onSelectTask={onSelectTask}
-      />
+      <div className="kanban-filters" role="group" aria-label="Board filters">
+        <button
+          className={`filter-chip${attentionOnly ? ' active' : ''}`}
+          aria-pressed={attentionOnly}
+          onClick={() => setAttentionOnly((value) => !value)}
+        >
+          <AlertTriangle size={11} /> Needs attention
+        </button>
+        <select
+          className="kanban-filter"
+          aria-label="Filter by status"
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.currentTarget.value as 'all' | TaskState)}
+        >
+          <option value="all">All statuses</option>
+          {(Object.keys(stateLabel) as TaskState[]).map((state) => (
+            <option key={state} value={state}>
+              {stateLabel[state]}
+            </option>
+          ))}
+        </select>
+        <select
+          className="kanban-filter"
+          aria-label="Filter by type"
+          value={typeFilter}
+          onChange={(event) => setTypeFilter(event.currentTarget.value as OverviewTypeFilter)}
+        >
+          <option value="all">All types</option>
+          <option value="quick">Quick</option>
+          <option value="standard">Standard</option>
+          <option value="deep">Deep</option>
+        </select>
+      </div>
+      <div className="kanban">
+        {KANBAN_COLUMNS.map((column) => {
+          const cards = filtered.filter((task) => column.states.includes(task.state));
+
+          if (!cards.length) return null;
+          return (
+            <section className="kanban-column" key={column.key} aria-label={`${column.label} column`}>
+              <header className="kanban-column-head">
+                <h3>{column.label}</h3>
+                <span className="small-muted">{cards.length}</span>
+              </header>
+              <div className="kanban-cards">
+                {cards.map((task) => (
+                  <button className="kanban-card" key={task.id} onClick={() => onSelectTask(task.id)}>
+                    <div className="kanban-card-top">
+                      <span className="task-id">{task.id}</span>
+                      <Status state={task.state} />
+                    </div>
+                    <strong>{task.title}</strong>
+                    <span className="kanban-card-meta">
+                      {task.profile}
+                      {task.attention ? ' · needs attention' : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+        {!filtered.length && (
+          <div className="empty-inline">No tasks match the current filters.</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1927,6 +1897,141 @@ function StepIndicator({
   );
 }
 
+type AgentConnectionId = 'codex' | 'claude' | 'opencode';
+
+const AGENT_CONNECTIONS: { id: AgentConnectionId; label: string }[] = [
+  { id: 'codex', label: 'Codex CLI' },
+  { id: 'claude', label: 'Claude CLI' },
+  { id: 'opencode', label: 'OpenCode CLI' },
+];
+
+const SETTINGS_CHAPTERS = [{ key: 'agent', label: 'Agent' }] as const;
+
+type SettingsChapter = (typeof SETTINGS_CHAPTERS)[number]['key'];
+
+function readAgentConnection(): AgentConnectionId | null {
+  const stored = readPreference('agent-connection');
+
+  return AGENT_CONNECTIONS.some((entry) => entry.id === stored)
+    ? (stored as AgentConnectionId)
+    : null;
+}
+
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [chapter, setChapter] = useState<SettingsChapter>('agent');
+  const [connection, setConnection] = useState<AgentConnectionId | null>(() =>
+    readAgentConnection(),
+  );
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key === 'Tab') {
+        const focusable = [
+          ...(dialogRef.current?.querySelectorAll<HTMLElement>(
+            'button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          ) ?? []),
+        ];
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable.at(-1)!;
+
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [onClose]);
+
+  const select = (id: AgentConnectionId) => {
+    setConnection(id);
+    writePreference('agent-connection', id);
+  };
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section
+        ref={dialogRef}
+        className="create-task settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+      >
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">Settings</span>
+            <h2>Settings</h2>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="icon-button"
+            aria-label="Close settings"
+            onClick={onClose}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="settings-layout">
+          <nav className="settings-chapters" aria-label="Settings chapters">
+            {SETTINGS_CHAPTERS.map((entry) => (
+              <button
+                key={entry.key}
+                type="button"
+                className={`settings-chapter${chapter === entry.key ? ' active' : ''}`}
+                aria-current={chapter === entry.key}
+                onClick={() => setChapter(entry.key)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </nav>
+          {chapter === 'agent' && (
+            <div className="settings-chapter-panel">
+              <p className="settings-notice">
+                Pick a preferred agent connection. This choice is stored on this device only —
+                nothing here is tested against your machine, and it does not change how tasks run
+                yet.
+              </p>
+              <div className="agent-connections" role="group" aria-label="Agent connections">
+                {AGENT_CONNECTIONS.map((entry) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={`agent-connection${connection === entry.id ? ' selected' : ''}`}
+                    aria-pressed={connection === entry.id}
+                    onClick={() => select(entry.id)}
+                  >
+                    <span className="agent-connection-label">{entry.label}</span>
+                    {connection === entry.id && (
+                      <span className="agent-connection-mark">
+                        <Check size={12} /> Selected
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1937,6 +2042,12 @@ export default function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [finishOpen, setFinishOpen] = useState(false);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    settingsButtonRef.current?.focus();
+  }, []);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState('plan');
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -2351,6 +2462,14 @@ export default function App() {
           <Logo />
           <div className="topbar-right">
             <Connection state={connection} />
+            <button
+              ref={settingsButtonRef}
+              className="icon-button"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={14} />
+            </button>
           </div>
         </header>
         <main className="empty">
@@ -2386,6 +2505,7 @@ export default function App() {
         {!unavailable && !waiting && addProjectOpen && (
           <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
         )}
+        {settingsOpen && <SettingsModal onClose={closeSettings} />}
       </div>
     );
   }
@@ -2398,6 +2518,14 @@ export default function App() {
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+            <button
+              ref={settingsButtonRef}
+              className="icon-button"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={14} />
+            </button>
           </div>
         </header>
         <div className="workspace">
@@ -2435,6 +2563,7 @@ export default function App() {
         {addProjectOpen && (
           <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
         )}
+        {settingsOpen && <SettingsModal onClose={closeSettings} />}
         <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
       </div>
     );
@@ -2448,6 +2577,14 @@ export default function App() {
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+            <button
+              ref={settingsButtonRef}
+              className="icon-button"
+              aria-label="Settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings size={14} />
+            </button>
             <button
               className="icon-button"
               aria-label="Refresh tasks"
@@ -2489,6 +2626,7 @@ export default function App() {
         {addProjectOpen && (
           <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />
         )}
+        {settingsOpen && <SettingsModal onClose={closeSettings} />}
         <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
       </div>
     );
@@ -2683,6 +2821,14 @@ export default function App() {
         <div className="topbar-right">
           <Connection state={connection} />
           <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+          <button
+            ref={settingsButtonRef}
+            className="icon-button"
+            aria-label="Settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings size={14} />
+          </button>
           <button className="icon-button" aria-label="Refresh tasks" onClick={() => void refresh()}>
             <RefreshCw size={14} />
           </button>
@@ -3089,6 +3235,7 @@ export default function App() {
         <FinalizationGate task={task} onClose={() => setFinishOpen(false)} onAction={act} />
       )}
       {addProjectOpen && <AddProject onClose={() => setAddProjectOpen(false)} onAdd={addProject} />}
+      {settingsOpen && <SettingsModal onClose={closeSettings} />}
       <CommandPalette projects={projects} tasks={tasks} onSelect={selectProjectAndTask} />
     </div>
   );

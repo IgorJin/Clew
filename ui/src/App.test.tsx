@@ -821,30 +821,33 @@ describe('project overview', () => {
     localStorage.clear();
   });
 
-  it('orders Needs attention before Running and Ready sections', async () => {
+  function board(): HTMLElement {
+    return document.querySelector('.kanban') as HTMLElement;
+  }
+
+  function columnHeadings(element: HTMLElement) {
+    return within(element)
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent);
+  }
+
+  it('renders the kanban board grouped by status from the sidebar toggle', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
 
     await screen.findByRole('heading', { name: 'Clew' });
-    const overview = screen.getByText('Needs attention').closest('.overview') as HTMLElement;
-    const sections = within(overview)
-      .getAllByRole('heading', { level: 3 })
-      .map((h) => h.textContent);
+    const kanban = board();
+    const columns = columnHeadings(kanban);
 
-    expect(sections).toEqual([
-      'Needs attention',
-      'Running',
-      'Ready',
-      'Recently completed',
-      'Failed',
-    ]);
-    expect(within(overview).getByText('Parallel cache migration')).toBeTruthy();
-    expect(within(overview).getByText('Session revocation rollout')).toBeTruthy();
-    expect(within(overview).getByText('Refresh token cleanup')).toBeTruthy();
-    expect(within(overview).getByText('Cache invalidation probe')).toBeTruthy();
+    expect(columns).toEqual(['Active', 'Waiting', 'Ready', 'Done', 'Failed']);
+    expect(within(kanban).getByText('Parallel cache migration')).toBeTruthy();
+    expect(within(kanban).getByText('Session revocation rollout')).toBeTruthy();
+    expect(within(kanban).getByText('Refresh token cleanup')).toBeTruthy();
+    expect(within(kanban).getByText('Cache invalidation probe')).toBeTruthy();
+    expect(within(kanban).getByText('Replace auth middleware')).toBeTruthy();
   });
 
-  it('omits empty overview sections entirely', async () => {
+  it('omits empty columns entirely', async () => {
     const tasks = structuredClone(fixtureTasks).map((task) => ({
       ...task,
       projectId: 'PRJ-LYKAR',
@@ -874,24 +877,54 @@ describe('project overview', () => {
     render(<App />);
 
     await screen.findByRole('heading', { name: 'Lykar' });
-    const overview = screen.getByText('Running').closest('.overview') as HTMLElement;
-    const headings = within(overview)
-      .getAllByRole('heading', { level: 3 })
-      .map((h) => h.textContent);
-
-    expect(headings).toEqual(['Running']);
+    expect(columnHeadings(board())).toEqual(['Active']);
   });
 
-  it('opens the task when an overview row is selected', async () => {
+  it('opens the task when a kanban card is selected', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
-    const overview = screen.getByText('Needs attention').closest('.overview') as HTMLElement;
-    fireEvent.click(within(overview).getByRole('button', { name: /session revocation rollout/i }));
+    fireEvent.click(within(board()).getByRole('button', { name: /session revocation rollout/i }));
 
     expect(window.location.pathname).toBe('/projects/PRJ-CLEW/tasks/CLW-EXEC');
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Session revocation rollout' }),
     ).toBeTruthy();
+  });
+
+  it('filters the board to tasks requiring attention', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
+    const toggle = screen.getByRole('button', { name: /^needs attention$/i });
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(columnHeadings(board())).toEqual(['Waiting']);
+    expect(within(board()).getByText('Parallel cache migration')).toBeTruthy();
+    expect(within(board()).queryByText('Session revocation rollout')).toBeNull();
+  });
+
+  it('filters the board by status and type', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^overview$/i }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: /filter by status/i }), {
+      target: { value: 'EXECUTING' },
+    });
+    expect(columnHeadings(board())).toEqual(['Active']);
+    expect(within(board()).getByText('Session revocation rollout')).toBeTruthy();
+    expect(within(board()).queryByText('Replace auth middleware')).toBeNull();
+
+    fireEvent.change(screen.getByRole('combobox', { name: /filter by type/i }), {
+      target: { value: 'deep' },
+    });
+    expect(within(board()).queryByText('Session revocation rollout')).toBeNull();
+    expect(board().textContent).toContain('No tasks match the current filters.');
+
+    fireEvent.change(screen.getByRole('combobox', { name: /filter by status/i }), {
+      target: { value: 'all' },
+    });
+    expect(within(board()).getByText('Parallel cache migration')).toBeTruthy();
+    expect(within(board()).queryByText('Replace auth middleware')).toBeNull();
   });
 
   it('renders a compact project breadcrumb above the task title', async () => {
@@ -1068,5 +1101,141 @@ describe('project awareness', () => {
     expect(lykarItem.textContent).not.toContain('waiting');
     expect(clewItem.textContent).not.toContain('running');
     expect(clewItem.textContent).not.toContain('waiting');
+  });
+});
+
+describe('settings modal (CLEW-099)', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+    api.execute.mockReset();
+    api.execute.mockResolvedValue({ fixture: true });
+    api.loadTasks.mockReset();
+    api.loadTasks.mockResolvedValue({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    api.subscribeToEvents.mockClear();
+  });
+
+  function connectionLabels(dialog: HTMLElement) {
+    const group = within(dialog).getByRole('group', { name: /agent connections/i });
+
+    return within(group)
+      .getAllByRole('button')
+      .map((entry) => entry.querySelector('.agent-connection-label')?.textContent);
+  }
+
+  function backendCalls() {
+    return api.execute.mock.calls.filter(([args]) => {
+      const command = (args as string[])[0];
+      const subcommand = (args as string[])[1];
+
+      return command !== 'task' || subcommand !== 'changes';
+    });
+  }
+
+  it('opens the Agent chapter from the gear icon and returns focus on Escape', async () => {
+    render(<App />);
+    const gear = await screen.findByRole('button', { name: /^settings$/i });
+
+    fireEvent.click(gear);
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(within(dialog).getByRole('button', { name: /^agent$/i })).toBeTruthy();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /settings/i })).toBeNull(),
+    );
+    expect(document.activeElement).toBe(gear);
+  });
+
+  it('lists exactly the three agent connections', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(connectionLabels(dialog)).toEqual(['Codex CLI', 'Claude CLI', 'OpenCode CLI']);
+  });
+
+  it('persists the selected connection across reload without backend calls', async () => {
+    const first = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const loadCallsBefore = api.loadTasks.mock.calls.length;
+
+    for (const name of [/^codex cli/i, /^claude cli/i, /^opencode cli/i]) {
+      const option = within(dialog).getByRole('button', { name });
+      fireEvent.click(option);
+      expect(option.getAttribute('aria-pressed')).toBe('true');
+    }
+    expect(backendCalls()).toHaveLength(0);
+    expect(api.loadTasks.mock.calls.length).toBe(loadCallsBefore);
+    expect(localStorage.getItem('clew.v1.agent-connection')).toBe('opencode');
+    first.unmount();
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const reopened = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(
+      within(reopened).getByRole('button', { name: /^opencode cli/i }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(connectionLabels(reopened)).toEqual(['Codex CLI', 'Claude CLI', 'OpenCode CLI']);
+  });
+
+  it('states the choice is not verified without check wording', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(within(dialog).getByText(/does not change how tasks run yet/i)).toBeTruthy();
+    expect(
+      within(dialog).queryByText(
+        /\b(check|checked|checking|verify|verified|status|available|online|connected)\b/i,
+      ),
+    ).toBeNull();
+  });
+
+  it('renders identically when the daemon is disconnected', async () => {
+    api.loadTasks.mockResolvedValue({ tasks: [], projects: [], state: 'disconnected' });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(connectionLabels(dialog)).toEqual(['Codex CLI', 'Claude CLI', 'OpenCode CLI']);
+    expect(within(dialog).getByText(/does not change how tasks run yet/i)).toBeTruthy();
+    const option = within(dialog).getByRole('button', { name: /^claude cli/i });
+
+    fireEvent.click(option);
+    expect(option.getAttribute('aria-pressed')).toBe('true');
+    expect(option.hasAttribute('disabled')).toBe(false);
+    expect(localStorage.getItem('clew.v1.agent-connection')).toBe('claude');
+  });
+
+  it('traps Tab focus within the settings dialog', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+    const focusable = within(dialog).getAllByRole('button');
+    const last = focusable[focusable.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+    await waitFor(() => expect(document.activeElement).toBe(focusable[0]));
+
+    focusable[0].focus();
+    fireEvent.keyDown(document.body, { key: 'Tab', shiftKey: true });
+    await waitFor(() => expect(document.activeElement).toBe(last));
+  });
+
+  it('contains no secret-like strings', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    expect(dialog.innerHTML).not.toMatch(/token|secret|password|api[-_ ]?key|bearer|credential/i);
   });
 });

@@ -382,34 +382,30 @@ button {
   background: #854d0e1a;
 }
 
-.sidebar-nav {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 8px 12px 6px;
+.sidebar-switcher-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 0;
 }
 
-.sidebar-nav-item {
-  height: 30px;
-  padding: 0 10px;
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 600;
-  text-align: left;
+.sidebar-switcher-row .project-switcher {
+  flex: 1;
+  min-width: 0;
 }
 
-.sidebar-nav-item:hover {
-  color: var(--text);
-  background: var(--surface-2);
+.view-toggle {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
 }
 
-.sidebar-nav-item.active {
-  color: var(--text);
-  background: var(--surface-2);
-  border-color: var(--border);
+.view-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .sidebar-heading {
@@ -1984,22 +1980,50 @@ textarea:focus {
   font-size: 22px;
 }
 
-.overview-section {
+.kanban-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kanban-filter {
+  height: 26px;
+  padding: 0 8px;
+  color: var(--text-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(210px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  align-items: start;
+  padding-bottom: 8px;
+}
+
+.kanban-column {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
 }
 
-.overview-section-head {
+.kanban-column-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid var(--border);
 }
 
-.overview-section-head h3 {
+.kanban-column-head h3 {
   margin: 0;
   color: var(--text-2);
   font-size: 11px;
@@ -2007,39 +2031,37 @@ textarea:focus {
   letter-spacing: 0.06em;
 }
 
-.overview-list {
-  padding: 4px 12px;
+.kanban-cards {
+  display: grid;
+  gap: 6px;
 }
 
-.overview-row {
+.kanban-card {
   display: grid;
   gap: 4px;
   width: 100%;
-  padding: 10px 4px;
+  padding: 8px 10px;
   text-align: left;
   color: var(--text-2);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
   cursor: pointer;
 }
 
-.overview-row:last-child {
-  border-bottom: 0;
-}
-
-.overview-row:hover {
+.kanban-card:hover {
   color: var(--text);
+  border-color: var(--accent);
 }
 
-.overview-row-top {
+.kanban-card-top {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
 }
 
-.overview-row strong {
+.kanban-card strong {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-2);
@@ -2047,18 +2069,13 @@ textarea:focus {
   overflow-wrap: anywhere;
 }
 
-.overview-row:hover strong {
+.kanban-card:hover strong {
   color: var(--text);
 }
 
-.overview-row-meta {
+.kanban-card-meta {
   color: var(--faint);
-  font:
-    10px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    Consolas,
-    monospace;
+  font-size: 10px;
 }
 
 /* ── Empty State ─────────────────────────────── */
@@ -2728,6 +2745,80 @@ textarea:focus {
   grid-column: 2;
   color: var(--faint);
   font-size: 10px;
+}
+
+/* ── Settings ────────────────────────────────── */
+.settings-modal {
+  width: min(560px, 100%);
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 16px;
+}
+
+.settings-chapters {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.settings-chapter {
+  text-align: left;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-chapter.active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.settings-chapter-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.settings-notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agent-connections {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-connection {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.agent-connection.selected {
+  border-color: var(--accent);
+}
+
+.agent-connection-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 12px;
 }
 
 /* ── Command palette ─────────────────────────── */
