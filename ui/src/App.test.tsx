@@ -81,7 +81,7 @@ describe('Preact control plane', () => {
     expect(
       container
         .querySelector('[aria-label="Finalization gate"]')
-      ?.classList.contains('finalization-recommendation'),
+        ?.classList.contains('finalization-recommendation'),
     ).toBe(true);
 
     fireEvent.click(finishButton);
@@ -1146,9 +1146,7 @@ describe('settings modal (CLEW-099)', () => {
 
     expect(within(dialog).getByRole('button', { name: /^agent$/i })).toBeTruthy();
     fireEvent.keyDown(document.body, { key: 'Escape' });
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: /settings/i })).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: /settings/i })).toBeNull());
     expect(document.activeElement).toBe(gear);
   });
 
@@ -1181,7 +1179,9 @@ describe('settings modal (CLEW-099)', () => {
     const reopened = await screen.findByRole('dialog', { name: /settings/i });
 
     expect(
-      within(reopened).getByRole('button', { name: /^opencode cli/i }).getAttribute('aria-pressed'),
+      within(reopened)
+        .getByRole('button', { name: /^opencode cli/i })
+        .getAttribute('aria-pressed'),
     ).toBe('true');
     expect(connectionLabels(reopened)).toEqual(['Codex CLI', 'Claude CLI', 'OpenCode CLI']);
   });

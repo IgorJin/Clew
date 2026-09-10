@@ -917,14 +917,22 @@ function Overview({
 
           if (!cards.length) return null;
           return (
-            <section className="kanban-column" key={column.key} aria-label={`${column.label} column`}>
+            <section
+              className="kanban-column"
+              key={column.key}
+              aria-label={`${column.label} column`}
+            >
               <header className="kanban-column-head">
                 <h3>{column.label}</h3>
                 <span className="small-muted">{cards.length}</span>
               </header>
               <div className="kanban-cards">
                 {cards.map((task) => (
-                  <button className="kanban-card" key={task.id} onClick={() => onSelectTask(task.id)}>
+                  <button
+                    className="kanban-card"
+                    key={task.id}
+                    onClick={() => onSelectTask(task.id)}
+                  >
                     <div className="kanban-card-top">
                       <span className="task-id">{task.id}</span>
                       <Status state={task.state} />

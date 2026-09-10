@@ -63,14 +63,14 @@ Project-centric UX tasks (`CLEW-096`–`CLEW-098`) consume these contracts. Toda
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence     | Logical scenarios                                             | Result |
-| --------- | ---------------------- | ------------------------------------------------------------- | ------ |
-| AC-1      | `test/project.test.js` | repo root vs subfolder; default-branch fallback chain; name   | pass   |
-| AC-2      | `test/project.test.js` | missing folder; non-Git folder; non-directory; no partial row | pass   |
-| AC-3      | `test/project.test.js` | create → close → reopen; duplicate repository rejected        | pass   |
-| AC-4      | `test/project.test.js` | bound Task carries projectId; legacy Task reads project null  | pass   |
-| AC-5      | `test/project.test.js` | projects array; Task↔Project association; snapshot stays v1   | pass   |
-| AC-6      | `npm run check`        | migrations, contracts, docs (see note below)                  | pass*  |
+| Criterion | Automated evidence     | Logical scenarios                                            | Result |
+| --------- | ---------------------- | ------------------------------------------------------------ | ------ |
+| AC-1      | `test/project.test.js` | repo root vs subfolder; default-branch fallback chain; name  | pass   |
+| AC-2      | `test/project.test.js` | absent folder; non-Git folder; non-directory; no partial row | pass   |
+| AC-3      | `test/project.test.js` | create → close → reopen; duplicate repository rejected       | pass   |
+| AC-4      | `test/project.test.js` | bound Task carries projectId; legacy Task reads project null | pass   |
+| AC-5      | `test/project.test.js` | projects array; Task↔Project association; snapshot stays v1  | pass   |
+| AC-6      | `npm run check`        | migrations, contracts, docs (see note below)                 | pass*  |
 
 \* Backend 191/191, UI 18/18, eslint clean, `tasks:check` 26 cards, `node --check` clean. `format:check` reports 2 pre-existing failures (`src/change-inspection.js`, `test/change-inspection.test.js`) that already fail at HEAD and are untouched by this change.
 

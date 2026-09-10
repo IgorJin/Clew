@@ -64,14 +64,14 @@ The operator clicks the gear icon, opens the settings modal, switches to the `Ag
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence | Logical scenarios | Result |
-| --------- | ------------------ | ----------------- | ------ |
-| AC-1 | `ui/src/App.test.tsx` (settings modal open/chapters/Esc/focus) | open via gear; Agent select; Esc close; focus return | pass |
-| AC-2 | `ui/src/App.test.tsx` (three connections) | exactly Codex/Claude/OpenCode entries | pass |
-| AC-3 | `ui/src/App.test.tsx` (selection persists, no calls) | select each entry; reload restores; fetch/WebSocket call count is zero | pass |
-| AC-4 | `ui/src/App.test.tsx` (not-verified notice) | notice text present; no status/check wording anywhere in the chapter | pass |
-| AC-5 | `ui/src/App.test.tsx` (daemon-independent) | no-daemon, connected, and disconnected renders are equivalent | pass |
-| AC-6 | `ui/src/App.test.tsx` (no secrets) | fixtures and snapshots contain no credential-like strings | pass |
+| Criterion | Automated evidence                                             | Logical scenarios                                                      | Result |
+| --------- | -------------------------------------------------------------- | ---------------------------------------------------------------------- | ------ |
+| AC-1      | `ui/src/App.test.tsx` (settings modal open/chapters/Esc/focus) | open via gear; Agent select; Esc close; focus return                   | pass   |
+| AC-2      | `ui/src/App.test.tsx` (three connections)                      | exactly Codex/Claude/OpenCode entries                                  | pass   |
+| AC-3      | `ui/src/App.test.tsx` (selection persists, no calls)           | select each entry; reload restores; fetch/WebSocket call count is zero | pass   |
+| AC-4      | `ui/src/App.test.tsx` (not-verified notice)                    | notice text present; no status/check wording anywhere in the chapter   | pass   |
+| AC-5      | `ui/src/App.test.tsx` (daemon-independent)                     | no-daemon, connected, and disconnected renders are equivalent          | pass   |
+| AC-6      | `ui/src/App.test.tsx` (no secrets)                             | fixtures and snapshots contain no credential-like strings              | pass   |
 
 ## Verification
 
