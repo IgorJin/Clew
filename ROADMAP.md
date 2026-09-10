@@ -446,6 +446,31 @@ Release gate:
 5. Key hints are discoverable, accessible, responsive, and cannot remain stuck after blur or application switching.
 6. UI tests, backend regressions, production build, installed-package acceptance, and release documentation pass.
 
+## Planned first — Minimal Scout
+
+[Scout v0](./docs/SCOUT.md) is the first context experiment after the active keyboard mini-release. One explicit read-only run investigates one repository revision for one Task and saves a bounded source-linked context map. It uses existing harnesses and local JSON files.
+
+- [CLEW-123](./tasks/CLEW-123.md), S: RepositoryContext contract and fixtures.
+- [CLEW-124](./tasks/CLEW-124.md), M: read-only execution, CLI, and local result.
+- [CLEW-125](./tasks/CLEW-125.md), M: initial architect/worker consumption through existing briefs.
+- [CLEW-126](./tasks/CLEW-126.md), S: pilot on three tasks and contract refinement.
+
+Execution order: 123 → 124 → 125 → 126 → 114 → 115. CLEW-114 also requires its storage dependencies; CLEW-105–113 can proceed independently. All four scout cards are planned, release unassigned.
+
+Scout is intended to expand later into reusable repository memory, incremental updates and additional requests during execution. The form of that memory remains open; those extensions are not prerequisites for this minimal slice.
+
+## Planned — Bounded Task data and resumable context
+
+Release assignment is pending; v0.10 remains the active target. [Task data lifecycle](./docs/TASK-DATA-LIFECYCLE.md) defines an implementation queue of 18 S/M cards, all planned:
+
+- CLEW-105–110: storage contracts, measured usage, local artifact writes, compression, normalized events, and diagnostic budgets;
+- CLEW-111–113: bounded HTTP queries, WebSocket flow control, and incremental Task Thread;
+- CLEW-114–115: versioned checkpoints and bounded role handoff, after the required CLEW-126 scout pilot;
+- CLEW-116–118: prune preview, race-safe quarantine/GC, and separate SQLite maintenance;
+- CLEW-119–122: consistent export/restore checks, resumable legacy migration, storage UI, and scale/recovery acceptance.
+
+Exact dependencies and acceptance criteria live in the [task index](./tasks/README.md). Canonical facts and evidence remain protected after export. The first backend is local on each execution host; Runner v1 data permissions remain unchanged. Formal QA policy and cross-host blob transfer are separate work.
+
 ## Plugin architecture proposal
 
 The proposed next integration boundary is documented in [Plugin architecture and implementation plan](./docs/PLUGIN-ARCHITECTURE.md). It covers a shared plugin registry, runtime connections for Codex/OpenCode/Claude Code, role routing, Controller/Runner compatibility, and extraction of the existing OpenTelemetry integration. Release assignment is pending; the first scope is P1–P5, followed by metrics, pricing sources, and change viewers.
@@ -458,7 +483,7 @@ These topics require discovery before release commitment:
 
 1. automated testing and QA responsibilities;
 2. Evidence Graph, manual artifacts, CI/Playwright ingestion, and quality policies;
-3. Task and failure memory;
+3. Task and failure memory beyond the scoped [checkpoint and retention implementation queue](./docs/TASK-DATA-LIFECYCLE.md);
 4. cross-repository Tasks and Repository Graph;
 5. task intake, enrichment, and autonomy scoring;
 6. harness analytics and empirical routing;
