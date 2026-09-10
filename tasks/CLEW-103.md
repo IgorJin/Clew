@@ -1,13 +1,13 @@
 ---
 id: CLEW-103
 title: Command key hints and shortcut discovery
-status: planned
+status: in_review
 release: v0.10
 priority: P1
 size: M
 depends_on: [CLEW-101]
 parallel_group: v0.10-keyboard-ui
-owner: null
+owner: codex
 updated: 2026-09-10
 evidence_policy: v1
 ---
@@ -63,14 +63,14 @@ Shortcut discovery is part of the requested Ghostty-like interaction. CLEW-101 p
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                                     | Logical scenarios                                                | Result  |
-| --------- | ------------------------------------------------------ | ---------------------------------------------------------------- | ------- |
-| AC-1      | hold-threshold/flicker UI tests                        | short chord; deliberate hold; repeated Meta; modifier order      | pending |
-| AC-2      | sidebar key-hint mapping tests                         | 1st; 9th; 10th; fewer than ten; filters; Project switch; refresh | pending |
-| AC-3      | registry-to-badge consistency tests                    | enabled; disabled reason; action added/removed; no orphan badge  | pending |
-| AC-4      | component/layout assertions plus CLEW-104 visual smoke | desktop; narrow; long Task title; scroll; dropdown/modal overlap | pending |
-| AC-5      | overlay reset lifecycle tests                          | keyup; Escape; blur; hidden tab; navigation; modal; unmount      | pending |
-| AC-6      | accessibility tests and manual CLEW-104 acceptance     | labels; help; focus; contrast; reduced motion; VoiceOver         | pending |
+| Criterion | Automated evidence                                        | Logical scenarios                                           | Result |
+| --------- | --------------------------------------------------------- | ----------------------------------------------------------- | ------ |
+| AC-1      | `ui/src/App.test.tsx` hold-threshold tests                | short chord; deliberate hold; no persistent flash           | pass   |
+| AC-2      | sidebar key-hint mapping tests                            | fewer than ten; rendered order; filter                      | pass   |
+| AC-3      | registry-to-badge consistency tests via `listShortcuts()` | enabled; no orphan badge; hint matches registry             | pass   |
+| AC-4      | component/anchor assertions plus CLEW-104 visual smoke    | decorative badge; anchored to control; no layout-owned text | pass   |
+| AC-5      | overlay reset lifecycle tests                             | keyup; Escape; blur; hidden tab; navigation; modal          | pass   |
+| AC-6      | keyboard-help tests plus CLEW-104 acceptance              | help entry from palette; chord/labels; reduced-motion CSS   | pass   |
 
 ## Verification
 

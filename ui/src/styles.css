@@ -3014,6 +3014,103 @@ textarea:focus {
   }
 }
 
+/* Keyboard key hints */
+.task-row,
+.key-hint-anchor {
+  position: relative;
+}
+
+.key-hint {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.key-hint-corner {
+  top: -6px;
+  right: -6px;
+}
+
+.key-hint-start {
+  top: 50%;
+  left: -6px;
+  transform: translateY(-50%);
+}
+
+.key-hint-end {
+  top: 50%;
+  right: -6px;
+  transform: translateY(-50%);
+}
+
+.key-hint-disabled {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.shortcut-help {
+  max-width: 520px;
+  width: min(520px, calc(100vw - 32px));
+}
+
+.shortcut-help-group {
+  margin-bottom: 20px;
+}
+
+.shortcut-help-group h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.shortcut-help-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shortcut-help-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcut-help-chord {
+  flex: 0 0 auto;
+  min-width: 44px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.shortcut-help-label {
+  flex: 1 1 auto;
+  color: var(--text);
+}
+
+.shortcut-help-reason {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

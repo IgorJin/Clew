@@ -41,11 +41,14 @@ import { TerminalPane } from './TerminalPane';
 import {
   isTerminalElement,
   isTextEntryElement,
+  listShortcuts,
   useShortcuts,
   type KeyCombo,
   type Shortcut,
+  type ShortcutMetadata,
   type ShortcutScope,
 } from './shortcuts';
+import { useCommandHold } from './commandHold';
 
 const stateLabel: Record<TaskState, string> = {
   DRAFT: 'Draft',
@@ -578,20 +581,27 @@ function CommandPalette({
   tasks,
   onSelect,
   onClose,
+  onShowHelp,
 }: {
   open: boolean;
   projects: Project[];
   tasks: Task[];
   onSelect: (projectId: string, taskId: string | null) => void;
   onClose: () => void;
+  onShowHelp: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const items = useMemo(() => {
-    const all: { projectId: string; projectName: string; taskId: string | null; label: string }[] =
-      [];
+    const all: {
+      projectId: string;
+      projectName: string;
+      taskId: string | null;
+      label: string;
+      help?: boolean;
+    }[] = [];
 
     for (const project of projects) {
       all.push({
@@ -610,6 +620,13 @@ function CommandPalette({
         });
       }
     }
+    all.push({
+      projectId: '',
+      projectName: 'Help',
+      taskId: null,
+      label: 'Keyboard shortcuts',
+      help: true,
+    });
 
     if (!query.trim()) return all;
     const lower = query.toLowerCase();
@@ -632,6 +649,8 @@ function CommandPalette({
   onSelectRef.current = onSelect;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const onShowHelpRef = useRef(onShowHelp);
+  onShowHelpRef.current = onShowHelp;
 
   useLayoutEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -650,7 +669,8 @@ function CommandPalette({
         const entry = itemsRef.current[activeIndexRef.current];
 
         onCloseRef.current();
-        onSelectRef.current(entry.projectId, entry.taskId);
+        if (entry.help) onShowHelpRef.current();
+        else onSelectRef.current(entry.projectId, entry.taskId);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -690,15 +710,21 @@ function CommandPalette({
           {items.length === 0 && <div className="palette-empty">No results</div>}
           {items.map((entry, i) => (
             <button
-              key={`${entry.projectId}-${entry.taskId ?? 'proj'}`}
+              key={entry.help ? 'help' : `${entry.projectId}-${entry.taskId ?? 'proj'}`}
               className={`palette-item${i === activeIndex ? ' active' : ''}`}
               onClick={() => {
                 onClose();
-                onSelect(entry.projectId, entry.taskId);
+                if (entry.help) onShowHelp();
+                else onSelect(entry.projectId, entry.taskId);
               }}
               onMouseEnter={() => setActiveIndex(i)}
             >
-              {entry.taskId ? (
+              {entry.help ? (
+                <span className="palette-item-project">
+                  <CircleHelp size={12} />
+                  {entry.label}
+                </span>
+              ) : entry.taskId ? (
                 <span className="palette-item-task">
                   <span className="task-id">{entry.taskId}</span>
                   {entry.label.slice(entry.taskId.length)}
@@ -722,6 +748,115 @@ function CommandPalette({
   );
 }
 
+function KeyHint({
+  metadata,
+  position,
+}: {
+  metadata?: ShortcutMetadata;
+  position?: 'corner' | 'start' | 'end';
+}) {
+  if (!metadata) return null;
+  const disabled = !metadata.enabled;
+
+  return (
+    <span
+      className={`key-hint${disabled ? ' key-hint-disabled' : ''}${position ? ` key-hint-${position}` : ''}`}
+      aria-hidden="true"
+      title={disabled ? metadata.disabledReason : metadata.label}
+    >
+      {metadata.hint}
+    </span>
+  );
+}
+
+function PaletteButton({
+  hints,
+  onOpen,
+}: {
+  hints: Map<string, ShortcutMetadata> | null;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className="icon-button key-hint-anchor"
+      aria-label="Open command palette"
+      onClick={onOpen}
+    >
+      <Search size={14} />
+      <KeyHint metadata={hints?.get('palette.open')} position="corner" />
+    </button>
+  );
+}
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const byId = new Map(listShortcuts().map((entry) => [entry.id, entry]));
+  const groups: { title: string; ids: string[] }[] = [
+    {
+      title: 'Navigation',
+      ids: ['palette.open', ...Array.from({ length: 10 }, (_, index) => `task.open.${index + 1}`)],
+    },
+    {
+      title: 'Task actions',
+      ids: [
+        'task.continue',
+        'task.changes.internal',
+        'task.changes.external',
+        'task.terminal.focus',
+        'task.terminal.external',
+      ],
+    },
+  ];
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="create-task settings-modal shortcut-help"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Keyboard shortcuts"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">Help</span>
+            <h2>Keyboard shortcuts</h2>
+          </div>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Close keyboard shortcuts"
+            onClick={onClose}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        {groups.map((group) => (
+          <section key={group.title} className="shortcut-help-group" aria-label={group.title}>
+            <h3>{group.title}</h3>
+            <ul className="shortcut-help-list">
+              {group.ids.map((id) => {
+                const entry = byId.get(id);
+
+                if (!entry) return null;
+
+                return (
+                  <li key={id}>
+                    <span className="shortcut-help-chord">{entry.chord}</span>
+                    <span className="shortcut-help-label">{entry.label}</span>
+                    {!entry.enabled && entry.disabledReason && (
+                      <span className="shortcut-help-reason">{entry.disabledReason}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 function ProjectSidebar({
   projects,
   projectId,
@@ -730,6 +865,7 @@ function ProjectSidebar({
   selectedTaskId,
   statusFilter,
   awareness,
+  hints,
   onSelectProject,
   onSelectView,
   onSelectTask,
@@ -744,6 +880,7 @@ function ProjectSidebar({
   selectedTaskId: string | null;
   statusFilter: string | null;
   awareness: Record<string, ProjectAwareness>;
+  hints: Map<string, ShortcutMetadata> | null;
   onSelectProject: (projectId: string) => void;
   onSelectView: (view: 'overview' | 'tasks') => void;
   onSelectTask: (taskId: string) => void;
@@ -796,7 +933,7 @@ function ProjectSidebar({
         ))}
       </div>
       <div className="task-list">
-        {tasks.map((entry) => (
+        {tasks.map((entry, index) => (
           <button
             className={`task-row ${entry.id === selectedTaskId ? 'selected' : ''}${entry.interactionStatus === 'waiting_for_operator' ? ' task-row-waiting' : ''}`}
             key={entry.id}
@@ -822,6 +959,9 @@ function ProjectSidebar({
               {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
             </span>
             <Wave state={entry.state} />
+            {index < 10 && (
+              <KeyHint metadata={hints?.get(`task.open.${index + 1}`)} position="corner" />
+            )}
           </button>
         ))}
       </div>
@@ -1124,6 +1264,7 @@ function ChangeActions({
   run,
   changes,
   disabled,
+  hints,
   onOpenEditor,
   onViewDiff,
   onCopyPath,
@@ -1132,6 +1273,7 @@ function ChangeActions({
   run: Run | undefined;
   changes: ChangeLoad | undefined;
   disabled: boolean;
+  hints: Map<string, ShortcutMetadata> | null;
   onOpenEditor: () => void;
   onViewDiff: () => void;
   onCopyPath: () => void;
@@ -1151,7 +1293,7 @@ function ChangeActions({
   return (
     <div className="changes-control">
       <button
-        className="button secondary small changes-main"
+        className="button secondary small changes-main key-hint-anchor"
         disabled={disabled || unavailable}
         title={!run ? 'No persisted run for this agent' : undefined}
         onClick={() => {
@@ -1160,6 +1302,7 @@ function ChangeActions({
         }}
       >
         <FileDiff size={12} /> {label}
+        <KeyHint metadata={hints?.get('task.changes.external')} position="corner" />
       </button>
       <button
         className="button secondary small changes-menu-toggle"
@@ -1184,12 +1327,14 @@ function ChangeActions({
           </button>
           <button
             role="menuitem"
+            className="key-hint-anchor"
             onClick={() => {
               setMenuOpen(false);
               onViewDiff();
             }}
           >
             <FileDiff size={12} /> View diff
+            <KeyHint metadata={hints?.get('task.changes.internal')} position="end" />
           </button>
           <button
             role="menuitem"
@@ -1535,12 +1680,14 @@ function AgentGrid({
   task,
   canMutate,
   act,
+  hints,
   expandedAgent,
   onToggleExpand,
 }: {
   task: Task;
   canMutate: boolean;
   act: (args: string[], success: string) => void;
+  hints: Map<string, ShortcutMetadata> | null;
   expandedAgent: string | null;
   onToggleExpand: (agent: string) => void;
 }) {
@@ -1614,7 +1761,7 @@ function AgentGrid({
             </div>
             <div className="agent-actions">
               <button
-                className="button secondary small"
+                className="button secondary small key-hint-anchor"
                 disabled={!canMutate || !terminalAvailable}
                 aria-expanded={expanded}
                 aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label} terminal`}
@@ -1622,9 +1769,10 @@ function AgentGrid({
               >
                 <SquareTerminal size={12} />
                 {expanded ? 'Collapse' : 'Expand'}
+                <KeyHint metadata={hints?.get('task.terminal.focus')} position="corner" />
               </button>
               <button
-                className="button secondary small"
+                className="button secondary small key-hint-anchor"
                 disabled={!canMutate || !canOpenExternally}
                 aria-label={`Open ${label} externally`}
                 title={
@@ -1638,6 +1786,7 @@ function AgentGrid({
               >
                 <Terminal size={12} />
                 Open externally
+                <KeyHint metadata={hints?.get('task.terminal.external')} position="corner" />
               </button>
             </div>
             {expanded && terminalId && (
@@ -2588,6 +2737,8 @@ export default function App() {
   } | null>(null);
   const terminalChoiceRef = useRef<Record<string, string>>({});
   const taskShortcutsRef = useRef<TaskShortcutBindings | null>(null);
+  const commandHold = useCommandHold();
+  const [helpOpen, setHelpOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
@@ -2948,6 +3099,7 @@ export default function App() {
       startApproval ||
       actionConfirmation ||
       terminalChooser ||
+      helpOpen ||
       diffRunId
     )
       return 'modal';
@@ -2983,6 +3135,7 @@ export default function App() {
         id: `task.open.${ordinal}`,
         label: `Open task ${ordinal}`,
         chord: `⌘${key}`,
+        hint: key,
         fallbackChords: [`⌥${key}`],
         combos: [
           { key, primary: true },
@@ -3005,6 +3158,7 @@ export default function App() {
       id: 'palette.open',
       label: 'Open command palette',
       chord: '⌘K',
+      hint: 'K',
       fallbackChords: ['Ctrl+K'],
       combos: [
         { key: 'k', primary: true },
@@ -3019,6 +3173,7 @@ export default function App() {
       id: string,
       label: string,
       chord: string,
+      hint: string,
       fallbackChords: string[],
       combos: KeyCombo[],
       key: keyof TaskShortcutBindings,
@@ -3026,6 +3181,7 @@ export default function App() {
       id,
       label,
       chord,
+      hint,
       fallbackChords,
       combos,
       scopes: ['task'],
@@ -3040,6 +3196,7 @@ export default function App() {
         'task.continue',
         'Continue task',
         '⌘↵',
+        '↵',
         ['Ctrl+Enter'],
         [
           { key: 'Enter', primary: true },
@@ -3051,6 +3208,7 @@ export default function App() {
         'task.changes.internal',
         'View changes',
         '⌘E',
+        'E',
         ['Ctrl+E'],
         [
           { key: 'e', primary: true },
@@ -3062,6 +3220,7 @@ export default function App() {
         'task.changes.external',
         'Open changes externally',
         '⌘⇧E',
+        '⇧E',
         ['Ctrl+Shift+E'],
         [
           { key: 'e', primary: true, shift: true },
@@ -3073,6 +3232,7 @@ export default function App() {
         'task.terminal.focus',
         'Focus terminal',
         '⌘`',
+        '`',
         ['Ctrl+`'],
         [
           { key: '`', primary: true },
@@ -3084,6 +3244,7 @@ export default function App() {
         'task.terminal.external',
         'Open session externally',
         '⌘⇧`',
+        '⇧`',
         ['Ctrl+Shift+`'],
         [
           { key: '`', primary: true, shift: true },
@@ -3097,6 +3258,27 @@ export default function App() {
   }, [sortedTasks, selectTask, setPaletteOpen, project]);
 
   useShortcuts(shortcuts, shortcutScope);
+
+  const hints = commandHold.active
+    ? new Map(listShortcuts().map((entry) => [entry.id, entry]))
+    : null;
+
+  useEffect(() => {
+    commandHold.reset();
+  }, [
+    route,
+    paletteOpen,
+    terminalChooser,
+    settingsOpen,
+    createOpen,
+    finishOpen,
+    addProjectOpen,
+    startApproval,
+    actionConfirmation,
+    helpOpen,
+    diffRunId,
+    commandHold.reset,
+  ]);
 
   const runApprovedStart = async (taskId: string, actionId: string) => {
     if (startRequests.current.has(taskId)) return;
@@ -3326,6 +3508,7 @@ export default function App() {
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+            <PaletteButton hints={hints} onOpen={() => setPaletteOpen(true)} />
             <button
               ref={settingsButtonRef}
               className="icon-button"
@@ -3345,6 +3528,7 @@ export default function App() {
             selectedTaskId={null}
             statusFilter={statusFilter}
             awareness={awareness}
+            hints={hints}
             onSelectProject={selectProject}
             onSelectView={selectView}
             onSelectTask={selectTask}
@@ -3376,12 +3560,14 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
+        {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
         <CommandPalette
           open={paletteOpen}
           projects={projects}
           tasks={tasks}
           onSelect={selectProjectAndTask}
           onClose={() => setPaletteOpen(false)}
+          onShowHelp={() => setHelpOpen(true)}
         />
       </div>
     );
@@ -3395,6 +3581,7 @@ export default function App() {
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+            <PaletteButton hints={hints} onOpen={() => setPaletteOpen(true)} />
             <button
               ref={settingsButtonRef}
               className="icon-button"
@@ -3422,6 +3609,7 @@ export default function App() {
             selectedTaskId={task?.id ?? null}
             statusFilter={statusFilter}
             awareness={awareness}
+            hints={hints}
             onSelectProject={selectProject}
             onSelectView={selectView}
             onSelectTask={selectTask}
@@ -3449,12 +3637,14 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
+        {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
         <CommandPalette
           open={paletteOpen}
           projects={projects}
           tasks={tasks}
           onSelect={selectProjectAndTask}
           onClose={() => setPaletteOpen(false)}
+          onShowHelp={() => setHelpOpen(true)}
         />
       </div>
     );
@@ -3829,6 +4019,7 @@ export default function App() {
         <div className="topbar-right">
           <Connection state={connection} />
           <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
+          <PaletteButton hints={hints} onOpen={() => setPaletteOpen(true)} />
           <button
             ref={settingsButtonRef}
             className="icon-button"
@@ -3852,6 +4043,7 @@ export default function App() {
           selectedTaskId={task.id}
           statusFilter={statusFilter}
           awareness={awareness}
+          hints={hints}
           onSelectProject={selectProject}
           onSelectView={selectView}
           onSelectTask={selectTask}
@@ -3895,18 +4087,20 @@ export default function App() {
                     run={changeRun}
                     changes={changeRun ? changesByRun[changeRun.id] : undefined}
                     disabled={!canMutate}
+                    hints={hints}
                     onOpenEditor={() => changeRun && void runViewerAction(changeRun)}
                     onViewDiff={() => changeRun && viewRunDiff(changeRun)}
                     onCopyPath={() => changeRun && void runViewerAction(changeRun, 'worktree-path')}
                     onRefresh={() => changeRun && void refreshRunChanges(changeRun.id)}
                   />
                   <button
-                    className="button secondary"
+                    className="button secondary key-hint-anchor"
                     disabled={!canMutate || !mainAction.enabled}
                     title={mainAction.reason}
                     onClick={mainAction.run}
                   >
                     {mainAction.icon} {mainAction.label}
+                    <KeyHint metadata={hints?.get('task.continue')} position="corner" />
                   </button>
                   {interactiveWorker && (
                     <button
@@ -4127,6 +4321,7 @@ export default function App() {
               task={task}
               canMutate={canMutate}
               act={act}
+              hints={hints}
               expandedAgent={expandedAgent}
               onToggleExpand={(agent) =>
                 setExpandedAgent((current) => (current === agent ? null : agent))
@@ -4249,12 +4444,14 @@ export default function App() {
           </section>
         </div>
       )}
+      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
       <CommandPalette
         open={paletteOpen}
         projects={projects}
         tasks={tasks}
         onSelect={selectProjectAndTask}
         onClose={() => setPaletteOpen(false)}
+        onShowHelp={() => setHelpOpen(true)}
       />
     </div>
   );

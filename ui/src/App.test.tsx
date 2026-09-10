@@ -2059,3 +2059,171 @@ describe('task shortcuts (CLEW-102)', () => {
     expect(screen.queryByRole('dialog', { name: /changes for worker/i })).toBeNull();
   });
 });
+
+describe('command key hints (CLEW-103)', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    sessionStorage.clear();
+    localStorage.clear();
+    api.execute.mockReset();
+    api.execute.mockResolvedValue({ fixture: true });
+    api.loadTasks.mockReset();
+    api.loadTasks.mockResolvedValue({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'fixture',
+    });
+    api.subscribeToEvents.mockClear();
+  });
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function hintNodes(container: Element) {
+    return [...container.querySelectorAll('.key-hint')];
+  }
+
+  async function holdCommand(container: Element) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      fireEvent.keyDown(document.body, { key: 'Meta', metaKey: true });
+      try {
+        await waitFor(() => expect(hintNodes(container).length).toBeGreaterThan(0), {
+          timeout: 400,
+        });
+        return;
+      } catch {
+        fireEvent.keyUp(document.body, { key: 'Meta' });
+      }
+    }
+    throw new Error('key hints did not appear');
+  }
+
+  it('reveals hints after a deliberate hold and not on a fast chord (AC-1)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: 'Meta', metaKey: true });
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    await delay(240);
+    expect(hintNodes(container)).toHaveLength(0);
+
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /command palette/i })).toBeNull(),
+    );
+
+    await holdCommand(container);
+    expect(hintNodes(container).length).toBeGreaterThan(0);
+  });
+
+  it('numbers sidebar rows in rendered order up to the visible list (AC-2)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    await holdCommand(container);
+    const numbers = [...container.querySelectorAll('.task-row .key-hint')].map(
+      (node) => node.textContent,
+    );
+
+    expect(numbers).toEqual(['1', '2', '3', '4', '5']);
+  });
+
+  it('matches sidebar numbers after a status filter (AC-2)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    await holdCommand(container);
+    const rows = [...container.querySelectorAll('.task-row')];
+    const numbers = rows.map((row) => row.querySelector('.key-hint')?.textContent);
+
+    expect(numbers).toEqual(['1']);
+  });
+
+  it('only shows badges backed by a registered action (AC-3)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    await holdCommand(container);
+    const known = new Set(listShortcuts().map((entry) => entry.hint));
+
+    for (const node of hintNodes(container)) expect(known.has(node.textContent ?? '')).toBe(true);
+
+    const first = listShortcuts().find((entry) => entry.id === 'task.open.1');
+
+    expect(first?.hint).toBe('1');
+    expect(first?.enabled).toBe(true);
+  });
+
+  it('keeps hint badges decorative and anchored to a control (AC-4)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    await holdCommand(container);
+    const badge = hintNodes(container)[0];
+
+    expect(badge.getAttribute('aria-hidden')).toBe('true');
+    expect(badge.closest('.key-hint-anchor, .task-row')).toBeTruthy();
+  });
+
+  it('clears hints on keyup, Escape, blur, and a hidden tab (AC-5)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    await holdCommand(container);
+    fireEvent.keyUp(document.body, { key: 'Meta' });
+    await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+
+    await holdCommand(container);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+
+    await holdCommand(container);
+    fireEvent(window, new Event('blur'));
+    await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+
+    await holdCommand(container);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      fireEvent(document, new Event('visibilitychange'));
+      await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+    } finally {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+    }
+  });
+
+  it('clears hints on navigation and modal transitions (AC-5)', async () => {
+    const { container } = render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    await holdCommand(container);
+    fireEvent.click(screen.getByRole('button', { name: /parallel cache migration/i }));
+    await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+
+    await holdCommand(container);
+    fireEvent.click(screen.getByRole('button', { name: /^settings$/i }));
+    await waitFor(() => expect(hintNodes(container)).toHaveLength(0));
+  });
+
+  it('opens the keyboard help from the command palette (AC-6)', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+
+    fireEvent.click(within(palette).getByRole('button', { name: /keyboard shortcuts/i }));
+    const help = await screen.findByRole('dialog', { name: /keyboard shortcuts/i });
+
+    expect(within(help).getByText('⌘K')).toBeTruthy();
+    expect(within(help).getByText(/continue task/i)).toBeTruthy();
+    expect(within(help).getByText(/focus terminal/i)).toBeTruthy();
+
+    fireEvent.click(within(help).getByRole('button', { name: /close keyboard shortcuts/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull(),
+    );
+  });
+});
