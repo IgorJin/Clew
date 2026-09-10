@@ -30,6 +30,31 @@ export type ShortcutResolution = {
   reason?: string;
 };
 
+function platformString(): string {
+  if (typeof navigator === 'undefined') return '';
+
+  const modernNavigator = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const values = [
+    modernNavigator.userAgentData?.platform,
+    navigator.platform,
+    navigator.userAgent,
+  ].filter((value): value is string => Boolean(value));
+
+  return values.join(' ');
+}
+
+export function usesMacModifiers(): boolean {
+  return /mac/i.test(platformString());
+}
+
+export function primaryModifierLabel(): '⌘' | 'Ctrl' {
+  return usesMacModifiers() ? '⌘' : 'Ctrl';
+}
+
+export function optionModifierLabel(): '⌥' | 'Alt' {
+  return usesMacModifiers() ? '⌥' : 'Alt';
+}
+
 export type ShortcutMetadata = {
   id: string;
   label: string;
@@ -75,33 +100,51 @@ export function resolveShortcut(
   shortcuts: Shortcut[],
   scope: ShortcutScope,
 ): ShortcutResolution {
+  let disabled: ShortcutResolution['disabled'];
+
   for (const shortcut of shortcuts) {
     if (!shortcut.scopes.includes(scope)) continue;
     if (!shortcut.combos.some((combo) => comboMatches(combo, event))) continue;
-    if (shortcut.enabled && !shortcut.enabled())
-      return { shortcut: null, disabled: shortcut, reason: shortcut.disabledReason?.() };
+    if (shortcut.enabled && !shortcut.enabled()) {
+      disabled ??= shortcut;
+      continue;
+    }
 
     return { shortcut };
   }
 
-  return { shortcut: null };
+  return { shortcut: null, disabled, reason: disabled?.disabledReason?.() };
 }
 
 const registry = new Map<string, Shortcut>();
 
+export function describeShortcut(shortcut: Shortcut): ShortcutMetadata {
+  return {
+    id: shortcut.id,
+    label: shortcut.label,
+    chord: shortcut.chord,
+    hint: shortcut.hint ?? shortcut.chord,
+    fallbackChords: shortcut.fallbackChords ?? [],
+    scopes: [...shortcut.scopes],
+    enabled: shortcut.enabled ? shortcut.enabled() : true,
+    disabledReason: shortcut.disabledReason?.(),
+  };
+}
+
+export function indexShortcuts(shortcuts: Shortcut[]): Map<string, ShortcutMetadata> {
+  return new Map(
+    shortcuts.map((shortcut) => {
+      const metadata = describeShortcut(shortcut);
+
+      return [metadata.id, metadata] as const;
+    }),
+  );
+}
+
 export function listShortcuts(scope?: ShortcutScope): ShortcutMetadata[] {
   return [...registry.values()]
     .filter((shortcut) => !scope || shortcut.scopes.includes(scope))
-    .map((shortcut) => ({
-      id: shortcut.id,
-      label: shortcut.label,
-      chord: shortcut.chord,
-      hint: shortcut.hint ?? shortcut.chord,
-      fallbackChords: shortcut.fallbackChords ?? [],
-      scopes: [...shortcut.scopes],
-      enabled: shortcut.enabled ? shortcut.enabled() : true,
-      disabledReason: shortcut.disabledReason?.(),
-    }));
+    .map(describeShortcut);
 }
 
 export function useShortcuts(shortcuts: Shortcut[], scope: () => ShortcutScope): void {

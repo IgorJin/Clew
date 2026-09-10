@@ -1,13 +1,13 @@
 ---
 id: CLEW-104
 title: v0.10 keyboard controls acceptance and release
-status: planned
+status: in_progress
 release: v0.10
 priority: P0
 size: M
 depends_on: [CLEW-099, CLEW-102, CLEW-103]
 parallel_group: null
-owner: null
+owner: codex
 updated: 2026-09-10
 evidence_policy: v1
 ---

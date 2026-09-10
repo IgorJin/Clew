@@ -2,7 +2,13 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/pre
 import { useState } from 'preact/hooks';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixtureProjects, fixtureTasks } from './fixtures';
-import { listShortcuts, useShortcuts } from './shortcuts';
+import {
+  listShortcuts,
+  optionModifierLabel,
+  primaryModifierLabel,
+  resolveShortcut,
+  useShortcuts,
+} from './shortcuts';
 import type { Task, ThreadItem } from './types';
 
 const api = vi.hoisted(() => ({
@@ -1745,6 +1751,35 @@ describe('keyboard shortcuts (CLEW-101)', () => {
     await waitFor(() => expect(window.location.pathname).toContain(ids[0]));
   });
 
+  it('prefers an enabled action when chords collide', () => {
+    const event = new KeyboardEvent('keydown', { key: 'x', metaKey: true });
+    const resolution = resolveShortcut(
+      event,
+      [
+        {
+          id: 'disabled.action',
+          label: 'Disabled action',
+          chord: '⌘X',
+          combos: [{ key: 'x', primary: true }],
+          scopes: ['global'],
+          enabled: () => false,
+          run: () => {},
+        },
+        {
+          id: 'enabled.action',
+          label: 'Enabled action',
+          chord: '⌘X',
+          combos: [{ key: 'x', primary: true }],
+          scopes: ['global'],
+          run: () => {},
+        },
+      ],
+      'global',
+    );
+
+    expect(resolution.shortcut?.id).toBe('enabled.action');
+  });
+
   it('dispatches one handler per keystroke across rerenders and unmount (AC-6)', async () => {
     const calls: number[] = [];
 
@@ -1791,9 +1826,9 @@ describe('keyboard shortcuts (CLEW-101)', () => {
 
     const byId = new Map(listShortcuts().map((entry) => [entry.id, entry]));
 
-    expect(byId.get('task.open.1')?.chord).toBe('⌘1');
-    expect(byId.get('task.open.10')?.chord).toBe('⌘0');
-    expect(byId.get('task.open.10')?.fallbackChords).toEqual(['⌥0']);
+    expect(byId.get('task.open.1')?.chord).toBe(`${primaryModifierLabel()}1`);
+    expect(byId.get('task.open.10')?.chord).toBe(`${primaryModifierLabel()}0`);
+    expect(byId.get('task.open.10')?.fallbackChords).toEqual([`${optionModifierLabel()}0`]);
     expect(byId.get('palette.open')?.scopes).toContain('input');
   });
 });
@@ -2037,6 +2072,106 @@ describe('task shortcuts (CLEW-102)', () => {
     expect(await screen.findByLabelText('Live Codex terminal')).toBeTruthy();
   });
 
+  it('keeps change and terminal shortcuts inert while the control plane is disconnected', async () => {
+    let reportState: ((state: string) => void) | undefined;
+
+    api.loadTasks.mockResolvedValueOnce({
+      tasks: structuredClone(fixtureTasks),
+      projects: structuredClone(fixtureProjects),
+      state: 'connected',
+    });
+    api.subscribeToEvents.mockImplementationOnce((_after, _onEvent, onState) => {
+      reportState = onState;
+
+      return () => undefined;
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    reportState?.('disconnected');
+    await screen.findByRole('alert');
+
+    await waitFor(() => {
+      const changes = listShortcuts().find((entry) => entry.id === 'task.changes.internal');
+
+      expect(changes?.enabled).toBe(false);
+      expect(changes?.disabledReason).toBe(
+        'Actions are disabled while the control plane is disconnected',
+      );
+    });
+
+    const sessionOpens = () =>
+      commands().filter(
+        (args) => args[0] === 'session' && args[1] === 'open' && args[2] === 'CLEW-071',
+      ).length;
+    const externalChanges = () =>
+      commands().filter(
+        (args) => args[0] === 'task' && args[1] === 'open-changes' && args[3] === 'CLEW-071',
+      ).length;
+    const opensBefore = sessionOpens();
+    const externalBefore = externalChanges();
+
+    fireEvent.keyDown(document.body, { key: 'e', metaKey: true });
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true, shiftKey: true });
+
+    expect(screen.queryByRole('dialog', { name: /changes for worker/i })).toBeNull();
+    expect(screen.queryByLabelText('Live Codex terminal')).toBeNull();
+    expect(sessionOpens()).toBe(opensBefore);
+    expect(externalChanges()).toBe(externalBefore);
+  });
+
+  it('supports Escape and starts on the chooser close control', async () => {
+    const base = structuredClone(fixtureTasks[0]);
+    const backend = {
+      ...structuredClone(base.runs[1]),
+      id: 'run-backend',
+      stageId: 'backend',
+      status: 'RUNNING',
+      sessionId: 'sess-backend',
+      terminalAvailable: true,
+      terminalAccess: 'controller_local' as const,
+    };
+    const frontend = {
+      ...structuredClone(base.runs[1]),
+      id: 'run-frontend',
+      stageId: 'frontend',
+      status: 'RUNNING',
+      sessionId: 'sess-frontend',
+      terminalAvailable: true,
+      terminalAccess: 'controller_local' as const,
+    };
+
+    loadSingleTask({
+      state: 'EXECUTING',
+      attention: null,
+      runId: 'run-backend',
+      runStatus: 'RUNNING',
+      terminalActive: true,
+      terminalAvailable: true,
+      terminalAccess: 'controller_local',
+      interactionStatus: 'waiting_for_operator',
+      roles: ['worker'],
+      stages: [
+        { id: 'backend', status: 'RUNNING', kind: 'worker' },
+        { id: 'frontend', status: 'RUNNING', kind: 'worker' },
+      ],
+      runs: [backend, frontend],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.keyDown(document.body, { key: '`', metaKey: true });
+    const chooser = await screen.findByRole('dialog', { name: /choose terminal/i });
+    const closeButton = within(chooser).getByRole('button', { name: /close terminal chooser/i });
+
+    await waitFor(() => expect(document.activeElement).toBe(closeButton));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /choose terminal/i })).toBeNull(),
+    );
+  });
+
   it('keeps task shortcuts out of input, palette, and modal scope (AC-6)', async () => {
     render(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
@@ -2216,14 +2351,33 @@ describe('command key hints (CLEW-103)', () => {
 
     fireEvent.click(within(palette).getByRole('button', { name: /keyboard shortcuts/i }));
     const help = await screen.findByRole('dialog', { name: /keyboard shortcuts/i });
+    const closeButton = within(help).getByRole('button', { name: /close keyboard shortcuts/i });
 
-    expect(within(help).getByText('⌘K')).toBeTruthy();
+    expect(within(help).getByText(`${primaryModifierLabel()}K`)).toBeTruthy();
+    expect(within(help).getByText(`${optionModifierLabel()}1`)).toBeTruthy();
     expect(within(help).getByText(/continue task/i)).toBeTruthy();
     expect(within(help).getByText(/focus terminal/i)).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(closeButton));
 
-    fireEvent.click(within(help).getByRole('button', { name: /close keyboard shortcuts/i }));
+    fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /keyboard shortcuts/i })).toBeNull(),
     );
+  });
+
+  it('marks task actions as unavailable in overview help when no task is active', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^overview$/i }));
+    await waitFor(() => expect(window.location.pathname).toContain('/overview'));
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true });
+    const palette = await screen.findByRole('dialog', { name: /command palette/i });
+
+    fireEvent.click(within(palette).getByRole('button', { name: /keyboard shortcuts/i }));
+    const help = await screen.findByRole('dialog', { name: /keyboard shortcuts/i });
+
+    expect(within(help).getAllByText('Open a task to use this action.')).toHaveLength(5);
   });
 });

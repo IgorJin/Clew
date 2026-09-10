@@ -39,9 +39,11 @@ import type {
 } from './types';
 import { TerminalPane } from './TerminalPane';
 import {
+  indexShortcuts,
   isTerminalElement,
   isTextEntryElement,
-  listShortcuts,
+  optionModifierLabel,
+  primaryModifierLabel,
   useShortcuts,
   type KeyCombo,
   type Shortcut,
@@ -748,6 +750,28 @@ function CommandPalette({
   );
 }
 
+function useModalDismiss(onClose: () => void) {
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  return closeButtonRef;
+}
+
 function KeyHint({
   metadata,
   position,
@@ -788,8 +812,9 @@ function PaletteButton({
   );
 }
 
-function ShortcutHelp({ onClose }: { onClose: () => void }) {
-  const byId = new Map(listShortcuts().map((entry) => [entry.id, entry]));
+function ShortcutHelp({ shortcuts, onClose }: { shortcuts: Shortcut[]; onClose: () => void }) {
+  const byId = indexShortcuts(shortcuts);
+  const dismissRef = useModalDismiss(onClose);
   const groups: { title: string; ids: string[] }[] = [
     {
       title: 'Navigation',
@@ -822,6 +847,7 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
             <h2>Keyboard shortcuts</h2>
           </div>
           <button
+            ref={dismissRef}
             type="button"
             className="icon-button"
             aria-label="Close keyboard shortcuts"
@@ -842,6 +868,11 @@ function ShortcutHelp({ onClose }: { onClose: () => void }) {
                 return (
                   <li key={id}>
                     <span className="shortcut-help-chord">{entry.chord}</span>
+                    {entry.fallbackChords.map((fallback) => (
+                      <span key={fallback} className="shortcut-help-chord shortcut-help-fallback">
+                        {fallback}
+                      </span>
+                    ))}
                     <span className="shortcut-help-label">{entry.label}</span>
                     {!entry.enabled && entry.disabledReason && (
                       <span className="shortcut-help-reason">{entry.disabledReason}</span>
@@ -1674,6 +1705,65 @@ function terminalTargets(task: Task): TerminalTarget[] {
     card,
     state: agentCardState(task, card),
   }));
+}
+
+function focusTerminalTargets(task: Task): TerminalTarget[] {
+  return terminalTargets(task).filter(
+    (target) =>
+      target.state.isRunning && target.state.terminalAvailable && Boolean(target.state.terminalId),
+  );
+}
+
+function TerminalChooser({
+  targets,
+  onSelect,
+  onClose,
+}: {
+  targets: TerminalTarget[];
+  onSelect: (target: TerminalTarget) => void;
+  onClose: () => void;
+}) {
+  const dismissRef = useModalDismiss(onClose);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="create-task"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Choose terminal"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-head compact">
+          <div>
+            <span className="eyebrow">Terminal</span>
+            <h2>Choose terminal</h2>
+          </div>
+          <button
+            ref={dismissRef}
+            type="button"
+            className="icon-button"
+            aria-label="Close terminal chooser"
+            onClick={onClose}
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="agent-connections" role="group" aria-label="Terminal targets">
+          {targets.map((target) => (
+            <button
+              key={target.key}
+              type="button"
+              className="agent-connection"
+              onClick={() => onSelect(target)}
+            >
+              <span className="agent-connection-label">{target.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function AgentGrid({
@@ -2737,6 +2827,8 @@ export default function App() {
   } | null>(null);
   const terminalChoiceRef = useRef<Record<string, string>>({});
   const taskShortcutsRef = useRef<TaskShortcutBindings | null>(null);
+
+  taskShortcutsRef.current = null;
   const commandHold = useCommandHold();
   const [helpOpen, setHelpOpen] = useState(false);
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
@@ -3113,6 +3205,8 @@ export default function App() {
     return 'global';
   };
 
+  const primary = primaryModifierLabel();
+  const alternate = optionModifierLabel();
   const shortcuts = useMemo<Shortcut[]>(() => {
     const digitKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
     const digitCodes = [
@@ -3134,9 +3228,9 @@ export default function App() {
       return {
         id: `task.open.${ordinal}`,
         label: `Open task ${ordinal}`,
-        chord: `⌘${key}`,
+        chord: `${primary}${key}`,
         hint: key,
-        fallbackChords: [`⌥${key}`],
+        fallbackChords: [`${alternate}${key}`],
         combos: [
           { key, primary: true },
           { code: digitCodes[index], primary: true },
@@ -3157,9 +3251,9 @@ export default function App() {
     list.push({
       id: 'palette.open',
       label: 'Open command palette',
-      chord: '⌘K',
+      chord: `${primary}K`,
       hint: 'K',
-      fallbackChords: ['Ctrl+K'],
+      fallbackChords: primary === '⌘' ? ['Ctrl+K'] : [],
       combos: [
         { key: 'k', primary: true },
         { code: 'KeyK', primary: true },
@@ -3186,7 +3280,8 @@ export default function App() {
       combos,
       scopes: ['task'],
       enabled: () => taskShortcutsRef.current?.[key].enabled() ?? false,
-      disabledReason: () => taskShortcutsRef.current?.[key].disabledReason(),
+      disabledReason: () =>
+        taskShortcutsRef.current?.[key].disabledReason() ?? 'Open a task to use this action.',
       onDisabled: (reason: string) => taskShortcutsRef.current?.[key].onDisabled?.(reason),
       run: () => taskShortcutsRef.current?.[key].run(),
     });
@@ -3195,9 +3290,9 @@ export default function App() {
       taskBinding(
         'task.continue',
         'Continue task',
-        '⌘↵',
+        `${primary}↵`,
         '↵',
-        ['Ctrl+Enter'],
+        primary === '⌘' ? ['Ctrl+Enter'] : [],
         [
           { key: 'Enter', primary: true },
           { code: 'Enter', primary: true },
@@ -3207,9 +3302,9 @@ export default function App() {
       taskBinding(
         'task.changes.internal',
         'View changes',
-        '⌘E',
+        `${primary}E`,
         'E',
-        ['Ctrl+E'],
+        primary === '⌘' ? ['Ctrl+E'] : [],
         [
           { key: 'e', primary: true },
           { code: 'KeyE', primary: true },
@@ -3219,9 +3314,9 @@ export default function App() {
       taskBinding(
         'task.changes.external',
         'Open changes externally',
-        '⌘⇧E',
+        `${primary}⇧E`,
         '⇧E',
-        ['Ctrl+Shift+E'],
+        primary === '⌘' ? ['Ctrl+Shift+E'] : [],
         [
           { key: 'e', primary: true, shift: true },
           { code: 'KeyE', primary: true, shift: true },
@@ -3231,9 +3326,9 @@ export default function App() {
       taskBinding(
         'task.terminal.focus',
         'Focus terminal',
-        '⌘`',
+        `${primary}\``,
         '`',
-        ['Ctrl+`'],
+        primary === '⌘' ? ['Ctrl+`'] : [],
         [
           { key: '`', primary: true },
           { code: 'Backquote', primary: true },
@@ -3243,9 +3338,9 @@ export default function App() {
       taskBinding(
         'task.terminal.external',
         'Open session externally',
-        '⌘⇧`',
+        `${primary}⇧\``,
         '⇧`',
-        ['Ctrl+Shift+`'],
+        primary === '⌘' ? ['Ctrl+Shift+`'] : [],
         [
           { key: '`', primary: true, shift: true },
           { code: 'Backquote', primary: true, shift: true },
@@ -3255,13 +3350,11 @@ export default function App() {
     );
 
     return list;
-  }, [sortedTasks, selectTask, setPaletteOpen, project]);
+  }, [sortedTasks, selectTask, setPaletteOpen, project, primary, alternate]);
 
   useShortcuts(shortcuts, shortcutScope);
 
-  const hints = commandHold.active
-    ? new Map(listShortcuts().map((entry) => [entry.id, entry]))
-    : null;
+  const hints = commandHold.active ? indexShortcuts(shortcuts) : null;
 
   useEffect(() => {
     commandHold.reset();
@@ -3560,7 +3653,7 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
-        {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+        {helpOpen && <ShortcutHelp shortcuts={shortcuts} onClose={() => setHelpOpen(false)} />}
         <CommandPalette
           open={paletteOpen}
           projects={projects}
@@ -3637,7 +3730,7 @@ export default function App() {
           />
         )}
         {settingsOpen && <SettingsModal onClose={closeSettings} />}
-        {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+        {helpOpen && <ShortcutHelp shortcuts={shortcuts} onClose={() => setHelpOpen(false)} />}
         <CommandPalette
           open={paletteOpen}
           projects={projects}
@@ -3768,9 +3861,7 @@ export default function App() {
   const changeRun = task.runs.find((run) => run.id === selectedChangeRunId) ?? latestTaskRun;
   const waitingForOperator = task.interactionStatus === 'waiting_for_operator';
   const changeRunAvailable = Boolean(changeRun);
-  const terminalTargetsAvailable = terminalTargets(task).some(
-    (target) => target.state.terminalAvailable && Boolean(target.state.terminalId),
-  );
+  const terminalTargetsAvailable = focusTerminalTargets(task).length > 0;
   const externalTargetsAvailable = terminalTargets(task).some(
     (target) => target.state.canOpenExternally,
   );
@@ -3792,11 +3883,10 @@ export default function App() {
   };
 
   const chooseTerminal = (mode: 'focus' | 'external') => {
-    const targets = terminalTargets(task).filter((target) =>
+    const targets =
       mode === 'external'
-        ? target.state.canOpenExternally
-        : target.state.terminalAvailable && Boolean(target.state.terminalId),
-    );
+        ? terminalTargets(task).filter((target) => target.state.canOpenExternally)
+        : focusTerminalTargets(task);
 
     if (!targets.length) {
       setNotice(
@@ -3870,29 +3960,39 @@ export default function App() {
       run: runContinue,
     },
     changesInternal: {
-      enabled: () => changeRunAvailable,
-      disabledReason: () => (changeRunAvailable ? undefined : 'No run is selected for inspection'),
+      enabled: () => canMutate && changeRunAvailable,
+      disabledReason: () => {
+        if (!canMutate) return 'Actions are disabled while the control plane is disconnected';
+        return changeRunAvailable ? undefined : 'No run is selected for inspection';
+      },
       run: () => {
         if (changeRun) viewRunDiff(changeRun);
       },
     },
     changesExternal: {
-      enabled: () => changeRunAvailable,
-      disabledReason: () => (changeRunAvailable ? undefined : 'No run is selected for inspection'),
+      enabled: () => canMutate && changeRunAvailable,
+      disabledReason: () => {
+        if (!canMutate) return 'Actions are disabled while the control plane is disconnected';
+        return changeRunAvailable ? undefined : 'No run is selected for inspection';
+      },
       run: () => {
         if (changeRun) void runViewerAction(changeRun);
       },
     },
     terminalFocus: {
-      enabled: () => terminalTargetsAvailable,
-      disabledReason: () =>
-        terminalTargetsAvailable ? undefined : 'No embedded terminal is available',
+      enabled: () => canMutate && terminalTargetsAvailable,
+      disabledReason: () => {
+        if (!canMutate) return 'Actions are disabled while the control plane is disconnected';
+        return terminalTargetsAvailable ? undefined : 'No embedded terminal is available';
+      },
       run: () => chooseTerminal('focus'),
     },
     terminalExternal: {
-      enabled: () => externalTargetsAvailable,
-      disabledReason: () =>
-        externalTargetsAvailable ? undefined : 'No session is available to open externally',
+      enabled: () => canMutate && externalTargetsAvailable,
+      disabledReason: () => {
+        if (!canMutate) return 'Actions are disabled while the control plane is disconnected';
+        return externalTargetsAvailable ? undefined : 'No session is available to open externally';
+      },
       run: () => chooseTerminal('external'),
     },
   };
@@ -3903,8 +4003,12 @@ export default function App() {
         return {
           label: 'Focus terminal',
           icon: <SquareTerminal size={13} />,
-          enabled: terminalTargetsAvailable,
-          reason: terminalTargetsAvailable ? undefined : 'No embedded terminal is available',
+          enabled: canMutate && terminalTargetsAvailable,
+          reason: !canMutate
+            ? 'Actions are disabled while the control plane is disconnected'
+            : terminalTargetsAvailable
+              ? undefined
+              : 'No embedded terminal is available',
           run: () => chooseTerminal('focus'),
         };
       return {
@@ -3953,6 +4057,8 @@ export default function App() {
       run: () => {},
     };
   })();
+
+  const taskHints = commandHold.active ? indexShortcuts(shortcuts) : null;
 
   const selectedWorkflowIndex = WORKFLOW_STEPS.findIndex((step) => step.key === selectedStep);
   const currentWorkflowIndex = workflowStepIndex(task.state);
@@ -4043,7 +4149,7 @@ export default function App() {
           selectedTaskId={task.id}
           statusFilter={statusFilter}
           awareness={awareness}
-          hints={hints}
+          hints={taskHints}
           onSelectProject={selectProject}
           onSelectView={selectView}
           onSelectTask={selectTask}
@@ -4087,7 +4193,7 @@ export default function App() {
                     run={changeRun}
                     changes={changeRun ? changesByRun[changeRun.id] : undefined}
                     disabled={!canMutate}
-                    hints={hints}
+                    hints={taskHints}
                     onOpenEditor={() => changeRun && void runViewerAction(changeRun)}
                     onViewDiff={() => changeRun && viewRunDiff(changeRun)}
                     onCopyPath={() => changeRun && void runViewerAction(changeRun, 'worktree-path')}
@@ -4100,7 +4206,7 @@ export default function App() {
                     onClick={mainAction.run}
                   >
                     {mainAction.icon} {mainAction.label}
-                    <KeyHint metadata={hints?.get('task.continue')} position="corner" />
+                    <KeyHint metadata={taskHints?.get('task.continue')} position="corner" />
                   </button>
                   {interactiveWorker && (
                     <button
@@ -4321,7 +4427,7 @@ export default function App() {
               task={task}
               canMutate={canMutate}
               act={act}
-              hints={hints}
+              hints={taskHints}
               expandedAgent={expandedAgent}
               onToggleExpand={(agent) =>
                 setExpandedAgent((current) => (current === agent ? null : agent))
@@ -4397,54 +4503,19 @@ export default function App() {
       )}
       {settingsOpen && <SettingsModal onClose={closeSettings} />}
       {terminalChooser && (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => setTerminalChooser(null)}
-        >
-          <section
-            className="create-task"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Choose terminal"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="panel-head compact">
-              <div>
-                <span className="eyebrow">Terminal</span>
-                <h2>Choose terminal</h2>
-              </div>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label="Close terminal chooser"
-                onClick={() => setTerminalChooser(null)}
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="agent-connections" role="group" aria-label="Terminal targets">
-              {terminalChooser.targets.map((target) => (
-                <button
-                  key={target.key}
-                  type="button"
-                  className="agent-connection"
-                  onClick={() => {
-                    const mode = terminalChooser.mode;
+        <TerminalChooser
+          targets={terminalChooser.targets}
+          onClose={() => setTerminalChooser(null)}
+          onSelect={(target) => {
+            const mode = terminalChooser.mode;
 
-                    setTerminalChooser(null);
-                    if (mode === 'external') openExternalTarget(target);
-                    else focusTerminalTarget(target);
-                  }}
-                >
-                  <span className="agent-connection-label">{target.label}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
+            setTerminalChooser(null);
+            if (mode === 'external') openExternalTarget(target);
+            else focusTerminalTarget(target);
+          }}
+        />
       )}
-      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+      {helpOpen && <ShortcutHelp shortcuts={shortcuts} onClose={() => setHelpOpen(false)} />}
       <CommandPalette
         open={paletteOpen}
         projects={projects}
