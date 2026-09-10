@@ -38,6 +38,42 @@ CLEW-099 ──────────────────────┐
 CLEW-101 → (CLEW-102 + CLEW-103) → CLEW-104
 ```
 
+## Planned first — Scout v0 (release unassigned)
+
+The [minimal scout plan](./docs/SCOUT.md) precedes context/checkpoint design. It uses the current harness and simple local JSON, then tests consumption by architect/worker before CLEW-114–115. Persistent repository memory and automatic refresh remain future extensions; v0.10 stays the active release.
+
+| Task                            | Size | Work package                                   | Depends on |
+| ------------------------------- | ---- | ---------------------------------------------- | ---------- |
+| [CLEW-123](./tasks/CLEW-123.md) | S    | Scout context contract and fixtures            | —          |
+| [CLEW-124](./tasks/CLEW-124.md) | M    | Read-only scout execution and local result     | 123        |
+| [CLEW-125](./tasks/CLEW-125.md) | M    | Initial scout context for architect and worker | 124        |
+| [CLEW-126](./tasks/CLEW-126.md) | S    | Scout pilot and context contract refinement    | 125        |
+
+## Planned — Task data lifecycle (release unassigned)
+
+The [architecture plan](./docs/TASK-DATA-LIFECYCLE.md) is split into S/M cards. All start as planned; v0.10 remains the selected mini-release. Local artifacts stay on their execution host; new cross-host blob transfer and scheduled prune are deferred.
+
+| Task                            | Size | Work package                                            | Depends on                   |
+| ------------------------------- | ---- | ------------------------------------------------------- | ---------------------------- |
+| [CLEW-105](./tasks/CLEW-105.md) | S    | Storage classes and policy contracts                    | —                            |
+| [CLEW-106](./tasks/CLEW-106.md) | S    | Storage usage report and counters                       | 105                          |
+| [CLEW-107](./tasks/CLEW-107.md) | M    | Local artifact publishing and references                | 105                          |
+| [CLEW-108](./tasks/CLEW-108.md) | S    | Compressed artifact bodies and bounded reads            | 107                          |
+| [CLEW-109](./tasks/CLEW-109.md) | M    | Normalize and externalize large event payloads          | 105, 107                     |
+| [CLEW-110](./tasks/CLEW-110.md) | M    | Diagnostic quotas and write backpressure                | 106, 109                     |
+| [CLEW-111](./tasks/CLEW-111.md) | M    | Bounded event queries and HTTP pages                    | 105, 109                     |
+| [CLEW-112](./tasks/CLEW-112.md) | M    | WebSocket replay flow control                           | 111                          |
+| [CLEW-113](./tasks/CLEW-113.md) | M    | Incremental Task Thread and summary projections         | 111                          |
+| [CLEW-114](./tasks/CLEW-114.md) | M    | Versioned progress checkpoints                          | 105, 107, 109, 126           |
+| [CLEW-115](./tasks/CLEW-115.md) | M    | Bounded role briefs from checkpoints                    | 108, 114                     |
+| [CLEW-116](./tasks/CLEW-116.md) | S    | Retention policy and prune preview                      | 106, 113, 115                |
+| [CLEW-117](./tasks/CLEW-117.md) | M    | Apply prune with quarantine and safe garbage collection | 116, 107                     |
+| [CLEW-118](./tasks/CLEW-118.md) | S    | SQLite maintenance after retention                      | 117                          |
+| [CLEW-119](./tasks/CLEW-119.md) | M    | Task artifact export and restore verification           | 108, 114                     |
+| [CLEW-120](./tasks/CLEW-120.md) | M    | Resumable legacy payload migration                      | 109, 111, 119                |
+| [CLEW-121](./tasks/CLEW-121.md) | M    | Storage controls and bounded history UI                 | 106, 112, 113, 117           |
+| [CLEW-122](./tasks/CLEW-122.md) | M    | Task data lifecycle integration and scale acceptance    | 110, 115, 118, 119, 120, 121 |
+
 ## v0.1 completion record
 
 | Range          | Status   | Release evidence                                                                                          |
