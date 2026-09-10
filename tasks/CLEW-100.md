@@ -1,5 +1,5 @@
 ---
-id: CLEW-099
+id: CLEW-100
 title: 'bug: Task creation UX, duplicate submission, approval modal, and Codex launch'
 status: in_review
 release: v0.9
@@ -12,7 +12,7 @@ updated: 2026-09-09
 evidence_policy: v1
 ---
 
-# CLEW-099 — bug: Task creation UX, duplicate submission, approval modal, and Codex launch
+# CLEW-100 — bug: Task creation UX, duplicate submission, approval modal, and Codex launch
 
 ## Objective
 
@@ -98,7 +98,7 @@ The current flow exposes an older, over-configured task modal even though the in
 
 - Verdict: pending
 - Reviewer: independent review pending
-- Findings: Implementation and focused evidence are ready for counterexample-oriented review. `npm run tasks:check` is blocked by the pre-existing incomplete evidence in `CLEW-095`; CLEW-099 itself passes its UI, backend, lint, build, and formatting checks.
+- Findings: Implementation and focused evidence are ready for counterexample-oriented review. `npm run tasks:check` is blocked by the pre-existing incomplete evidence in `CLEW-095`; CLEW-100 itself passes its UI, backend, lint, build, and formatting checks.
 
 ## Dependencies and parallelization
 
