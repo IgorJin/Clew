@@ -1,14 +1,14 @@
 ---
 id: CLEW-125
 title: Initial scout context for architect and worker
-status: planned
+status: ready
 release: unassigned
 priority: P1
 size: M
 depends_on: [CLEW-124]
 parallel_group: null
 owner: null
-updated: 2026-09-10
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -72,7 +72,7 @@ Checkpoint engine CLEW-114/115, автоматический повторный 
 
 ## Dependencies and parallelization
 
-Зависит от [CLEW-124](./CLEW-124.md). Не зависит от CLEW-105–122. После 123 → 124 → 125 → 126 можно уточнять и реализовывать CLEW-114 → 115; независимые storage задачи могут выполняться рядом. Карточка остаётся planned до выбора очереди и завершения зависимостей.
+Зависит от завершённой [CLEW-124](./done/CLEW-124.md). Не зависит от CLEW-105–122. После 123 → 124 → 125 → 126 можно уточнять и реализовывать CLEW-114 → 115; независимые storage задачи могут выполняться рядом. Карточка готова к выполнению как следующий шаг scout v0.
 
 ## Risks
 

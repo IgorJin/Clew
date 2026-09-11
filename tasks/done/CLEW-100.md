@@ -1,14 +1,14 @@
 ---
 id: CLEW-100
 title: 'bug: Task creation UX, duplicate submission, approval modal, and Codex launch'
-status: in_review
+status: done
 release: v0.9
 priority: P0
 size: L
 depends_on: []
 parallel_group: null
 owner: codex
-updated: 2026-09-09
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -96,9 +96,9 @@ The current flow exposes an older, over-configured task modal even though the in
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: independent review pending
-- Findings: Implementation and focused evidence are ready for counterexample-oriented review. `npm run tasks:check` is blocked by the pre-existing incomplete evidence in `CLEW-095`; CLEW-100 itself passes its UI, backend, lint, build, and formatting checks.
+- Verdict: pass
+- Reviewer: independent counterexample review, 2026-09-11
+- Findings: Reviewed the minimal create form, synchronous submit guard, stable client ID, service-side idempotency, approval dialog, Quick/Standard/Deep branching, Codex resolver precedence, and normalized launch errors. No blocking issue found. Current repository gates pass: `npm run check`, UI tests, backend tests (230 pass, 10 loopback skips imposed by the managed sandbox), lint, and formatting.
 
 ## Dependencies and parallelization
 
@@ -118,9 +118,8 @@ None.
 
 ## Completion record
 
-- Implementation completed locally and moved to `in_review` on 2026-09-09.
-- `npm run ui:check`: 59/59 UI tests pass; TypeScript build and UI lint pass.
-- `npm test`: 225 pass, 10 environment-skipped, 0 fail.
-- `npm run lint` and `git diff --check`: pass.
-- Reduced-PATH macOS verification resolves Codex to `/Applications/ChatGPT.app/Contents/Resources/codex`.
-- Not yet merged to `main`; task remains `in_review`.
+Completed on 2026-09-11 on `main` as part of the v0.10.0 release line.
+
+- `npm run check` passes; the current UI suite has 101 passing tests and the backend suite has 230 passing tests with 10 loopback-listener skips imposed by the managed sandbox.
+- The service idempotency and Codex resolver tests cover stable client IDs, repeated input rejection, explicit paths, inherited `PATH`, macOS app-bundle fallback, and actionable missing-binary diagnostics.
+- The reduced-PATH macOS fixture resolves Codex to `/Applications/ChatGPT.app/Contents/Resources/codex`; packed-release acceptance evidence is retained in the v0.10 release record.

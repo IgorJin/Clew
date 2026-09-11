@@ -80,12 +80,12 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-092](./CLEW-092.md)      | v0.8       | done       | 088, 089                     | —                   |
 | [CLEW-091](./CLEW-091.md)      | v0.8       | done       | 087–089, 092                 | —                   |
 | [CLEW-093](./CLEW-093.md)      | v0.9       | done       | 087–092                      | —                   |
-| [CLEW-099](./CLEW-099.md)      | v0.10      | in_review  | —                            | —                   |
-| [CLEW-100](./CLEW-100.md)      | v0.9       | in_review  | —                            | —                   |
-| [CLEW-101](./CLEW-101.md)      | v0.10      | in_review  | —                            | —                   |
-| [CLEW-102](./CLEW-102.md)      | v0.10      | in_review  | CLEW-101                     | v0.10-keyboard-ui   |
-| [CLEW-103](./CLEW-103.md)      | v0.10      | in_review  | CLEW-101                     | v0.10-keyboard-ui   |
-| [CLEW-104](./CLEW-104.md)      | v0.10      | in_review  | 099, 102, 103                | —                   |
+| [CLEW-099](./done/CLEW-099.md) | v0.10      | done       | —                            | —                   |
+| [CLEW-100](./done/CLEW-100.md) | v0.9       | done       | —                            | —                   |
+| [CLEW-101](./done/CLEW-101.md) | v0.10      | done       | —                            | —                   |
+| [CLEW-102](./done/CLEW-102.md) | v0.10      | done       | CLEW-101                     | v0.10-keyboard-ui   |
+| [CLEW-103](./done/CLEW-103.md) | v0.10      | done       | CLEW-101                     | v0.10-keyboard-ui   |
+| [CLEW-104](./done/CLEW-104.md) | v0.10      | done       | 099, 102, 103                | —                   |
 | [CLEW-105](./CLEW-105.md)      | unassigned | planned    | —                            | —                   |
 | [CLEW-106](./CLEW-106.md)      | unassigned | planned    | 105                          | —                   |
 | [CLEW-107](./CLEW-107.md)      | unassigned | planned    | 105                          | —                   |
@@ -104,14 +104,14 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-120](./CLEW-120.md)      | unassigned | planned    | 109, 111, 119                | —                   |
 | [CLEW-121](./CLEW-121.md)      | unassigned | planned    | 106, 112, 113, 117           | —                   |
 | [CLEW-122](./CLEW-122.md)      | unassigned | planned    | 110, 115, 118, 119, 120, 121 | —                   |
-| [CLEW-123](./CLEW-123.md)      | unassigned | planned    | —                            | —                   |
-| [CLEW-124](./CLEW-124.md)      | unassigned | planned    | 123                          | —                   |
+| [CLEW-123](./done/CLEW-123.md) | unassigned | done       | —                            | codex               |
+| [CLEW-124](./done/CLEW-124.md) | unassigned | done       | 123                          | codex               |
 | [CLEW-125](./CLEW-125.md)      | unassigned | planned    | 124                          | —                   |
 | [CLEW-126](./CLEW-126.md)      | unassigned | planned    | 125                          | —                   |
 
-`release: unassigned` marks scoped implementation work whose release has not been selected. CLEW-105–122 form the [Task data lifecycle queue](../docs/TASK-DATA-LIFECYCLE.md); they remain planned while v0.10 keyboard controls are the active target. Card sizes are S/M; exact dependencies are in frontmatter.
+`release: unassigned` marks scoped implementation work whose release has not been selected. CLEW-105–122 form the [Task data lifecycle queue](../docs/TASK-DATA-LIFECYCLE.md); they remain planned while Scout v0 is the next selected experiment. Card sizes are S/M; exact dependencies are in frontmatter.
 
-Scout v0 is the first context experiment: [CLEW-123](./CLEW-123.md) → 124 → 125 → 126. CLEW-114 requires the pilot CLEW-126, and CLEW-115 follows 114; storage work CLEW-105–113 stays independent. The [scout document](../docs/SCOUT.md) records later extensions separately.
+Scout v0 is the first context experiment: completed [CLEW-123](./done/CLEW-123.md) → completed [CLEW-124](./done/CLEW-124.md) → ready CLEW-125 → 126. CLEW-114 requires the pilot CLEW-126, and CLEW-115 follows 114; storage work CLEW-105–113 stays independent. The [scout document](../docs/SCOUT.md) records later extensions separately.
 
 ## Execution waves
 
@@ -129,7 +129,7 @@ Next v0.7: CLEW-080 → CLEW-076 → CLEW-081
 Completed interactive response slice: CLEW-078 → CLEW-079 → CLEW-077
 Completed v0.8: CLEW-087 → (CLEW-088 + CLEW-089) → CLEW-092 → CLEW-091; CLEW-090 superseded
 Completed v0.9: CLEW-093 (lifecycle → finalization gate → Git integration → Task Screen v3 → responsive acceptance)
-Next v0.10 mini-release: CLEW-099 + (CLEW-101 → CLEW-102 + CLEW-103) → CLEW-104
+Completed v0.10 mini-release: CLEW-099 + (CLEW-101 → CLEW-102 + CLEW-103) → CLEW-104; native browser/accessibility rows remain recorded as environmental skips before public publication
 Then context experiment (release unassigned): CLEW-123 → CLEW-124 → CLEW-125 → CLEW-126 → CLEW-114 → CLEW-115
 Independent storage (release unassigned): CLEW-105 → CLEW-106 / CLEW-107 → later storage cards; see card dependencies
 ```

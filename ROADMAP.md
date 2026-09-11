@@ -24,7 +24,7 @@ Released:
 
 Next target:
 
-- `v0.6.0`: Controller/Runner transport and durable leases with one preconfigured Runner.
+- Scout v0: a bounded read-only repository context experiment for one Task (`CLEW-123` → `CLEW-126`).
 
 ## v0.3 — Explainable execution economics
 
@@ -410,23 +410,23 @@ Release evidence is recorded in [`RELEASE-0.9.md`](./RELEASE-0.9.md). External d
 
 This is a focused UI mini-release. The existing UI-only Agent settings slice ships with it but does not connect plugins to execution.
 
-### [CLEW-099](./tasks/CLEW-099.md) — Settings modal with Agent chapter
+### [CLEW-099](./tasks/done/CLEW-099.md) — Settings modal with Agent chapter
 
 Complete review of the existing UI-only connection preference and preserve its explicit unverified/not-applied boundary.
 
-### [CLEW-101](./tasks/CLEW-101.md) — Shortcut registry and numbered task navigation
+### [CLEW-101](./tasks/done/CLEW-101.md) — Shortcut registry and numbered task navigation
 
 Create one scoped shortcut registry and map `Cmd/Option+1…0` to the first ten Tasks in the current rendered sidebar order, including browser-conflict handling and input/terminal scope rules.
 
-### [CLEW-102](./tasks/CLEW-102.md) — Contextual task, changes, and terminal shortcuts
+### [CLEW-102](./tasks/done/CLEW-102.md) — Contextual task, changes, and terminal shortcuts
 
 Add `Cmd+Enter`, internal/external Changes shortcuts, and embedded/external terminal shortcuts through the existing action handlers. Present one Continue action while keeping Finish worker explicit.
 
-### [CLEW-103](./tasks/CLEW-103.md) — Command key hints and shortcut discovery
+### [CLEW-103](./tasks/done/CLEW-103.md) — Command key hints and shortcut discovery
 
 Show accessible key badges while Command is held, reset the overlay safely, and expose the same registry through shortcut help.
 
-### [CLEW-104](./tasks/CLEW-104.md) — v0.10 acceptance and release
+### [CLEW-104](./tasks/done/CLEW-104.md) — v0.10 acceptance and release
 
 Own browser-reserved-key validation, embedded-terminal conflicts, accessibility and layout acceptance, full repository checks, installed-package verification, versioning, and release evidence.
 
@@ -450,18 +450,18 @@ Release gate:
 
 [Scout v0](./docs/SCOUT.md) is the first context experiment after the active keyboard mini-release. One explicit read-only run investigates one repository revision for one Task and saves a bounded source-linked context map. It uses existing harnesses and local JSON files.
 
-- [CLEW-123](./tasks/CLEW-123.md), S: RepositoryContext contract and fixtures.
-- [CLEW-124](./tasks/CLEW-124.md), M: read-only execution, CLI, and local result.
+- [CLEW-123](./tasks/done/CLEW-123.md), S: RepositoryContext contract and fixtures (complete).
+- [CLEW-124](./tasks/done/CLEW-124.md), M: read-only execution, CLI, and local result (complete).
 - [CLEW-125](./tasks/CLEW-125.md), M: initial architect/worker consumption through existing briefs.
 - [CLEW-126](./tasks/CLEW-126.md), S: pilot on three tasks and contract refinement.
 
-Execution order: 123 → 124 → 125 → 126 → 114 → 115. CLEW-114 also requires its storage dependencies; CLEW-105–113 can proceed independently. All four scout cards are planned, release unassigned.
+Execution order: 123 → 124 → 125 → 126 → 114 → 115. CLEW-123 and CLEW-124 are complete; CLEW-125 is ready. CLEW-114 also requires its storage dependencies; CLEW-105–113 can proceed independently. The scout release assignment remains unassigned.
 
 Scout is intended to expand later into reusable repository memory, incremental updates and additional requests during execution. The form of that memory remains open; those extensions are not prerequisites for this minimal slice.
 
 ## Planned — Bounded Task data and resumable context
 
-Release assignment is pending; v0.10 remains the active target. [Task data lifecycle](./docs/TASK-DATA-LIFECYCLE.md) defines an implementation queue of 18 S/M cards, all planned:
+Release assignment is pending; v0.10 is signed off locally and Scout v0 is the next selected experiment. [Task data lifecycle](./docs/TASK-DATA-LIFECYCLE.md) defines an implementation queue of 18 S/M cards, all planned:
 
 - CLEW-105–110: storage contracts, measured usage, local artifact writes, compression, normalized events, and diagnostic budgets;
 - CLEW-111–113: bounded HTTP queries, WebSocket flow control, and incremental Task Thread;
@@ -485,7 +485,7 @@ These topics require discovery before release commitment:
 2. Evidence Graph, manual artifacts, CI/Playwright ingestion, and quality policies;
 3. Task and failure memory beyond the scoped [checkpoint and retention implementation queue](./docs/TASK-DATA-LIFECYCLE.md);
 4. cross-repository Tasks and Repository Graph;
-5. task intake, enrichment, and autonomy scoring;
+5. [Project Inbox V1 and Task Shaping](./docs/TASK-CANVAS.md): project-level text intents, explicit analysis, and confirmed Create / Attach / Mark resolved proposals at the Clew edge; execution begins from a validated Task Contract. Free-form canvas, attachments, and autonomous intake remain later extensions;
 6. harness analytics and empirical routing;
 7. WIP limits, backpressure, critical path, and attention scheduling;
 8. GitHub Checks and public verification surfaces;

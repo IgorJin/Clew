@@ -1,14 +1,14 @@
 ---
 id: CLEW-123
 title: Scout context contract and fixtures
-status: planned
+status: done
 release: unassigned
 priority: P1
 size: S
 depends_on: []
 parallel_group: null
-owner: null
-updated: 2026-09-10
+owner: codex
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -49,30 +49,27 @@ Harness execution, полная память репозитория, индек�
 
 ## Acceptance evidence
 
-Пути — планируемые тесты; результаты пока не получены.
-
-| Criterion | Automated evidence                     | Logical scenarios                                                  | Result  |
-| --------- | -------------------------------------- | ------------------------------------------------------------------ | ------- |
-| AC-1      | `test/scout-context.test.js`, группа 1 | schema fixtures; Unicode; size and collection limits; invalid refs | pending |
-| AC-2      | `test/scout-context.test.js`, группа 2 | observed/inferred fixtures; recommended tests vs executed evidence | pending |
-| AC-3      | `test/scout-context.test.js`, группа 3 | deterministic fingerprint/checksum; changed Task; changed revision | pending |
+| Criterion | Automated evidence                     | Logical scenarios                                                  | Result |
+| --------- | -------------------------------------- | ------------------------------------------------------------------ | ------ |
+| AC-1      | `test/scout-context.test.js`, группа 1 | schema fixtures; Unicode; size and collection limits; invalid refs | pass   |
+| AC-2      | `test/scout-context.test.js`, группа 2 | observed/inferred fixtures; recommended tests vs executed evidence | pass   |
+| AC-3      | `test/scout-context.test.js`, группа 3 | deterministic fingerprint/checksum; changed Task; changed revision | pass   |
 
 ## Verification
 
-- Выполнить criterion-specific fixtures выше и проверки затронутых harness/brief/CLI модулей.
-- Для persistence и запуска проверить повтор запроса, interruption и restart на durable boundaries.
-- Проверить сценарий без scout и сохранение Task Contract/permissions.
-- Пройти применимые repository gates и независимый review; для пилота приложить результаты реальных consumer прогонов.
+- Выполнить criterion-specific fixtures и проверку JSON artifacts.
+- Проверить сценарий без scout и сохранение Task Contract/permissions полным regression suite.
+- Пройти repository gates и counterexample-oriented review. Persistence, запуск, interruption и restart проверяются в CLEW-124, а реальные consumer прогоны — в CLEW-125/126.
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass
+- Reviewer: Codex counterexample-oriented implementation review, 2026-09-11
+- Findings: Проверены подмена checksum/contextId, unsupported version, изменённые Task/Project/repo/revision, Unicode overflow, выход из repo root, несовпадающая source revision, отсутствующие evidence/omission и попытка записать результат выполнения в recommended check. Блокирующих замечаний не осталось.
 
 ## Dependencies and parallelization
 
-Входных зависимостей нет; это первая карточка scout очереди. Не зависит от CLEW-105–122. После 123 → 124 → 125 → 126 можно уточнять и реализовывать CLEW-114 → 115; независимые storage задачи могут выполняться рядом. Карточка остаётся planned до выбора очереди и завершения зависимостей.
+Входных зависимостей нет; это первая завершённая карточка scout очереди. Не зависит от CLEW-105–122. После 123 → 124 → 125 → 126 можно уточнять и реализовывать CLEW-114 → 115; независимые storage задачи могут выполняться рядом.
 
 ## Risks
 
@@ -84,4 +81,4 @@ None.
 
 ## Completion record
 
-Not completed.
+RepositoryContext v1 реализован в `src/scout-context.js`; request/result schemas и complete/partial consumer fixtures включены в published package и подтверждены `npm pack --dry-run --json`. Полный `npm run check` проходит: 101 UI tests; 248 backend tests total, 238 pass, 10 managed-sandbox loopback skips, 0 fail.

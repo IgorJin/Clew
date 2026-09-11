@@ -1,14 +1,14 @@
 ---
 id: CLEW-101
 title: Shortcut registry and numbered task navigation
-status: in_review
+status: done
 release: v0.10
 priority: P0
 size: M
 depends_on: []
 parallel_group: null
 owner: codex
-updated: 2026-09-10
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -80,9 +80,9 @@ Clew already provides `Cmd/Ctrl+K` through an app-global listener, but keyboard 
 
 ## Review record
 
-- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
-- Reviewer: implementation author, 2026-09-10
-- Findings: Four issues found and fixed. (1) Out-of-range numbered positions resolved to a disabled action but shared the disabled-explanation path, risking consumed input; resolution now prefers the first enabled match and leaves unmatched/disabled number keys to default behavior since digit actions carry no `onDisabled`. (2) The singleton registry snapshot used for hints/help could lag one render behind task transitions; badges and help are now derived from the current shortcut definitions via `indexShortcuts`/`describeShortcut`, and the per-task binding ref is reset outside the task view. (3) Chord labels were macOS-only (`⌘…`, `⌥…`) while matching also accepts Ctrl/Alt; chord and fallback labels are now platform-aware via `primaryModifierLabel`/`optionModifierLabel`. (4) `resolveShortcut` returned the first disabled match even if an enabled action shared the chord; it now scans for an enabled match first and reports the earliest disabled one only as fallback. Verified: `npm run check` green (240 backend, 99 UI), `tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
+- Verdict: pass
+- Reviewer: independent counterexample review, 2026-09-11
+- Findings: Four issues found and fixed. (1) Out-of-range numbered positions resolved to a disabled action but shared the disabled-explanation path, risking consumed input; resolution now prefers the first enabled match and leaves unmatched/disabled number keys to default behavior since digit actions carry no `onDisabled`. (2) The singleton registry snapshot used for hints/help could lag one render behind task transitions; badges and help are now derived from the current shortcut definitions via `indexShortcuts`/`describeShortcut`, and the per-task binding ref is reset outside the task view. (3) Chord labels were macOS-only (`⌘…`, `⌥…`) while matching also accepts Ctrl/Alt; chord and fallback labels are now platform-aware. (4) `resolveShortcut` now scans for an enabled action before reporting a disabled collision. Independent review found no additional blocking issue. `npm run check` is green and the current result is on `main`.
 
 ## Dependencies and parallelization
 
@@ -100,4 +100,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-11 in `95710f6`/`98eb104` on `main`. The scoped registry, first-ten task mapping, Option/Alt fallback, input/terminal/modal scope rules, dynamic metadata, and regression tests are shipped in v0.10.0.

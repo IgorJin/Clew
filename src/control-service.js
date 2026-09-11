@@ -35,6 +35,7 @@ import { analyzeTask } from './task-analysis.js';
 import { buildFinalizationReport } from './finalization.js';
 import { createProjectId, detectProject } from './project.js';
 import { pickFolder } from './folder-picker.js';
+import { ScoutRunner } from './scout-runner.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -76,6 +77,7 @@ const TASK_COMMANDS = new Set([
   'open-changes',
   'result',
   'show',
+  'scout',
   'thread',
   'usage',
 ]);
@@ -227,6 +229,7 @@ export class ClewService {
     runnerGateway = null,
     editorLauncher = null,
     folderPicker = pickFolder,
+    scoutRunner = null,
   }) {
     this.cwd = resolve(cwd);
     this.store = store;
@@ -235,6 +238,7 @@ export class ClewService {
     this.runnerGateway = runnerGateway;
     this.editorLauncher = editorLauncher;
     this.folderPicker = folderPicker;
+    this.scoutRunner = scoutRunner ?? new ScoutRunner({ cwd: this.cwd, store, config });
   }
 
   supports(args) {
@@ -251,7 +255,7 @@ export class ClewService {
     if (!this.supports(args)) throw new Error(`unsupported service command: ${args.join(' ')}`);
     const [command, subcommand, ...rest] = args;
 
-    if (command === 'task') return this.task(subcommand, rest);
+    if (command === 'task') return this.task(subcommand, rest, signal);
     if (command === 'project') return this.project(subcommand, rest);
     if (command === 'session') return this.session(subcommand, rest);
     if (command === 'continue') return this.continueTask(subcommand, rest, signal);
@@ -397,8 +401,9 @@ export class ClewService {
     throw new Error(`unsupported project command: ${subcommand}`);
   }
 
-  task(subcommand, args) {
+  task(subcommand, args, signal) {
     if (subcommand === 'create') return this.createTask(args);
+    if (subcommand === 'scout') return this.scoutRunner.execute(args, signal);
     if (subcommand === 'next-step') return this.nextStep(args[0]);
     if (subcommand === 'open-changes') return this.openChanges(args[0], args);
     if (subcommand === 'changes' || subcommand === 'inspect-changes')
