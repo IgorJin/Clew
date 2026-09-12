@@ -452,10 +452,10 @@ Release gate:
 
 - [CLEW-123](./tasks/done/CLEW-123.md), S: RepositoryContext contract and fixtures (complete).
 - [CLEW-124](./tasks/done/CLEW-124.md), M: read-only execution, CLI, and local result (complete).
-- [CLEW-125](./tasks/CLEW-125.md), M: initial architect/worker consumption through existing briefs.
+- [CLEW-125](./tasks/done/CLEW-125.md), M: initial architect/worker consumption through existing briefs (done).
 - [CLEW-126](./tasks/CLEW-126.md), S: pilot on three tasks and contract refinement.
 
-Execution order: 123 → 124 → 125 → 126 → 114 → 115. CLEW-123 and CLEW-124 are complete; CLEW-125 is ready. CLEW-114 also requires its storage dependencies; CLEW-105–113 can proceed independently. The scout release assignment remains unassigned.
+Execution order: 123 → 124 → 125 → 126 → 114 → 115. CLEW-123–125 are complete; CLEW-126 is next. CLEW-114 also requires its storage dependencies; CLEW-105–113 can proceed independently. The scout release assignment remains unassigned.
 
 Scout is intended to expand later into reusable repository memory, incremental updates and additional requests during execution. The form of that memory remains open; those extensions are not prerequisites for this minimal slice.
 

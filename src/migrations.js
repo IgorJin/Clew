@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -518,6 +518,21 @@ const MIGRATIONS = Object.freeze([
           );
         }
       }
+    },
+  },
+  {
+    version: 24,
+    apply(db) {
+      const columns = db.prepare('PRAGMA table_info(runs)').all();
+
+      if (!columns.some((column) => column.name === 'scout_context_id'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_id TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_checksum'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_checksum TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_revision'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_revision TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_sections'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_sections TEXT');
     },
   },
 ]);

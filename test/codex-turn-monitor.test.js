@@ -83,8 +83,11 @@ test('read-only monitor reports a completed turn once and never writes turn meth
   });
 
   monitor.start();
-  await new Promise((resolve) => setTimeout(resolve, 25));
-  monitor.stop();
+  try {
+    await waitFor(() => updates.some((update) => update.status === 'completed'));
+  } finally {
+    monitor.stop();
+  }
 
   assert.equal(updates.filter((update) => update.status === 'completed').length, 1);
   assert.equal(updates.at(-1).output, 'Готово, жду вас.');

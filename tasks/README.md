@@ -106,12 +106,12 @@ Human-authorized transitions are valid product behavior when the card calls for 
 | [CLEW-122](./CLEW-122.md)      | unassigned | planned    | 110, 115, 118, 119, 120, 121 | —                   |
 | [CLEW-123](./done/CLEW-123.md) | unassigned | done       | —                            | codex               |
 | [CLEW-124](./done/CLEW-124.md) | unassigned | done       | 123                          | codex               |
-| [CLEW-125](./CLEW-125.md)      | unassigned | planned    | 124                          | —                   |
+| [CLEW-125](./done/CLEW-125.md) | unassigned | done       | 124                          | codex               |
 | [CLEW-126](./CLEW-126.md)      | unassigned | planned    | 125                          | —                   |
 
 `release: unassigned` marks scoped implementation work whose release has not been selected. CLEW-105–122 form the [Task data lifecycle queue](../docs/TASK-DATA-LIFECYCLE.md); they remain planned while Scout v0 is the next selected experiment. Card sizes are S/M; exact dependencies are in frontmatter.
 
-Scout v0 is the first context experiment: completed [CLEW-123](./done/CLEW-123.md) → completed [CLEW-124](./done/CLEW-124.md) → ready CLEW-125 → 126. CLEW-114 requires the pilot CLEW-126, and CLEW-115 follows 114; storage work CLEW-105–113 stays independent. The [scout document](../docs/SCOUT.md) records later extensions separately.
+Scout v0 is the first context experiment: completed [CLEW-123](./done/CLEW-123.md) → completed [CLEW-124](./done/CLEW-124.md) → completed [CLEW-125](./done/CLEW-125.md) → 126. CLEW-114 requires the pilot CLEW-126, and CLEW-115 follows 114; storage work CLEW-105–113 stays independent. The [scout document](../docs/SCOUT.md) records later extensions separately.
 
 ## Execution waves
 

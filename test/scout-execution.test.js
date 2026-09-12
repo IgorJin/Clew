@@ -102,7 +102,12 @@ function createRunner(cwd, store, harnessFactory = null) {
   return new ScoutRunner({
     cwd,
     store,
-    config: { worktreeRoot: cwd, codexBin: 'codex', openCodeUrl: 'http://127.0.0.1:4096' },
+    config: {
+      scoutEnabled: true,
+      worktreeRoot: cwd,
+      codexBin: 'codex',
+      openCodeUrl: 'http://127.0.0.1:4096',
+    },
     harnessFactory,
   });
 }
@@ -114,9 +119,15 @@ function cleanup({ cwd, store }) {
 
 const cliFile = fileURLToPath(new URL('../bin/clew.js', import.meta.url));
 
-function runCli(args, cwd) {
+function runCli(args, cwd, enableScout = null) {
+  const env = { ...process.env };
+
+  if (enableScout === null) delete env.ENABLE_SCOUT;
+  else env.ENABLE_SCOUT = enableScout;
+
   return execFileSync(process.execPath, [cliFile, ...args], {
     cwd,
+    env,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -127,6 +138,20 @@ test('group 1: fake Scout runs against a commit snapshot and publishes an idempo
 
   try {
     fixture.store.createTask(taskContract());
+    const beforeScout = fixture.store.getTask('SCOUT-1');
+    const beforeEvents = fixture.store.listEvents('SCOUT-1');
+    const disabledRunner = new ScoutRunner({
+      cwd: fixture.cwd,
+      store: fixture.store,
+      harnessFactory: () => {
+        throw new Error('disabled Scout must not start a harness');
+      },
+    });
+
+    await assert.rejects(disabledRunner.run('SCOUT-1', ['SCOUT-1']), /ENABLE_SCOUT=1/);
+    assert.deepEqual(fixture.store.getTask('SCOUT-1'), beforeScout);
+    assert.deepEqual(fixture.store.listEvents('SCOUT-1'), beforeEvents);
+    assert.equal(existsSync(join(fixture.cwd, '.clew', 'scout')), false);
     const runner = createRunner(fixture.cwd, fixture.store);
     const first = await runner.run('SCOUT-1', ['SCOUT-1', '--harness', 'fake']);
 
@@ -203,14 +228,24 @@ test('group 1: the CLI exposes scout run and human show output', () => {
       ],
       fixture.cwd,
     );
+    assert.throws(
+      () => runCli(['task', 'scout', 'SCOUT-CLI', '--harness', 'fake'], fixture.cwd),
+      /ENABLE_SCOUT=1/,
+    );
+    writeFileSync(join(fixture.cwd, '.env'), 'ENABLE_SCOUT=1\n');
     const result = JSON.parse(
       runCli(['task', 'scout', 'SCOUT-CLI', '--harness', 'fake'], fixture.cwd),
+    );
+
+    assert.throws(
+      () => runCli(['task', 'scout', 'SCOUT-CLI', '--harness', 'fake'], fixture.cwd, '0'),
+      /ENABLE_SCOUT=1/,
     );
     const human = runCli(['task', 'scout', 'show', 'SCOUT-CLI', '--human'], fixture.cwd);
 
     assert.equal(result.status, SCOUT_STATUS.COMPLETED);
     assert.match(human, /Scout: completed/);
-    assert.match(human, /Dirty changes present: no/);
+    assert.match(human, /Dirty changes present: yes \(not included\)/);
   } finally {
     cleanup(fixture);
   }

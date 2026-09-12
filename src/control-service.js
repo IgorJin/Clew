@@ -99,6 +99,32 @@ function getOptionValues(args, name) {
   return values;
 }
 
+function getScoutSelection(args) {
+  const hasContextOption = args.includes('--scout-context');
+  const hasSectionsOption = args.includes('--scout-sections');
+  const contextId = getOptionValue(args, '--scout-context');
+  const skip = args.includes('--no-scout');
+  const rawSections = getOptionValue(args, '--scout-sections');
+
+  if (hasContextOption && (!contextId || contextId.startsWith('--')))
+    throw new Error('--scout-context requires a context ID');
+  if (hasSectionsOption && (!rawSections || rawSections.startsWith('--')))
+    throw new Error('--scout-sections requires a comma-separated section list');
+  if (contextId && skip) throw new Error('use either --scout-context or --no-scout, not both');
+  if (rawSections && !contextId) throw new Error('--scout-sections requires --scout-context');
+  if (!contextId && !skip) return null;
+  const sections = rawSections
+    ? rawSections
+        .split(',')
+        .map((section) => section.trim())
+        .filter(Boolean)
+    : null;
+
+  if (rawSections && !sections.length) throw new Error('--scout-sections must not be empty');
+
+  return { contextId: contextId ?? null, skip, sections };
+}
+
 function readMarkdownTask(file, cwd) {
   const source = readFileSync(resolve(cwd, file), 'utf8').replace(/^\uFEFF/, '');
   const match = source.match(/^#\s+(.+?)\s*(?:\r?\n|$)/);
@@ -1000,6 +1026,7 @@ export class ClewService {
 
     this.store.setStage(taskId, stageId, 'QUEUED');
     this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+    const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
@@ -1007,6 +1034,8 @@ export class ClewService {
       getOptionValue(args, '--review-harness'),
       getOptionValue(args, '--architect'),
       previousRuns.length === 1 ? previousRuns.at(-1).session_id : null,
+      [],
+      scoutSelection ? { scoutContext: scoutSelection } : {},
     );
 
     return { action, result };
@@ -1075,6 +1104,7 @@ export class ClewService {
         },
       });
     const feedback = [{ severity: 'blocking', criterion: 'operator', reason: message }];
+    const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
@@ -1088,6 +1118,7 @@ export class ClewService {
         forceSingleWorker: true,
         stageId,
         continuationGrantId: grant.id,
+        ...(scoutSelection ? { scoutContext: scoutSelection } : {}),
       },
     );
 
@@ -1420,6 +1451,7 @@ export class ClewService {
 
   run(taskId, args, signal, options = {}) {
     if (!taskId) throw new Error('task id is required');
+    const scoutSelection = getScoutSelection(args);
 
     return this.scheduler(args, signal).runTask(
       taskId,
@@ -1429,7 +1461,7 @@ export class ClewService {
       getOptionValue(args, '--architect'),
       null,
       [],
-      options,
+      scoutSelection ? { ...options, scoutContext: scoutSelection } : options,
     );
   }
 
@@ -1470,6 +1502,7 @@ export class ClewService {
       signal,
       adapterConfig: { ...runtimeConfig, terminalManager: this.terminalManager },
       executionPort,
+      scoutRunner: this.scoutRunner,
     });
   }
 

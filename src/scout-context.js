@@ -4,6 +4,7 @@ import { validateTaskContract } from './domain.js';
 export const SCOUT_CONTEXT_REQUEST_VERSION = 1;
 export const REPOSITORY_CONTEXT_VERSION = 1;
 export const REPOSITORY_CONTEXT_MAX_BYTES = 64 * 1024;
+export const REPOSITORY_CONTEXT_BRIEF_MAX_BYTES = 16 * 1024;
 
 export const REPOSITORY_CONTEXT_STATUS = Object.freeze({
   COMPLETE: 'complete',
@@ -33,6 +34,15 @@ export const REPOSITORY_CONTEXT_LIMITS = Object.freeze({
   textCharacters: 2_000,
   commandCharacters: 1_024,
 });
+
+export const REPOSITORY_CONTEXT_SECTIONS = Object.freeze([
+  'components',
+  'relationships',
+  'checks',
+  'observations',
+  'unknowns',
+  'omissions',
+]);
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const REVISION_PATTERN = /^[a-f0-9]{7,64}$/i;
@@ -711,4 +721,56 @@ export function evaluateRepositoryContext(context, current = {}) {
   return reasons.length
     ? { status: REPOSITORY_CONTEXT_APPLICABILITY.STALE, applicable: false, reasons }
     : { status: REPOSITORY_CONTEXT_APPLICABILITY.CURRENT, applicable: true, reasons: [] };
+}
+
+/**
+ * Produce the small, immutable portion of a RepositoryContext that can cross
+ * an execution boundary. The full context remains on disk; only normalized
+ * repository facts, source references, and explicit unknowns are copied into
+ * an Execution Brief.
+ */
+export function selectRepositoryContext(
+  context,
+  { sections = REPOSITORY_CONTEXT_SECTIONS, maxBytes = REPOSITORY_CONTEXT_BRIEF_MAX_BYTES } = {},
+) {
+  const normalized = validateRepositoryContext(context);
+  const requestedSections = Array.isArray(sections) ? sections : [sections];
+  const selectedSections = unique(
+    requestedSections.map((section, index) => {
+      if (typeof section !== 'string' || !section.trim())
+        throw new Error(`scout context section[${index}] is required`);
+      const normalizedSection = section.trim();
+
+      if (!REPOSITORY_CONTEXT_SECTIONS.includes(normalizedSection))
+        throw new Error(`unsupported scout context section: ${normalizedSection}`);
+
+      return normalizedSection;
+    }),
+    'scout context sections',
+  );
+
+  if (!selectedSections.length) throw new Error('scout context sections must not be empty');
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1)
+    throw new Error('scout context brief maxBytes must be a positive integer');
+  const brief = {
+    version: REPOSITORY_CONTEXT_VERSION,
+    contextId: normalized.contextId,
+    checksum: normalized.provenance.checksum,
+    task: normalized.task,
+    source: {
+      repositoryId: normalized.source.repositoryId,
+      revision: normalized.source.revision,
+      scope: normalized.source.scope,
+      generatedAt: normalized.source.generatedAt,
+      attemptId: normalized.source.attemptId,
+    },
+    status: normalized.provenance.status,
+    sections: Object.fromEntries(selectedSections.map((section) => [section, normalized[section]])),
+  };
+  const byteLength = Buffer.byteLength(JSON.stringify(brief), 'utf8');
+
+  if (byteLength > maxBytes)
+    throw new Error(`scout context brief exceeds ${maxBytes} UTF-8 bytes (${byteLength})`);
+
+  return brief;
 }

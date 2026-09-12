@@ -1,6 +1,6 @@
 # Scout: минимальная сущность и дальнейшее развитие
 
-Статус: scout v0 в работе, CLEW-123 и CLEW-124 завершены, CLEW-125 готова следующей. Дата: 2026-09-11. Релиз не назначен. Это первый эксперимент в очереди контекста задачи после локального sign-off v0.10 Keyboard-first.
+Статус: scout v0 в работе, CLEW-123–125 завершены, CLEW-126 готовит пилот. Дата: 2026-09-12. Релиз не назначен. Это первый эксперимент в очереди контекста задачи после локального sign-off v0.10 Keyboard-first. Подробный отчёт реализации: [CLEW-125 HTML report](./CLEW-125-REPORT.html).
 
 ## Назначение
 
@@ -10,6 +10,16 @@ Scout изучает один репозиторий под конкретную
 
 ## Граница v0
 
+Scout выключен по умолчанию. Для включения добавь в корень проекта файл `.env`:
+
+```dotenv
+ENABLE_SCOUT=1
+```
+
+Значения `1`, `true`, `yes`, `on` включают возможность; отсутствие `.env` или остальные значения выключают. Явная переменная окружения `ENABLE_SCOUT` имеет приоритет над `.env`, поэтому временное переопределение можно сделать через `export ENABLE_SCOUT=0` или `export ENABLE_SCOUT=1`. Флаг читается при старте процесса: после изменения `.env` daemon нужно перезапустить. Загружается только этот флаг; JSON-конфигурация не включает Scout в обход env-флага.
+
+Без флага новые scout attempts отклоняются до обращения к Git, harness и записи событий; обычный Task flow остаётся прежним. Просмотр сохранённых карт и отмена уже начатого Scout доступны и при выключенном флаге. Включение разрешает явный Scout run; автоматическое исследование каждой задачи не запускается. Подключение карты к architect/worker в CLEW-125 также проверяет этот флаг.
+
 - Один локальный Project, один репозиторий и один явно выбранный commit. Для первой версии используется read-only представление этого commit; незакоммиченные изменения не объявляются изученными и отображаются как несовпадение со снимком.
 - Явный запуск scout для существующей задачи через CLI на текущем поддерживаемом harness: `clew task scout TASK [--harness fake|codex|opencode] [--revision SHA] [--path PATH]`. Результат можно повторно получить через `clew task scout show TASK [--request-id ID] [--context ID]`, отменить через `clew task scout cancel TASK [--request-id ID]`, а для короткого preview добавить `--human` к show.
 - Один ограниченный read-only запуск с timeout/cancel и проверкой structured output. Используются существующие harness adapters; новый агентный цикл и универсальная plugin-система не требуются.
@@ -17,6 +27,8 @@ Scout изучает один репозиторий под конкретную
 - Результат сохраняется в небольшом versioned JSON-файле в state directory, с checksum и ссылкой от Task; CLI показывает человекочитаемый preview. Это временный простой способ хранения до ArtifactStore, не отдельная универсальная подсистема.
 - Execution идёт из `git archive` выбранной revision во временный frozen snapshot. Checkout не меняется; dirty changes только отмечаются и не входят в карту. Публикация сначала делает атомарный JSON в `.clew/scout/<task>/<context>.json`, затем добавляет Task event. Если процесс остановился между этими действиями, валидный файл восстанавливает reference; повреждённый или отсутствующий reference остаётся явной ошибкой.
 - Выбор готовой карты для следующего architect/worker запуска явный. Создание карты и её выбор сами не запускают основную задачу и не меняют её workflow state.
+- Для локального запуска карту можно выбрать так: `clew run TASK --scout-context CONTEXT_ID [--scout-sections components,relationships,checks,observations,unknowns,omissions]`. `clew retry` и `clew continue` принимают те же параметры. `--no-scout` явно сохраняет обычный путь без карты; `--scout-sections` без `--scout-context` отклоняется.
+- После успешного выбора context ID и выбранные sections фиксируются в истории; retry/restart повторно используют ту же карту и sections, пока пользователь явно не выберет новую версию или `--no-scout`. При ожидании Deep plan approval этот выбор также остаётся для следующего запуска.
 - Повторное исследование по инициативе пользователя создаёт новую версию карты; прежний результат и идентичность использовавшего его Run сохраняются.
 
 ## Минимальный контракт RepositoryContext v1
@@ -36,7 +48,7 @@ Source reference содержит repo-relative path, revision и при нео�
 
 Контракт реализован парой схем [scout-context-request.v1](../schemas/scout-context-request.v1.schema.json) и [repository-context.v1](../schemas/repository-context.v1.schema.json) и runtime validator в `src/scout-context.js`. Request фиксирует `requestId`, `attemptId`, Task/Project identity, fingerprint нормализованного публичного Task Contract, repository/commit и scope. `contextId` детерминирован по Task identity, repository/commit, scope и attempt ID; повтор того же attempt получает тот же ID. Checksum считается по каноническому нормализованному результату без самого поля checksum, поэтому порядок ключей и внешние пробелы не меняют digest. Изменение содержимого обнаруживается до передачи consumer.
 
-Стартовый предел результата — 64 КиБ канонического UTF-8 JSON; сырой ответ harness ограничен 256 КиБ до разбора. Максимумы v1: 64 scope paths, 128 components, 128 relationships, 64 checks, 256 observations, 64 unknowns, 32 omissions, 16 source references на запись и 32 аргумента команды. Пути ограничены 512 символами, обычный текст — 2 000, команда или аргумент — 1 024. `complete` запрещает omissions; `partial` требует хотя бы одну omission с категорией и пояснением. При переполнении producer сохраняет явный partial в пределах лимита либо получает validation error; молча обрезанный complete недопустим. Raw transcripts, секреты и скрытые рассуждения не копируются в карту.
+Стартовый предел полного результата — 64 КиБ канонического UTF-8 JSON; сырой ответ harness ограничен 256 КиБ до разбора. Максимумы v1: 64 scope paths, 128 components, 128 relationships, 64 checks, 256 observations, 64 unknowns, 32 omissions, 16 source references на запись и 32 аргумента команды. Пути ограничены 512 символами, обычный текст — 2 000, команда или аргумент — 1 024. Перед handoff выбирается только bounded блок размером до 16 КиБ; он содержит identity/checksum/revision и выбранные sections со source references и unknowns, без transcript, локальных файлов и Task Contract. `complete` запрещает omissions; `partial` требует хотя бы одну omission с категорией и пояснением. При переполнении producer сохраняет явный partial в пределах лимита либо получает validation error; молча обрезанный complete недопустим. Raw transcripts, секреты и скрытые рассуждения не копируются в карту.
 
 Runtime отклоняет абсолютные пути, `..`, backslash и несовпадающую revision в source references. Наблюдение `observed` требует хотя бы один источник; `inferred` остаётся отдельным типом, а нерешённый вопрос хранится в `unknowns`. Каждая запись `checks` имеет только тип `recommended`: поля результата и execution evidence контракт не принимает. Локальная проверка применимости возвращает `current`, `stale`, `unsupported` или `invalid` по Task/Project fingerprint, repository identity, revision, версии, checksum и структуре. Fake consumer-примеры доступны как [request](../fixtures/scout/request.v1.json), [complete map](../fixtures/scout/complete.v1.json) и [partial map](../fixtures/scout/partial.v1.json).
 
@@ -44,13 +56,13 @@ Runtime отклоняет абсолютные пути, `..`, backslash и н�
 
 Запрос получает собственный attempt ID и idempotency key. Durable claim в Task event transaction не даёт двум процессам запустить один request одновременно. Повтор одного запроса не запускает второй scout; после crash/interruption состояние явно interrupted/failed и доступен новый явный request/attempt ID. Уже опубликованный результат не перезаписывается. Запись файла атомарная; Task reference публикуется после неё, а recovery на границе file/reference проверяет context ID, Task, revision, attempt и checksum. История Task фиксирует contextId/checksum, фактически опубликованные для дальнейшего consumer.
 
-При использовании проверяются Task fingerprint, Project/repo identity и revision. Смена требований или кода означает stale, а не «всё ещё актуальную память». Для v0 пользователь может заново запустить scout либо явно продолжить без его карты; старая карта не подставляется незаметно. Ошибка опционального scout не должна изменять исходную задачу или делать обычный путь запуска недоступным.
+При использовании проверяются Task fingerprint, Project/repo identity, scope и revision. Смена требований или кода означает stale, а не «всё ещё актуальную память». Для v0 пользователь может заново запустить scout либо явно продолжить без его карты; старая карта не подставляется незаметно. Ошибка выбора карты происходит до worktree/harness и не меняет Task. Ошибка опционального scout не должна изменять исходную задачу или делать обычный путь запуска недоступным.
 
-Первый consumer — тонкий дополнительный блок в существующем Execution Brief для architect и worker. Обязательные инструкции и критерии задачи имеют приоритет; контекст scout передаётся как данные с provenance. Контекст задачи может включать выбранную часть карты и ссылку на полный bounded результат. Проверки карты являются подсказками и не считаются выполненными проверками.
+Первый consumer — тонкий дополнительный блок в существующем Execution Brief для architect и worker. Обязательные инструкции и критерии задачи имеют приоритет; контекст scout помечается как untrusted data и передаётся как данные с provenance. Контекст задачи может включать выбранную часть карты и ссылку на полный bounded результат. Проверки карты являются подсказками и не считаются выполненными проверками.
 
 В Quick карта идёт worker; в Standard — worker; в Deep — architect и применимым worker stages. Если рабочая revision изменилась в ходе Deep, карту нельзя выдавать за текущую: выполняется проверка применимости, обновление или явное исключение. Автоматическое повторное исследование пока не вводится. Reviewer и QA получат проверенный общий механизм выбора контекста позднее в CLEW-115.
 
-Scout v0 работает локально. Paired path продолжает существующее поведение и явно сообщает, что scout context недоступен на этом host; расширение Runner v1 для пересылки карт/исходников не входит в v0.
+Scout v0 работает локально. При выборе карты paired path сразу сообщает, что scout context unsupported; `--no-scout` оставляет существующий paired flow. В Runner не передаются local files, raw output или полный context; расширение Runner v1 для пересылки карт не входит в v0.
 
 ## Пилот до фиксации checkpoints
 
@@ -60,12 +72,12 @@ Fixtures автоматически проверяют контракт, provena
 
 ## Задачи и последовательность
 
-| Задача                                | Размер | Результат                                            | Зависимость |
-| ------------------------------------- | ------ | ---------------------------------------------------- | ----------- |
-| [CLEW-123](../tasks/done/CLEW-123.md) | S      | RepositoryContext v1 и проверяемые fixtures (готово) | —           |
-| [CLEW-124](../tasks/done/CLEW-124.md) | M      | Явный read-only scout run, CLI и локальный результат | 123         |
-| [CLEW-125](../tasks/CLEW-125.md)      | M      | Минимальное подключение карты к architect/worker     | 124         |
-| [CLEW-126](../tasks/CLEW-126.md)      | S      | Пилот на трёх задачах и уточнение контракта          | 125         |
+| Задача                                | Размер | Результат                                                 | Зависимость |
+| ------------------------------------- | ------ | --------------------------------------------------------- | ----------- |
+| [CLEW-123](../tasks/done/CLEW-123.md) | S      | RepositoryContext v1 и проверяемые fixtures (готово)      | —           |
+| [CLEW-124](../tasks/done/CLEW-124.md) | M      | Явный read-only scout run, CLI и локальный результат      | 123         |
+| [CLEW-125](../tasks/done/CLEW-125.md) | M      | Минимальное подключение карты к architect/worker (готово) | 124         |
+| [CLEW-126](../tasks/CLEW-126.md)      | S      | Пилот на трёх задачах и уточнение контракта               | 125         |
 
 ```text
 123 → 124 → 125 → 126 ───────────────→ 114 → 115

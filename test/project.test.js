@@ -245,7 +245,7 @@ test('project migration assigns legacy unscoped tasks to the oldest project', ()
   const store = new Store(file);
 
   try {
-    assert.equal(CURRENT_SCHEMA_VERSION, 23);
+    assert.equal(CURRENT_SCHEMA_VERSION, 24);
     assert.equal(store.getTask('LEGACY-SCOPE').project_id, 'PRJ-FIRST');
     assert.equal(store.getTask('LEGACY-SCOPE').contract.projectId, 'PRJ-FIRST');
   } finally {

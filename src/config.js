@@ -92,6 +92,27 @@ function readJsonIfPresent(path) {
   }
 }
 
+function readDotEnvFlag(path) {
+  if (!existsSync(path)) return undefined;
+
+  let value;
+
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*(?:export\s+)?ENABLE_SCOUT\s*=\s*(.*?)\s*$/);
+
+    if (!match) continue;
+    value = match[1];
+
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    )
+      value = value.slice(1, -1);
+  }
+
+  return value;
+}
+
 function assertSafeProjectConfig(config) {
   const inspect = (value, path = []) => {
     if (!value || typeof value !== 'object') return;
@@ -112,8 +133,11 @@ function assertSafeProjectConfig(config) {
 export function loadConfig(projectRoot = process.cwd(), env = process.env) {
   const userConfigPath = env.CLEW_USER_CONFIG || join(homedir(), '.config', 'clew', 'config.json');
   const projectConfigPath = join(projectRoot, '.clew.json');
+  const dotenvPath = join(projectRoot, '.env');
   const userConfig = readJsonIfPresent(userConfigPath);
   const projectConfig = readJsonIfPresent(projectConfigPath);
+  const dotenvScoutFlag = readDotEnvFlag(dotenvPath);
+  const scoutFlag = Object.hasOwn(env, 'ENABLE_SCOUT') ? env.ENABLE_SCOUT : dotenvScoutFlag;
 
   assertSafeProjectConfig(projectConfig);
   const merged = {
@@ -164,6 +188,11 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
 
   return {
     ...merged,
+    scoutEnabled: ['1', 'true', 'yes', 'on'].includes(
+      String(scoutFlag ?? '')
+        .trim()
+        .toLowerCase(),
+    ),
     codexBin: resolveCodexExecutable(merged.codexBin, { env }),
     openCodexDesktop: ['1', 'true', 'yes', 'on'].includes(
       String(env.CLEW_CODEX_OPEN_DESKTOP ?? '').toLowerCase(),
@@ -171,6 +200,7 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
     worktreeRoot: resolve(projectRoot, merged.worktreeRoot),
     projectConfigPath,
     userConfigPath,
+    dotenvPath,
   };
 }
 

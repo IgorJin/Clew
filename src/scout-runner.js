@@ -29,10 +29,12 @@ import { redactSecrets } from './security.js';
 import {
   createRepositoryContext,
   createScoutContextRequest,
+  evaluateRepositoryContext,
   REPOSITORY_CONTEXT_MAX_BYTES,
   REPOSITORY_CONTEXT_STATUS,
   repositoryContextId,
   repositoryContextChecksum,
+  selectRepositoryContext,
   validateRepositoryContext,
 } from './scout-context.js';
 
@@ -554,6 +556,8 @@ export class ScoutRunner {
   }
 
   async run(taskId, args, signal) {
+    if (this.config.scoutEnabled !== true)
+      throw new Error('Scout is disabled; set ENABLE_SCOUT=1 to enable it');
     if (!taskId) throw new Error('task id is required');
     const task = this.store.getTask(taskId);
 
@@ -994,6 +998,23 @@ export class ScoutRunner {
         status: SCOUT_STATUS.COMPLETED,
       });
     }
+    if (requestedContext)
+      return {
+        version: 1,
+        taskId,
+        requestId: null,
+        attemptId: null,
+        status: SCOUT_STATUS.UNAVAILABLE,
+        duplicate: false,
+        revision: null,
+        dirtyChanges: null,
+        contextId: requestedContext,
+        checksum: null,
+        path: null,
+        context: null,
+        error: `scout context ${requestedContext} was not found for this task`,
+        retryRequired: true,
+      };
     if (terminal)
       return resultFromEvent({
         taskId,
@@ -1018,6 +1039,69 @@ export class ScoutRunner {
       context: null,
       error: 'no scout attempt exists for this task',
       retryRequired: true,
+    };
+  }
+
+  resolveContext(taskId, contextId, { revision = null, sections = null } = {}) {
+    if (this.config.scoutEnabled !== true)
+      throw new Error('Scout is disabled; set ENABLE_SCOUT=1 to enable it');
+    if (!taskId) throw new Error('task id is required');
+    if (!contextId) throw new Error('scout context id is required');
+    const task = this.store.getTask(taskId);
+
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const result = this.show(taskId, ['--context', contextId]);
+
+    if (result.status !== SCOUT_STATUS.COMPLETED || !result.context) {
+      const error = new Error(
+        `scout context ${contextId} is unavailable: ${result.error ?? result.status}`,
+      );
+
+      error.code = 'SCOUT_CONTEXT_UNAVAILABLE';
+      throw error;
+    }
+    const revisionRef = revision ?? task.contract.base_ref ?? 'HEAD';
+    let requestInfo;
+
+    try {
+      requestInfo = this.requestFor(task, ['--revision', revisionRef]);
+    } catch (error) {
+      const wrapped = new Error(
+        `cannot validate scout context ${contextId} against repository revision: ${error.message}`,
+        { cause: error },
+      );
+
+      wrapped.code = 'SCOUT_CONTEXT_INVALID_TARGET';
+      throw wrapped;
+    }
+    const applicability = evaluateRepositoryContext(result.context, {
+      task: task.contract,
+      projectId: requestInfo.context.projectId,
+      repositoryId: requestInfo.context.repositoryId,
+      revision: requestInfo.metadata.revision,
+    });
+
+    if (!applicability.applicable) {
+      const error = new Error(
+        `scout context ${contextId} is ${applicability.status}: ${applicability.reasons.join('; ')}`,
+      );
+
+      error.code = 'SCOUT_CONTEXT_NOT_APPLICABLE';
+      throw error;
+    }
+    const brief = selectRepositoryContext(result.context, {
+      sections: sections ?? undefined,
+    });
+
+    return {
+      contextId: result.context.contextId,
+      checksum: result.context.provenance.checksum,
+      revision: result.context.source.revision,
+      repositoryId: result.context.source.repositoryId,
+      path: result.path,
+      status: applicability.status,
+      context: result.context,
+      brief,
     };
   }
 

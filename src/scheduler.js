@@ -50,6 +50,7 @@ export class Scheduler {
       approvalTimeoutMs = 30 * 60_000,
       adapterConfig = {},
       executionPort = null,
+      scoutRunner = null,
     } = {},
   ) {
     this.store = store;
@@ -65,6 +66,7 @@ export class Scheduler {
     this.approvalTimeoutMs = approvalTimeoutMs;
     this.adapterConfig = adapterConfig;
     this.executionPort = executionPort;
+    this.scoutRunner = scoutRunner;
     this.taskSignals = new Map();
     this.resumeSessions = new Map();
   }
@@ -115,6 +117,9 @@ export class Scheduler {
     const profile = { ...resolvedProfile, harness: harnessName };
 
     const pairedExecution = this.executionPort?.describe().mode === 'paired';
+    const scoutContext = this.resolveScoutContext(row, options, pairedExecution);
+
+    if (scoutContext) options = { ...options, scoutContext };
     const harness = pairedExecution ? null : this.createHarnessAdapter(harnessName);
 
     if (profile.mode === EXECUTION_MODE.PARALLEL && !options.forceSingleWorker)
@@ -141,12 +146,29 @@ export class Scheduler {
         options,
       );
     const stageId = options.stageId ?? 'worker';
+    const plannedStageKind = this.store
+      .getLatestPlan(taskId)
+      ?.plan?.stages?.find((stage) => stage.id === stageId)?.kind;
+    const isWorkerStage = plannedStageKind
+      ? plannedStageKind === EXECUTION_ROLE.WORKER
+      : stageId !== 'integration';
+    const workerScoutContext = isWorkerStage ? options.scoutContext : null;
     const continuationGrant = options.continuationGrantId
       ? this.store.getContinuationGrant(options.continuationGrantId)
       : null;
     let persistedRun = continuationGrant?.correction_run_id
       ? this.store.getRun(continuationGrant.correction_run_id)
       : null;
+
+    if (persistedRun) {
+      const persistedScoutContextId = persistedRun.scoutContextId ?? null;
+      const selectedScoutContextId = workerScoutContext?.contextId ?? null;
+
+      if (persistedScoutContextId !== selectedScoutContextId)
+        throw new Error(
+          `Run ${persistedRun.id} already has Scout context ${persistedScoutContextId ?? 'disabled'}; its context cannot change while resuming`,
+        );
+    }
 
     if (!persistedRun) resumeSessionId = this.reconcileSingleWorker(row, resumeSessionId);
     else if (
@@ -215,6 +237,12 @@ export class Scheduler {
           baseSha: workspace.baseSha,
           startedAt,
           runtimeNamespace: createRuntimeNamespace(taskId, runId),
+          scoutContextId: workerScoutContext?.contextId ?? null,
+          scoutContextChecksum: workerScoutContext?.checksum ?? null,
+          scoutContextRevision: workerScoutContext?.revision ?? null,
+          scoutContextSections: workerScoutContext?.brief?.sections
+            ? Object.keys(workerScoutContext.brief.sections)
+            : null,
         };
 
         const createdRun = continuationGrant
@@ -264,6 +292,7 @@ export class Scheduler {
           assignmentGoal: row.contract.goal,
           reviewFindings: retryFeedback,
           readOnly: options.readOnly === true,
+          scoutContext: workerScoutContext?.brief ?? null,
         });
 
         this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
@@ -519,6 +548,8 @@ export class Scheduler {
           requestedReviewHarness,
           requestedArchitect,
           attempt === 1 ? (timedOutRun?.session_id ?? null) : null,
+          [],
+          { ...options },
         );
       }
       throw error;
@@ -905,6 +936,77 @@ export class Scheduler {
     return requestedSessionId ?? latestRun?.session_id ?? null;
   }
 
+  resolveScoutContext(row, options = {}, pairedExecution = false) {
+    let selection = options.scoutContext;
+    const explicitSelection = selection !== undefined && selection !== null;
+
+    if (!explicitSelection && this.scoutRunner?.config?.scoutEnabled === true) {
+      const previousSelection = this.store
+        .listEvents(row.id)
+        .toReversed()
+        .find((event) => ['SCOUT_CONTEXT_SELECTED', 'SCOUT_CONTEXT_SKIPPED'].includes(event.type));
+
+      if (previousSelection?.type === 'SCOUT_CONTEXT_SKIPPED')
+        return { skip: true, persisted: true };
+      if (previousSelection?.payload?.contextId)
+        selection = {
+          contextId: previousSelection.payload.contextId,
+          sections: previousSelection.payload.sections ?? null,
+        };
+      else {
+        const previousRun = this.store
+          .listRuns(row.id)
+          .toReversed()
+          .find((run) => run.scoutContextId);
+
+        if (previousRun)
+          selection = {
+            contextId: previousRun.scoutContextId,
+            sections: previousRun.scoutContextSections,
+          };
+      }
+    } else if (!explicitSelection) {
+      const interruptedScoutRun = this.store
+        .listRuns(row.id)
+        .toReversed()
+        .find((run) => run.status === RUN_STATUS.RUNNING && run.scoutContextId);
+
+      if (interruptedScoutRun)
+        throw new Error(
+          `Run ${interruptedScoutRun.id} uses Scout context ${interruptedScoutRun.scoutContextId}; enable Scout to resume it`,
+        );
+    }
+    if (!selection) return null;
+    if (selection.skip) {
+      if (explicitSelection && !options.scoutContext.persisted)
+        this.store.appendEvent(row.id, 'SCOUT_CONTEXT_SKIPPED', { reason: 'explicit no-scout' });
+
+      return { skip: true, persisted: true };
+    }
+    if (pairedExecution)
+      throw new Error(
+        'Scout context is unsupported for paired execution; rerun with --no-scout or use local execution',
+      );
+    if (!this.scoutRunner)
+      throw new Error('Scout context selection requires an enabled Scout runner');
+    if (!selection.contextId) throw new Error('scout context id is required');
+
+    const resolved = this.scoutRunner.resolveContext(row.id, selection.contextId, {
+      revision: row.contract.base_ref,
+      sections: selection.sections ?? null,
+    });
+
+    if (explicitSelection && !selection.persisted)
+      this.store.appendEvent(row.id, 'SCOUT_CONTEXT_SELECTED', {
+        contextId: resolved.contextId,
+        checksum: resolved.checksum,
+        revision: resolved.revision,
+        sections: resolved.brief ? Object.keys(resolved.brief.sections) : null,
+      });
+
+    return { ...resolved, persisted: true };
+  }
+
   async runHarnessWithSessionFallback(harness, options, taskId, runId) {
     try {
       return await harness.run(options);
@@ -1014,9 +1116,24 @@ export class Scheduler {
       if (!planning.plan) throw new Error('paired Runner completed without an execution plan');
       proposedPlan = planning;
     } else {
+      const executionBrief = prepareExecutionBrief({
+        task: row.contract,
+        role: EXECUTION_ROLE.ARCHITECT,
+        stageId: 'architect',
+        assignmentGoal:
+          'Produce an implementation DAG. Every stage must feed one terminal integration stage with kind=integration.',
+        readOnly: true,
+        scoutContext: options.scoutContext?.brief ?? null,
+      });
+
+      this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', {
+        runId: null,
+        executionBrief,
+      });
       proposedPlan = await this.createArchitectAdapter(architectName).createPlan({
         task: row.contract,
         cwd: this.workspaceManager.projectRoot ?? process.cwd(),
+        executionBrief,
       });
     }
     const planResult = Array.isArray(proposedPlan?.stages)
@@ -1137,6 +1254,7 @@ export class Scheduler {
       integrationStageId: integrationStage.id,
       initialCompleted: recoveredStages,
       signal: taskSignal,
+      scoutContext: options.scoutContext,
     });
 
     if (execution.failures.size) {
@@ -1352,6 +1470,7 @@ export class Scheduler {
     integrationStageId,
     initialCompleted = new Map(),
     signal = null,
+    scoutContext = null,
   }) {
     const pending = new Map(
       plan.stages
@@ -1406,6 +1525,7 @@ export class Scheduler {
           policy,
           signal,
           resumeSessionId: this.takeResumeSession(task.id, stage.id),
+          scoutContext: stage.kind === EXECUTION_ROLE.WORKER ? scoutContext : null,
         }).then(
           (value) => ({ stageId: stage.id, status: 'fulfilled', value }),
           (error) => ({ stageId: stage.id, status: 'rejected', error }),
@@ -1475,6 +1595,7 @@ export class Scheduler {
     policy,
     signal = null,
     resumeSessionId = null,
+    scoutContext = null,
   }) {
     const attempt =
       this.store.listRuns(task.id).filter((run) => run.stage_id === stage.id).length + 1;
@@ -1569,6 +1690,7 @@ export class Scheduler {
         policy,
         signal,
         resumeSessionId,
+        scoutContext: stage.id === integrationStageId ? null : scoutContext,
       });
     } catch (error) {
       if (stage.id === integrationStageId)
@@ -1608,6 +1730,7 @@ export class Scheduler {
     policy = null,
     signal = null,
     resumeSessionId = null,
+    scoutContext = null,
   }) {
     const taskId = task.id;
     const runId = randomUUID();
@@ -1629,6 +1752,12 @@ export class Scheduler {
       baseSha: stageWorkspace.baseSha,
       startedAt: new Date().toISOString(),
       runtimeNamespace: createRuntimeNamespace(taskId, runId),
+      scoutContextId: scoutContext?.contextId ?? null,
+      scoutContextChecksum: scoutContext?.checksum ?? null,
+      scoutContextRevision: scoutContext?.revision ?? null,
+      scoutContextSections: scoutContext?.brief?.sections
+        ? Object.keys(scoutContext.brief.sections)
+        : null,
     };
 
     this.store.createRun(run);
@@ -1648,6 +1777,7 @@ export class Scheduler {
         attempt,
         assignmentGoal: stage.goal,
         readOnly: false,
+        scoutContext: scoutContext?.brief ?? null,
       });
 
       this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
