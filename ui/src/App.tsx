@@ -111,6 +111,42 @@ const kindLabel: Record<string, string> = {
   worker_output: 'Output',
 };
 
+const complexityLevel: Record<string, number> = {
+  quick: 1,
+  standard: 2,
+  deep: 3,
+};
+
+function complexityLabel(profile: string) {
+  if (profile === 'deep') return 'high complexity';
+  if (profile === 'standard') return 'medium complexity';
+  return 'low complexity';
+}
+
+function ComplexityChevrons({ profile }: { profile: string }) {
+  return (
+    <span
+      className="complexity-chevrons"
+      aria-label={complexityLabel(profile)}
+      title={complexityLabel(profile)}
+    >
+      {[1, 2, 3].map((level) => (
+        <ChevronRight
+          key={level}
+          size={11}
+          strokeWidth={3}
+          aria-hidden="true"
+          className={
+            level <= (complexityLevel[profile] ?? 1)
+              ? 'complexity-chevron complexity-chevron-active'
+              : 'complexity-chevron'
+          }
+        />
+      ))}
+    </span>
+  );
+}
+
 type ProjectAwareness = { running: number; waiting: number };
 
 function projectAwareness(all: Task[], projectId: string): ProjectAwareness {
@@ -987,7 +1023,10 @@ function ProjectSidebar({
               </span>
             )}
             <span className="task-meta">
-              {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
+              {entry.profile}
+              <ComplexityChevrons profile={entry.profile} />
+              <span aria-hidden="true">·</span>
+              {entry.attempts ? `${entry.attempts} runs` : 'not started'}
             </span>
             <Wave state={entry.state} />
             {index < 10 && (
@@ -1021,7 +1060,7 @@ export function Thread({ items }: { items: ThreadItem[] }) {
               </span>
               <time>{formatTime(entry.at)}</time>
             </div>
-            <p>{entry.summary}</p>
+            <div className="thread-summary">{entry.summary}</div>
             <div className="source">
               <span>{entry.stageId ?? 'task'}</span>
               {entry.runId && (
@@ -1312,19 +1351,23 @@ function ChangeActions({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const available = changes?.result?.state === 'available';
-  const label = available
-    ? `Changes +${changes.result!.summary.additions} −${changes.result!.summary.deletions}`
+  const summary = available ? changes.result!.summary : undefined;
+  const changeButtonLabel = summary
+    ? summary.additions || summary.deletions
+      ? `+${summary.additions}, -${summary.deletions}`
+      : 'No diff'
     : changes?.loading
-      ? 'Changes…'
+      ? 'Loading…'
       : !run || changes?.result?.state === 'unavailable' || changes?.error
-        ? 'Changes unavailable'
-        : 'Changes';
+        ? 'Unavailable'
+        : 'Diff';
   const unavailable = !run || changes?.result?.state === 'unavailable';
 
   return (
     <div className="changes-control">
       <button
         className="button secondary small changes-main key-hint-anchor"
+        aria-label={changeButtonLabel}
         disabled={disabled || unavailable}
         title={!run ? 'No persisted run for this agent' : undefined}
         onClick={() => {
@@ -1332,7 +1375,23 @@ function ChangeActions({
           onOpenEditor();
         }}
       >
-        <FileDiff size={12} /> {label}
+        <FileDiff size={12} />
+        {summary ? (
+          summary.additions || summary.deletions ? (
+            <>
+              <span className="change-count change-count-additions">+{summary.additions}</span>
+              <span className="change-count change-count-deletions">-{summary.deletions}</span>
+            </>
+          ) : (
+            <span className="change-count-empty">No diff</span>
+          )
+        ) : changes?.loading ? (
+          'Loading…'
+        ) : !run || changes?.result?.state === 'unavailable' || changes?.error ? (
+          'Unavailable'
+        ) : (
+          'Diff'
+        )}
         <KeyHint metadata={hints?.get('task.changes.external')} position="corner" />
       </button>
       <button
@@ -2834,7 +2893,7 @@ export default function App() {
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
-  const [descExpanded, setDescExpanded] = useState(true);
+  const [descExpanded, setDescExpanded] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [changesByRun, setChangesByRun] = useState<Record<string, ChangeLoad>>({});
@@ -4157,7 +4216,10 @@ export default function App() {
                 </button>
                 <span className="eyebrow-slash">/</span>
                 {task.id}
-                <span className="eyebrow-tag">{task.profile}</span>
+                <span className="eyebrow-tag">
+                  {task.profile}
+                  <ComplexityChevrons profile={task.profile} />
+                </span>
               </div>
               <div className="task-title-row">
                 <div className="task-title-copy">

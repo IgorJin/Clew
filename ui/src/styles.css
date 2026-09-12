@@ -556,6 +556,9 @@ button {
 }
 
 .task-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--faint);
   font-size: 10px;
 }
@@ -637,6 +640,25 @@ button {
     monospace;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+}
+
+.complexity-chevrons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  color: var(--border-hover);
+}
+
+.complexity-chevron {
+  margin-left: -3px;
+}
+
+.complexity-chevron:first-child {
+  margin-left: 0;
+}
+
+.complexity-chevron-active {
+  color: var(--accent);
 }
 
 .breadcrumb-project {
@@ -773,7 +795,7 @@ h1 {
   color: var(--muted);
   background: none;
   border: 0;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 500;
   margin-bottom: 8px;
 }
@@ -928,11 +950,28 @@ h1 {
 }
 
 .changes-main {
-  width: 156px;
+  width: auto;
+  min-width: 0;
   justify-content: center;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   border-radius: 6px 0 0 6px;
+}
+
+.change-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.change-count-additions {
+  color: var(--green);
+}
+
+.change-count-deletions {
+  color: var(--red);
+}
+
+.change-count-empty {
+  color: var(--muted);
 }
 
 .changes-menu-toggle {
@@ -1247,6 +1286,7 @@ h3 {
   display: none;
 }
 .thread-content {
+  width: 100%;
   min-width: 0;
   padding-bottom: 19px;
 }
@@ -1258,7 +1298,7 @@ h3 {
 }
 .thread-kind {
   color: #aeb8af;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   text-transform: capitalize;
 }
@@ -1271,7 +1311,10 @@ time {
     Consolas,
     monospace;
 }
-.thread-content p {
+.thread-summary {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   margin: 0 0 9px;
   color: #e0e6e1;
   font-size: 13px;
@@ -1456,7 +1499,6 @@ time {
 }
 
 .button.small {
-  height: 26px;
   padding: 0 8px;
   font-size: 11px;
 }
@@ -1634,6 +1676,7 @@ h3 {
 
 .thread-content {
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
   padding-bottom: 14px;
@@ -1648,7 +1691,7 @@ h3 {
 
 .thread-kind {
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -1662,7 +1705,10 @@ time {
     monospace;
 }
 
-.thread-content p {
+.thread-summary {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   margin: 0 0 6px;
   color: var(--text-2);
   font-size: 12px;

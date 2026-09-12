@@ -617,13 +617,13 @@ describe('Preact control plane', () => {
     expect(container.querySelector('.terminal-waiting-banner')).toBeNull();
   });
 
-  it('keeps Changes only in the task header', async () => {
+  it('keeps the change summary only in the task header', async () => {
     api.execute.mockImplementation(async (args: string[]) =>
       args[0] === 'task' && args[1] === 'changes' ? availableChanges(args[2]) : { fixture: true },
     );
     const { container } = render(<App />);
 
-    await screen.findByRole('button', { name: 'Changes +4 −2' });
+    await screen.findByRole('button', { name: '+4, -2' });
     expect(container.querySelectorAll('.changes-control')).toHaveLength(1);
     expect(container.querySelector('.agent-card .changes-control')).toBeNull();
   });
@@ -675,7 +675,7 @@ describe('Preact control plane', () => {
     });
     render(<App />);
 
-    const changes = await screen.findByRole('button', { name: 'Changes +7 −2' });
+    const changes = await screen.findByRole('button', { name: '+7, -2' });
 
     fireEvent.click(changes);
     expect(api.execute).toHaveBeenCalledWith([
@@ -804,7 +804,7 @@ describe('Preact control plane', () => {
     );
     fireEvent.change(runSelect, { target: { value: 'backend-2' } });
     await waitFor(() => expect((runSelect as HTMLSelectElement).value).toBe('backend-2'));
-    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^\+9, -0$/ }));
     expect(api.execute).toHaveBeenCalledWith([
       'task',
       'open-changes',
@@ -813,7 +813,7 @@ describe('Preact control plane', () => {
       'backend-2',
     ]);
     fireEvent.change(runSelect, { target: { value: 'frontend-1' } });
-    expect(await screen.findByRole('button', { name: 'Changes unavailable' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Unavailable' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /change actions for frontend/i }));
     fireEvent.click(screen.getByRole('menuitem', { name: /view diff/i }));
     expect(await screen.findByText(/available only on the runner host/i)).toBeTruthy();
@@ -839,7 +839,7 @@ describe('Preact control plane', () => {
       return 42;
     });
     render(<App />);
-    await screen.findByRole('button', { name: 'Changes +4 −2' });
+    await screen.findByRole('button', { name: '+4, -2' });
 
     const before = api.execute.mock.calls.filter(
       ([args]) => args[0] === 'task' && args[1] === 'changes' && args[2] === 'run-2',
@@ -894,11 +894,11 @@ describe('Preact control plane', () => {
     poll?.();
     await waitFor(() => expect(resolvers).toHaveLength(2));
     resolvers[1](availableChanges('active-run', 9, 1));
-    await screen.findByRole('button', { name: 'Changes +9 −1' });
+    await screen.findByRole('button', { name: '+9, -1' });
     resolvers[0](availableChanges('active-run', 1, 0));
     await Promise.resolve();
 
-    expect(screen.getByRole('button', { name: 'Changes +9 −1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '+9, -1' })).toBeTruthy();
     view.unmount();
     expect(clearInterval).toHaveBeenCalledWith(73);
   });
