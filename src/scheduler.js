@@ -21,13 +21,17 @@ function readyStateForTask(contract) {
 import {
   APPROVAL_DECISION,
   FakeHarness,
-  CodexHarness,
-  OpenCodeHarness,
   ExternalHarnessUnavailable,
   HarnessInterruptedError,
 } from './harness.js';
-import { FakeReviewer, CodexReviewer } from './review.js';
-import { FakeArchitect, CodexArchitect } from './architect.js';
+import { FakeReviewer } from './review.js';
+import { FakeArchitect } from './architect.js';
+import {
+  resolveCodexArchitect,
+  resolveCodexHarness,
+  resolveCodexReviewer,
+  resolveOpenCodeHarness,
+} from './plugins/legacy.js';
 import { verificationEnvironment } from './trust.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 import { RUNNER_MESSAGE_KIND, createRunnerEnvelope } from './runner-protocol.js';
@@ -42,6 +46,7 @@ export class Scheduler {
       harnessFactory = null,
       reviewerFactory = null,
       architectFactory = null,
+      runtimeResolver = null,
       planFactory = null,
       requirePlanApproval = true,
       signal = null,
@@ -57,6 +62,7 @@ export class Scheduler {
     this.harnessFactory = harnessFactory;
     this.reviewerFactory = reviewerFactory;
     this.architectFactory = architectFactory;
+    this.runtimeResolver = runtimeResolver;
     this.planFactory = planFactory;
     this.requirePlanApproval = requirePlanApproval;
     this.signal = signal;
@@ -1755,14 +1761,21 @@ export class Scheduler {
     if (this.harnessFactory) return this.harnessFactory(harnessName);
     if (harnessName === HARNESS_NAME.FAKE) return new FakeHarness();
     if (harnessName === HARNESS_NAME.CODEX)
-      return new CodexHarness({
-        command: this.adapterConfig.codexBin,
-        openDesktop: this.adapterConfig.openCodexDesktop,
-        terminalManager: this.adapterConfig.terminalManager,
-        trustedWorkspaceRoot: this.workspaceManager.root ?? null,
+      return resolveCodexHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {
+          openDesktop: this.adapterConfig.openCodexDesktop,
+          terminalManager: this.adapterConfig.terminalManager,
+          trustedWorkspaceRoot: this.workspaceManager.root ?? null,
+        },
       });
     if (harnessName === HARNESS_NAME.OPENCODE)
-      return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
+      return resolveOpenCodeHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {},
+      });
 
     return new ExternalHarnessUnavailable(harnessName);
   }
@@ -1867,13 +1880,12 @@ export class Scheduler {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
 
     return reviewerName === HARNESS_NAME.CODEX
-      ? new CodexReviewer(
-          new CodexHarness({
-            command: this.adapterConfig.codexBin,
-            model: this.adapterConfig.models?.reviewer,
-            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
-          }),
-        )
+      ? resolveCodexReviewer({
+          resolver: this.runtimeResolver,
+          adapterConfig: this.adapterConfig,
+          hostServices: { trustedWorkspaceRoot: this.workspaceManager.root ?? null },
+          connectionId: this.adapterConfig.reviewConnection ?? undefined,
+        })
       : new FakeReviewer();
   }
 
@@ -1892,13 +1904,12 @@ export class Scheduler {
     if (this.architectFactory) return this.architectFactory(architectName);
 
     return architectName === HARNESS_NAME.CODEX
-      ? new CodexArchitect(
-          new CodexHarness({
-            command: this.adapterConfig.codexBin,
-            model: this.adapterConfig.models?.architect,
-            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
-          }),
-        )
+      ? resolveCodexArchitect({
+          resolver: this.runtimeResolver,
+          adapterConfig: this.adapterConfig,
+          hostServices: { trustedWorkspaceRoot: this.workspaceManager.root ?? null },
+          connectionId: this.adapterConfig.architectConnection ?? undefined,
+        })
       : new FakeArchitect();
   }
 }

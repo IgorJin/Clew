@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/plugin-connection.v1.schema.json",
+  "title": "Clew plugin connection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "plugin"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "plugin": { "type": "string", "pattern": "^clew\\.[a-z0-9-]+(\\.[a-z0-9-]+)*$" },
+    "enabled": { "type": "boolean", "default": true },
+    "config": { "type": "object" }
+  }
+}

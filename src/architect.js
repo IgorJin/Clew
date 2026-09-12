@@ -1,4 +1,6 @@
-import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
+/** CLEW-128: `CodexArchitect` moved to `src/plugins/codex/role-services.js`.
+ * This module keeps the harness-agnostic plan schema and the fake architect.
+ */
 
 export const PLAN_OUTPUT_SCHEMA = {
   type: 'object',
@@ -40,37 +42,5 @@ export class FakeArchitect {
         },
       ],
     };
-  }
-}
-
-export class CodexArchitect {
-  constructor(harness) {
-    this.harness = harness;
-  }
-
-  async createPlan({ task, executionBrief = null, cwd }) {
-    executionBrief ??= prepareExecutionBrief({
-      task,
-      role: EXECUTION_ROLE.ARCHITECT,
-      stageId: 'architect',
-      assignmentGoal:
-        'Produce an implementation DAG. Every stage must feed one terminal integration stage with kind=integration.',
-      readOnly: true,
-    });
-    const result = await this.harness.run({
-      task,
-      executionBrief,
-      cwd,
-      model: process.env.CLEW_ARCHITECT_MODEL,
-      readOnly: true,
-      outputSchema: PLAN_OUTPUT_SCHEMA,
-      onEvent: () => {},
-    });
-    const plan = result.output?.output ?? result.output;
-
-    if (!plan || typeof plan !== 'object' || !Array.isArray(plan.stages))
-      throw new Error(`Codex architect did not return a structured plan: ${JSON.stringify(plan)}`);
-
-    return result.sessionId ? { plan, sessionId: result.sessionId } : plan;
   }
 }

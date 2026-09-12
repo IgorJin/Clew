@@ -60,12 +60,24 @@ export const DEFAULT_CONFIG = Object.freeze({
   editorBin: 'code',
   changeViewer: null,
   worktreeRoot: '.clew/worktrees',
+  // CLEW-130: role models default to the runtime default (`null`). The
+  // historical Codex reviewer default lives in the legacy connection
+  // mapping (`legacyDefaultModel` in `src/plugins/legacy.js`), not in core.
+  // Binary/endpoint host settings stay here until the terminal/doctor
+  // surfaces move to plugins (deferred, see CLEW-130 card).
   models: Object.freeze({
     worker: null,
     architect: null,
-    reviewer: 'gpt-5.6-luna',
+    reviewer: null,
     qa: null,
   }),
+  agents: Object.freeze({
+    worker: Object.freeze({ connection: null, model: null }),
+    architect: Object.freeze({ connection: null, model: null }),
+    reviewer: Object.freeze({ connection: null, model: null }),
+    qa: Object.freeze({ connection: null, model: null }),
+  }),
+  connections: Object.freeze([]),
   pricing: Object.freeze({ sources: [] }),
   integration: Object.freeze({
     enabled: true,
@@ -92,6 +104,38 @@ function readJsonIfPresent(path) {
   }
 }
 
+function assertAgentEntry(role, value, source) {
+  if (value === undefined) return;
+
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error(`${source} agents.${role} must be an object with optional connection/model`);
+
+  for (const field of ['connection', 'model'])
+    if (value[field] !== undefined && value[field] !== null && typeof value[field] !== 'string')
+      throw new Error(`${source} agents.${role}.${field} must be a string or null`);
+}
+
+const AGENT_ENV_PREFIX = Object.freeze({
+  worker: 'WORKER',
+  architect: 'ARCHITECT',
+  reviewer: 'REVIEW',
+  qa: 'QA',
+});
+
+function mergeRoleAgent(role, userAgents, projectAgents, env) {
+  const prefix = AGENT_ENV_PREFIX[role];
+  const envConnection = env[`CLEW_${prefix}_CONNECTION`];
+
+  return {
+    connection:
+      envConnection ?? projectAgents?.[role]?.connection ?? userAgents?.[role]?.connection ?? null,
+    // CLEW_*_MODEL env and legacy `models.*` stay on the models path and
+    // are merged as a fallback level in role routing (CLEW-130); the agents
+    // section carries only explicitly configured per-role models.
+    model: projectAgents?.[role]?.model ?? userAgents?.[role]?.model ?? null,
+  };
+}
+
 function assertSafeProjectConfig(config) {
   const inspect = (value, path = []) => {
     if (!value || typeof value !== 'object') return;
@@ -116,6 +160,20 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
   const projectConfig = readJsonIfPresent(projectConfigPath);
 
   assertSafeProjectConfig(projectConfig);
+
+  for (const role of ['worker', 'architect', 'reviewer', 'qa']) {
+    assertAgentEntry(role, userConfig.agents?.[role], 'user config');
+    assertAgentEntry(role, projectConfig.agents?.[role], 'project config');
+  }
+
+  if (userConfig.connections !== undefined && !Array.isArray(userConfig.connections))
+    throw new Error('user config connections must be an array');
+
+  if (projectConfig.connections !== undefined && !Array.isArray(projectConfig.connections))
+    throw new Error('project config connections must be an array');
+
+  const userAgents = userConfig.agents ?? {};
+  const projectAgents = projectConfig.agents ?? {};
   const merged = {
     ...DEFAULT_CONFIG,
     ...userConfig,
@@ -143,6 +201,16 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
       ...(env.CLEW_REVIEW_MODEL ? { reviewer: env.CLEW_REVIEW_MODEL } : {}),
       ...(env.CLEW_QA_MODEL ? { qa: env.CLEW_QA_MODEL } : {}),
     },
+    agents: {
+      worker: mergeRoleAgent('worker', userAgents, projectAgents, env),
+      architect: mergeRoleAgent('architect', userAgents, projectAgents, env),
+      reviewer: mergeRoleAgent('reviewer', userAgents, projectAgents, env),
+      qa: mergeRoleAgent('qa', userAgents, projectAgents, env),
+    },
+    // Host-owned connections come from the user config only. Project
+    // `connections` never merge here; they stay in `layers` for an
+    // ignore-with-diagnostic at host build time (CLEW-130).
+    connections: userConfig.connections ?? [],
     pricing: {
       ...DEFAULT_CONFIG.pricing,
       ...(userConfig.pricing ?? {}),
@@ -171,6 +239,14 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
     worktreeRoot: resolve(projectRoot, merged.worktreeRoot),
     projectConfigPath,
     userConfigPath,
+    layers: {
+      agents: { user: userAgents, project: projectAgents },
+      models: { user: userConfig.models ?? {}, project: projectConfig.models ?? {} },
+      connections: {
+        user: userConfig.connections ?? [],
+        project: projectConfig.connections ?? [],
+      },
+    },
   };
 }
 

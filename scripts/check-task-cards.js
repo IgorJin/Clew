@@ -92,11 +92,13 @@ function evidenceResults(evidence) {
     });
 }
 
+const cardFilePattern = /^CLEW-\d{3}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.md$/;
+
 const cardFiles = [
-  ...readdirSync(taskDir).filter((file) => /^CLEW-\d{3}\.md$/.test(file)),
+  ...readdirSync(taskDir).filter((file) => cardFilePattern.test(file)),
   ...(existsSync(`${taskDir}/done`)
     ? readdirSync(`${taskDir}/done`)
-        .filter((file) => /^CLEW-\d{3}\.md$/.test(file))
+        .filter((file) => cardFilePattern.test(file))
         .map((file) => `done/${file}`)
     : []),
 ];
@@ -105,7 +107,9 @@ const cards = cardFiles.sort().map(parseCard);
 const byId = new Map(cards.map((card) => [card.id, card]));
 
 for (const card of cards) {
-  if (!card.file.endsWith(`${card.id}.md`))
+  const base = card.file.split('/').pop();
+
+  if (base !== `${card.id}.md` && !base.startsWith(`${card.id}-`))
     throw new Error(`${card.file}: id does not match filename`);
   if (!allowedStatuses.has(card.status))
     throw new Error(`${card.file}: unsupported status ${card.status}`);

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CodexArchitect, FakeArchitect, PLAN_OUTPUT_SCHEMA } from '../src/architect.js';
+import { FakeArchitect, PLAN_OUTPUT_SCHEMA } from '../src/architect.js';
+import { CodexArchitect } from '../src/plugins/codex/role-services.js';
 
 const task = {
   id: 'T-22',

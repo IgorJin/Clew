@@ -131,7 +131,7 @@ test('resolves role-specific model configuration with environment precedence', (
   }
 });
 
-test('uses Luna for Codex review by default without changing worker and architect models', () => {
+test('role models default to the runtime default; the Luna reviewer default lives in legacy mapping', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-default-review-model-'));
 
   try {
@@ -140,9 +140,53 @@ test('uses Luna for Codex review by default without changing worker and architec
     assert.deepEqual(config.models, {
       worker: null,
       architect: null,
-      reviewer: 'gpt-5.6-luna',
+      reviewer: null,
       qa: null,
     });
+    assert.deepEqual(config.agents, {
+      worker: { connection: null, model: null },
+      architect: { connection: null, model: null },
+      reviewer: { connection: null, model: null },
+      qa: { connection: null, model: null },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('merges agent connections with project-over-user precedence and exposes layers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-agents-'));
+  const userConfig = join(dir, 'user.json');
+
+  try {
+    writeFileSync(
+      userConfig,
+      JSON.stringify({
+        agents: { worker: { connection: 'user-conn' }, reviewer: { model: 'user-model' } },
+        connections: [{ id: 'user-conn', plugin: 'clew.runtime.codex' }],
+      }),
+    );
+    writeFileSync(
+      join(dir, '.clew.json'),
+      JSON.stringify({
+        agents: { worker: { connection: 'project-conn' } },
+        connections: [{ id: 'project-conn', plugin: 'clew.runtime.codex' }],
+      }),
+    );
+    const config = loadConfig(dir, {
+      CLEW_USER_CONFIG: userConfig,
+      CLEW_QA_CONNECTION: 'env-conn',
+    });
+
+    assert.equal(config.agents.worker.connection, 'project-conn');
+    assert.equal(config.agents.reviewer.model, 'user-model');
+    assert.equal(config.agents.qa.connection, 'env-conn');
+    assert.deepEqual(
+      config.connections.map((entry) => entry.id),
+      ['user-conn'],
+    );
+    assert.equal(config.layers.agents.project.worker.connection, 'project-conn');
+    assert.equal(config.layers.connections.project[0].id, 'project-conn');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

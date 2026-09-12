@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
-import { CodexReviewer } from '../src/review.js';
+import { CodexReviewer } from '../src/plugins/codex/role-services.js';
 import {
   APPROVAL_DECISION,
   CodexHarness,

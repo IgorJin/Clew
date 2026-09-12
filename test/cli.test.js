@@ -353,7 +353,7 @@ test('CLI continue grants one correction from WAITING_FOR_HUMAN', () => {
   }
 });
 
-test('doctor reports optional native adapter readiness without failing fake setup', () => {
+test('doctor reports per-connection readiness without failing fake setup', () => {
   const repo = mkdtempSync(join(tmpdir(), 'clew-cli-doctor-'));
 
   try {
@@ -368,13 +368,20 @@ test('doctor reports optional native adapter readiness without failing fake setu
     assert.equal(result.ok, true);
     assert.deepEqual(
       result.checks.map((check) => check.name),
-      ['node', 'git', 'telemetry', 'codex-cli', 'codex-auth', 'opencode-cli', 'opencode-endpoint'],
+      ['node', 'git', 'telemetry', 'connection:codex-default', 'connection:opencode-default'],
     );
-    assert.equal(result.checks.find((check) => check.name === 'codex-cli').ok, false);
-    assert.equal(
-      result.checks.find((check) => check.name === 'opencode-endpoint').detail,
-      'invalid URL',
-    );
+
+    const codex = result.checks.find((check) => check.name === 'connection:codex-default');
+
+    assert.equal(codex.ok, false);
+    assert.equal(codex.required, false);
+    assert.equal(codex.status, 'unavailable');
+    assert.equal(codex.plugin, 'clew.runtime.codex');
+
+    const opencode = result.checks.find((check) => check.name === 'connection:opencode-default');
+
+    assert.equal(opencode.ok, false);
+    assert.equal(opencode.status, 'unavailable');
 
     const required = JSON.parse(
       runCommand(process.execPath, [cliFile, 'doctor', '--harness', 'codex'], repo, {
@@ -385,6 +392,25 @@ test('doctor reports optional native adapter readiness without failing fake setu
     );
 
     assert.equal(required.ok, false);
+    assert.equal(
+      required.checks.find((check) => check.name === 'connection:codex-default').required,
+      true,
+    );
+    assert.equal(
+      required.checks.find((check) => check.name === 'connection:opencode-default').required,
+      false,
+    );
+
+    const selected = JSON.parse(
+      runCommand(process.execPath, [cliFile, 'doctor', '--connection', 'opencode-default'], repo, {
+        CLEW_OPENCODE_URL: 'not-a-url',
+      }),
+    );
+
+    assert.deepEqual(
+      selected.checks.map((check) => check.name),
+      ['node', 'git', 'telemetry', 'connection:opencode-default'],
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

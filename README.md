@@ -62,6 +62,14 @@ node bin/clew.js run DEMO-1 --harness codex
 node bin/clew.js run DEMO-1 --harness opencode
 ```
 
+Since the plugin routing release, connection-first selection is preferred:
+`--connection ID` (worker), `--review-connection ID`, `--architect-connection ID`.
+Each agent role resolves `role → connection → model` with flag → environment →
+project → user → defaults precedence; combining `--harness` with `--connection`
+is an explicit error. List configured connections (safe projection, no secrets
+or host paths) with `node bin/clew.js connections list`, and probe them with
+`node bin/clew.js doctor [--connection ID]`.
+
 OpenCode requires a running server, normally `opencode serve --hostname 127.0.0.1 --port 4096`. Codex uses `codex app-server` over JSON-RPC stdio. Native completion alone is insufficient for `READY`: Clew requires at least one passing command evidence item.
 
 ## Standard and Deep flows
@@ -142,7 +150,13 @@ For daemon-run Codex tasks, the embedded Codex TUI is the worker from the first 
 
 Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
 
-Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.
+Role connections and models can be selected per role with the `agents` section
+(`worker`/`architect`/`reviewer`/`qa`, each `{ connection, model }`) in user or
+project config, or with `CLEW_<ROLE>_CONNECTION` environment variables
+(`CLEW_WORKER_CONNECTION`, `CLEW_ARCHITECT_CONNECTION`, `CLEW_REVIEW_CONNECTION`,
+`CLEW_QA_CONNECTION`). Legacy `models.worker`, `models.architect`, `models.reviewer`,
+and `models.qa` in `.clew.json` (or the corresponding `CLEW_*_MODEL` variables)
+still work as a model fallback with a migration diagnostic. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.
 
 ## Roadmap and future plans
 

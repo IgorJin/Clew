@@ -1,6 +1,12 @@
-import { FakeHarness, CodexHarness, OpenCodeHarness } from './harness.js';
-import { FakeReviewer, CodexReviewer } from './review.js';
-import { FakeArchitect, CodexArchitect } from './architect.js';
+import { FakeHarness } from './harness.js';
+import { FakeReviewer } from './review.js';
+import { FakeArchitect } from './architect.js';
+import {
+  resolveCodexHarness,
+  resolveOpenCodeHarness,
+  wrapCodexArchitect,
+  wrapCodexReviewer,
+} from './plugins/legacy.js';
 import { join } from 'node:path';
 import { GitWorktreeManager } from './workspace.js';
 
@@ -65,6 +71,7 @@ export class RunnerExecutionPort {
     workspaces = [],
     worktreeRoot = null,
     harnessFactory = null,
+    runtimeResolver = null,
     adapterConfig = {},
   } = {}) {
     this.workspaces = new Map(workspaces.map((workspace) => [workspace.id, workspace.path]));
@@ -80,6 +87,7 @@ export class RunnerExecutionPort {
         : [],
     );
     this.harnessFactory = harnessFactory;
+    this.runtimeResolver = runtimeResolver;
     this.adapterConfig = adapterConfig;
     this.active = new Map();
   }
@@ -92,26 +100,33 @@ export class RunnerExecutionPort {
     if (this.harnessFactory) return this.harnessFactory(name);
     if (name === 'fake') return new FakeHarness();
     if (name === 'codex')
-      return new CodexHarness({
-        command: this.adapterConfig.codexBin ?? 'codex',
-        openDesktop: this.adapterConfig.openCodexDesktop ?? false,
-        trustedWorkspaceRoot,
+      return resolveCodexHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {
+          openDesktop: this.adapterConfig.openCodexDesktop ?? false,
+          trustedWorkspaceRoot,
+        },
       });
     if (name === 'opencode')
-      return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
+      return resolveOpenCodeHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {},
+      });
     throw new Error(`unsupported Runner harness: ${name}`);
   }
 
   createReviewer(name, trustedWorkspaceRoot = null) {
     if (name === 'fake') return new FakeReviewer();
     if (name === 'codex')
-      return new CodexReviewer(this.createHarness('codex', trustedWorkspaceRoot));
+      return wrapCodexReviewer(this.createHarness('codex', trustedWorkspaceRoot));
     throw new Error(`unsupported Runner reviewer: ${name}`);
   }
 
   createArchitect(name) {
     if (name === 'fake') return new FakeArchitect();
-    if (name === 'codex') return new CodexArchitect(this.createHarness('codex'));
+    if (name === 'codex') return wrapCodexArchitect(this.createHarness('codex'));
     throw new Error(`unsupported Runner architect: ${name}`);
   }
 
