@@ -88,25 +88,25 @@ describe('Preact control plane', () => {
     api.subscribeToEvents.mockClear();
   });
 
-  it('opens the finalization gate and completes the pinned revision', async () => {
+  it('keeps the next action primary and cancels an unfinished task with confirmation', async () => {
     const nativeConfirm = vi.spyOn(window, 'confirm');
     const { container } = render(<App />);
-    const finishButton = await screen.findByRole('button', { name: /finish work/i });
+    const cancelButton = await screen.findByRole('button', { name: /cancel task/i });
+    const nextAction = await screen.findByRole('button', { name: /^continue$/i });
 
     expect(container.querySelector('[aria-label="Finalization gate"]')).toBeNull();
+    expect(cancelButton.className).toContain('danger-outline');
+    expect(nextAction.className).toContain('primary');
 
-    fireEvent.click(finishButton);
-    fireEvent.click(await screen.findByRole('button', { name: /complete task/i }));
+    fireEvent.click(cancelButton);
     await confirmAction();
 
-    await waitFor(() =>
-      expect(api.execute).toHaveBeenCalledWith(['complete', 'CLEW-071', '--revision', 'a91c4e2']),
-    );
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['interrupt', 'CLEW-071']));
     expect(nativeConfirm).not.toHaveBeenCalled();
-    expect(await screen.findByText('Task completed')).toBeTruthy();
+    expect(await screen.findByText('Task cancellation requested')).toBeTruthy();
   });
 
-  it('uses the finalization gate for Git integration', async () => {
+  it('keeps cancellation outlined for a task that is ready to finish', async () => {
     const nativeConfirm = vi.spyOn(window, 'confirm');
     const gitTask = structuredClone(fixtureTasks[0]);
 
@@ -133,22 +133,12 @@ describe('Preact control plane', () => {
     });
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: /finish work/i }));
-    expect(await screen.findByRole('dialog', { name: /finish work/i })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^integrate$/i }));
+    const cancelButton = await screen.findByRole('button', { name: /cancel task/i });
+    expect(cancelButton.className).toContain('danger-outline');
+    fireEvent.click(cancelButton);
     await confirmAction();
 
-    await waitFor(() =>
-      expect(api.execute).toHaveBeenCalledWith([
-        'task',
-        'integrate',
-        'CLEW-071',
-        '--strategy',
-        'squash',
-        '--message',
-        'Integrate CLEW-071',
-      ]),
-    );
+    await waitFor(() => expect(api.execute).toHaveBeenCalledWith(['interrupt', 'CLEW-071']));
     expect(nativeConfirm).not.toHaveBeenCalled();
   });
 
@@ -263,6 +253,50 @@ describe('Preact control plane', () => {
     expect(container.querySelector('img')).toBeNull();
   });
 
+  it('formats thread status transitions and keeps worker output behind a tooltip', () => {
+    const items: ThreadItem[] = [
+      {
+        version: 1,
+        id: 'created',
+        cursor: 1,
+        kind: 'task_created',
+        at: '2026-08-28T09:42:00.000Z',
+        source: { kind: 'event', id: 'event-1' },
+        summary: 'Task created: Fixture',
+      },
+      {
+        version: 1,
+        id: 'started',
+        cursor: 2,
+        kind: 'run_started',
+        at: '2026-08-28T09:43:00.000Z',
+        source: { kind: 'run', id: 'event-2' },
+        summary: 'Stage worker run started',
+      },
+      {
+        version: 1,
+        id: 'output',
+        cursor: 3,
+        kind: 'worker_output',
+        at: '2026-08-28T09:44:00.000Z',
+        source: { kind: 'worker', id: 'event-3' },
+        summary: 'Worker output:\nfull worker response\nwith multiple lines',
+      },
+    ];
+
+    render(<Thread items={items} />);
+
+    expect(screen.getAllByText('Task status changed')).toHaveLength(2);
+    expect(screen.getByText('EXECUTION')).toBeTruthy();
+    expect(screen.queryByRole('tooltip')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /expand worker response/i }));
+    expect(screen.getByRole('tooltip').textContent).toContain('full worker response');
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
   it('keeps last known data but disables operator actions after disconnect', async () => {
     let reportState: ((state: string) => void) | undefined;
 
@@ -277,11 +311,11 @@ describe('Preact control plane', () => {
       return () => undefined;
     });
     render(<App />);
-    const complete = await screen.findByRole('button', { name: /finish work/i });
+    const cancel = await screen.findByRole('button', { name: /cancel task/i });
 
-    expect(complete.hasAttribute('disabled')).toBe(false);
+    expect(cancel.hasAttribute('disabled')).toBe(false);
     reportState?.('disconnected');
-    await waitFor(() => expect(complete.hasAttribute('disabled')).toBe(true));
+    await waitFor(() => expect(cancel.hasAttribute('disabled')).toBe(true));
     expect(screen.getByRole('alert').textContent).toMatch(/last known data/i);
     expect(screen.getByRole('alert').textContent).toMatch(/actions are disabled/i);
   });
@@ -436,7 +470,7 @@ describe('Preact control plane', () => {
       render(<App />);
 
       fireEvent.click(await screen.findByRole('button', { name: /^next step$/i }));
-      fireEvent.click(await screen.findByRole('button', { name: /^approve start$/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /^next step$/i }));
       expect(await screen.findByRole('dialog', { name: /start this task/i })).toBeTruthy();
       expect(screen.getByText(`${profile} workflow`)).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
@@ -447,7 +481,7 @@ describe('Preact control plane', () => {
         ),
       ).toHaveLength(0);
 
-      fireEvent.click(screen.getByRole('button', { name: /^approve start$/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^next step$/i }));
       const start = await screen.findByRole('button', { name: /^start task$/i });
 
       fireEvent.click(start);
@@ -632,9 +666,9 @@ describe('Preact control plane', () => {
     render(<App />);
     const review = await screen.findByRole('button', { name: 'Review' });
 
-    expect(screen.queryByRole('region', { name: 'review step details' })).toBeNull();
+    expect(screen.queryByRole('tooltip', { name: 'review step details' })).toBeNull();
     fireEvent.click(review);
-    const details = screen.getByRole('region', { name: 'review step details' });
+    const details = screen.getByRole('tooltip', { name: 'review step details' });
 
     expect(review.getAttribute('aria-pressed')).toBe('true');
     expect(within(details).getByText('Status')).toBeTruthy();
@@ -643,8 +677,11 @@ describe('Preact control plane', () => {
     expect(within(details).getByText('Approval')).toBeTruthy();
     expect(within(details).getByText('Side effects')).toBeTruthy();
 
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('tooltip', { name: 'review step details' })).toBeNull();
+
     fireEvent.click(review);
-    expect(screen.queryByRole('region', { name: 'review step details' })).toBeNull();
+    expect(screen.queryByRole('tooltip', { name: 'review step details' })).toBeTruthy();
   });
 
   it('orders sidebar tasks newest first with a stable id tie-breaker', async () => {
@@ -911,6 +948,14 @@ describe('project shell', () => {
     localStorage.clear();
   });
 
+  it('renders the project skeleton while the initial data is loading', () => {
+    api.loadTasks.mockReturnValueOnce(new Promise<never>(() => undefined));
+    render(<App />);
+
+    expect(screen.getByRole('status', { name: 'Loading project' })).toBeTruthy();
+    expect(screen.queryByText('Connecting…')).toBeNull();
+  });
+
   it('renders the selected project switcher and scoped task list', async () => {
     render(<App />);
 
@@ -986,7 +1031,7 @@ describe('project shell', () => {
     render(<App />);
 
     expect(await screen.findByText('No tasks yet')).toBeTruthy();
-    expect(screen.getByRole('button', { name: /new task/i })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /new task/i })).toHaveLength(2);
   });
 
   it('does not show an unassigned task in every project', async () => {
@@ -1213,15 +1258,15 @@ describe('project overview', () => {
     expect(within(board()).queryByText('Replace auth middleware')).toBeNull();
   });
 
-  it('renders a compact project breadcrumb above the task title', async () => {
+  it('renders the project switcher in the topbar without a project breadcrumb', async () => {
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: /^clew$/i })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /project: clew/i })).toBeTruthy();
     expect(
       (await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' }))
         .textContent,
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: /^clew$/i }).nextSibling?.textContent).toBe('/');
+    expect(screen.queryByRole('button', { name: /^clew$/i })).toBeNull();
   });
 });
 
@@ -1603,7 +1648,10 @@ describe('keyboard shortcuts (CLEW-101)', () => {
     const { container } = render(<App />);
 
     await renderWithTasks(container, 6);
-    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), {
+      target: { value: 'active' },
+    });
     await renderWithTasks(container, 3);
     const ids = renderedIds(container);
 
@@ -2349,7 +2397,10 @@ describe('command key hints (CLEW-103)', () => {
     const { container } = render(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Replace auth middleware' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Active' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status' }), {
+      target: { value: 'active' },
+    });
     await holdCommand(container);
     const rows = [...container.querySelectorAll('.task-row')];
     const numbers = rows.map((row) => row.querySelector('.key-hint')?.textContent);
