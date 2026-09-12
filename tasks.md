@@ -4,7 +4,7 @@
 
 **Sources:** [`spec.md`](./spec.md), [`ROADMAP.md`](./ROADMAP.md), and [`VISION.md`](./VISION.md)
 
-**Active target:** Scout v0 context experiment (`CLEW-126`; execution CLEW-123–125 complete); detailed cards are tracked in [`tasks/`](./tasks/README.md)
+**Active target:** Scout v0 context experiment (`CLEW-126` complete; checkpoint/handoff work follows); detailed cards are tracked in [`tasks/`](./tasks/README.md)
 
 This backlog is ordered by risk reduction and vertical product value. A task is complete only when its acceptance criteria are automated where practical and its user-visible or protocol behavior is documented.
 
@@ -47,7 +47,7 @@ The [minimal scout plan](./docs/SCOUT.md) is the next context experiment. It use
 | [CLEW-123](./tasks/done/CLEW-123.md) | S    | Scout context contract and fixtures (done)            | —          |
 | [CLEW-124](./tasks/done/CLEW-124.md) | M    | Read-only scout execution and local result            | 123        |
 | [CLEW-125](./tasks/done/CLEW-125.md) | M    | Initial scout context for architect and worker (done) | 124        |
-| [CLEW-126](./tasks/CLEW-126.md)      | S    | Scout pilot and context contract refinement           | 125        |
+| [CLEW-126](./tasks/done/CLEW-126.md) | S    | Scout pilot and context contract refinement (done)    | 125        |
 
 ## Planned — Task data lifecycle (release unassigned)
 

@@ -1,6 +1,6 @@
 # Scout: минимальная сущность и дальнейшее развитие
 
-Статус: scout v0 в работе, CLEW-123–125 завершены, CLEW-126 готовит пилот. Дата: 2026-09-12. Релиз не назначен. Это первый эксперимент в очереди контекста задачи после локального sign-off v0.10 Keyboard-first. Подробный отчёт реализации: [CLEW-125 HTML report](./CLEW-125-REPORT.html).
+Статус: scout v0 и пилот CLEW-126 завершены; следующий контрактный потребитель — CLEW-114/115. Дата: 2026-09-12. Релиз не назначен. Это первый эксперимент в очереди контекста задачи после локального sign-off v0.10 Keyboard-first. Отчёты: [CLEW-125 HTML report](./CLEW-125-REPORT.html) и [CLEW-126 pilot report](./CLEW-126-REPORT.md).
 
 ## Назначение
 
@@ -48,7 +48,7 @@ Source reference содержит repo-relative path, revision и при нео�
 
 Контракт реализован парой схем [scout-context-request.v1](../schemas/scout-context-request.v1.schema.json) и [repository-context.v1](../schemas/repository-context.v1.schema.json) и runtime validator в `src/scout-context.js`. Request фиксирует `requestId`, `attemptId`, Task/Project identity, fingerprint нормализованного публичного Task Contract, repository/commit и scope. `contextId` детерминирован по Task identity, repository/commit, scope и attempt ID; повтор того же attempt получает тот же ID. Checksum считается по каноническому нормализованному результату без самого поля checksum, поэтому порядок ключей и внешние пробелы не меняют digest. Изменение содержимого обнаруживается до передачи consumer.
 
-Стартовый предел полного результата — 64 КиБ канонического UTF-8 JSON; сырой ответ harness ограничен 256 КиБ до разбора. Максимумы v1: 64 scope paths, 128 components, 128 relationships, 64 checks, 256 observations, 64 unknowns, 32 omissions, 16 source references на запись и 32 аргумента команды. Пути ограничены 512 символами, обычный текст — 2 000, команда или аргумент — 1 024. Перед handoff выбирается только bounded блок размером до 16 КиБ; он содержит identity/checksum/revision и выбранные sections со source references и unknowns, без transcript, локальных файлов и Task Contract. `complete` запрещает omissions; `partial` требует хотя бы одну omission с категорией и пояснением. При переполнении producer сохраняет явный partial в пределах лимита либо получает validation error; молча обрезанный complete недопустим. Raw transcripts, секреты и скрытые рассуждения не копируются в карту.
+Стартовый предел полного результата — 64 КиБ канонического UTF-8 JSON; сырой ответ harness ограничен 256 КиБ до разбора. Максимумы v1: 64 scope paths, 128 components, 128 relationships, 64 checks, 256 observations, 64 unknowns, 32 omissions, 16 source references на запись и 32 аргумента команды. Пути ограничены 512 символами, обычный текст — 2 000, команда или аргумент — 1 024. Перед handoff выбирается только bounded блок размером до 16 КиБ; он содержит identity/checksum/revision и выбранные sections со source references и unknowns, без transcript, локальных файлов и Task Contract. `complete` запрещает omissions; `partial` требует хотя бы одну omission с категорией и пояснением. При переполнении producer сохраняет явный partial в пределах лимита либо получает validation error; молча обрезанный complete недопустим. Raw transcripts, секреты и скрытые рассуждения не копируются в карту. Сценарии и решения пилота зафиксированы в [pilot fixture](../fixtures/scout/pilot.v1.json), его форма — в [pilot schema](../schemas/scout-pilot.v1.schema.json).
 
 Runtime отклоняет абсолютные пути, `..`, backslash и несовпадающую revision в source references. Наблюдение `observed` требует хотя бы один источник; `inferred` остаётся отдельным типом, а нерешённый вопрос хранится в `unknowns`. Каждая запись `checks` имеет только тип `recommended`: поля результата и execution evidence контракт не принимает. Локальная проверка применимости возвращает `current`, `stale`, `unsupported` или `invalid` по Task/Project fingerprint, repository identity, revision, версии, checksum и структуре. Fake consumer-примеры доступны как [request](../fixtures/scout/request.v1.json), [complete map](../fixtures/scout/complete.v1.json) и [partial map](../fixtures/scout/partial.v1.json).
 
@@ -66,7 +66,7 @@ Scout v0 работает локально. При выборе карты paire
 
 ## Пилот до фиксации checkpoints
 
-Использовать scout на трёх представительных задачах: локальное исправление, изменение с зависимостью между модулями, задача с неоднозначной областью изменений. Передать карту архитектору/воркеру и записать: какие ссылки помогли, чего не хватило, что оказалось лишним или неверным, размер выбранного контекста и затраты scout. Не утверждать ускорение без сопоставимых измерений.
+Пилот завершён на трёх представительных задачах: локальное исправление, изменение с зависимостью между модулями и задача с неоднозначной областью изменений. Карта была передана через настоящий Scheduler/Execution Brief path архитектору и воркеру; сохранены context IDs, revisions, consumer roles, selected fields, source evidence, bytes и приблизительный token estimate. Выводы keep/change и ограничения находятся в [отчёте CLEW-126](./CLEW-126-REPORT.md). Fixture adapter не предоставляет provider usage, поэтому ускорение и live-model quality не утверждаются.
 
 Fixtures автоматически проверяют контракт, provenance, stale/cancel/restart и совместимость с обычным запуском. Реальные прогоны подтверждают полезность содержания; они не заменяются одной проверкой JSON. Вывод пилота — перечень сохранённых полей и необходимых поправок, включённых в контракт до начала CLEW-114/115. Если результаты неудовлетворительны, карточка пилота остаётся незавершённой до исправления минимальной версии; постоянная память не становится обходным требованием.
 
@@ -77,7 +77,7 @@ Fixtures автоматически проверяют контракт, provena
 | [CLEW-123](../tasks/done/CLEW-123.md) | S      | RepositoryContext v1 и проверяемые fixtures (готово)      | —           |
 | [CLEW-124](../tasks/done/CLEW-124.md) | M      | Явный read-only scout run, CLI и локальный результат      | 123         |
 | [CLEW-125](../tasks/done/CLEW-125.md) | M      | Минимальное подключение карты к architect/worker (готово) | 124         |
-| [CLEW-126](../tasks/CLEW-126.md)      | S      | Пилот на трёх задачах и уточнение контракта               | 125         |
+| [CLEW-126](../tasks/done/CLEW-126.md) | S      | Пилот на трёх задачах и уточнение контракта (готово)      | 125         |
 
 ```text
 123 → 124 → 125 → 126 ───────────────→ 114 → 115
@@ -85,7 +85,7 @@ Fixtures автоматически проверяют контракт, provena
 105 → 106; 107 → 108; 109 → 110/111 → bounded reads
 ```
 
-Это сокращённая схема: точные зависимости остаются в карточках. Scout не зависит от нового ArtifactStore/checkpoint, чтобы пилот можно было провести первым. CLEW-114 требует завершённого CLEW-126; CLEW-115 наследует эту зависимость. Оптимизация хранения CLEW-105–113 может выполняться независимо от scout. После пилота сначала используется простая карта v0, затем её references переходят в стандартное хранение без повторного исследования и изменения provenance.
+Это сокращённая схема: точные зависимости остаются в карточках. Scout не зависит от нового ArtifactStore/checkpoint, чтобы пилот можно было провести первым. CLEW-126 завершён; CLEW-114 требует его выводы, а CLEW-115 наследует эту зависимость. Оптимизация хранения CLEW-105–113 может выполняться независимо от scout. Сначала используется простая карта v0, затем её references переходят в стандартное хранение без повторного исследования и изменения provenance.
 
 ## Позднее расширение — намерение, не текущие обязательства
 

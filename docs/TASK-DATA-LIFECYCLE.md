@@ -33,7 +33,7 @@ Clew уже сохраняет Task Contract, планы, Runs, решения �
 
 ## Scout и входной контекст задачи
 
-[Scout v0](./SCOUT.md) реализуется и проверяется до фиксации checkpoint/handoff контракта: CLEW-123 → 124 → 125 → 126 → 114 → 115. Минимальная карта хранится обычным versioned JSON-файлом и использует существующий Execution Brief; ей не требуется новый ArtifactStore.
+[Scout v0](./SCOUT.md) реализован и проверен до фиксации checkpoint/handoff контракта: CLEW-123 → 124 → 125 → 126 → 114 → 115. Пилот CLEW-126 подтвердил передачу выбранных sections через существующий Execution Brief на трёх fixture-сценариях. Минимальная карта хранится обычным versioned JSON-файлом и использует существующий Execution Brief; ей не требуется новый ArtifactStore.
 
 RepositoryContext описывает изученный код и источники на определённой revision. Checkpoint описывает прогресс конкретной Task и хранит ссылки на выбранные версии RepositoryContext. Ни общая память репозитория, ни её постоянная синхронизация не входят в этот этап. По результатам пилота CLEW-126 уточняются поля контекста, выбор по ролям и проверка устаревания. Последующее расширение scout обозначено в его документе и не блокирует оптимизацию хранения.
 
@@ -191,7 +191,7 @@ CLEW-123–126: контракт карты → read-only исследовани
 
 ### S4. Progress checkpoints и role handoff
 
-После scout пилота CLEW-126 уточнить схему checkpoint и сборщик Execution Brief по реальным результатам. Ввести materialized current pointer, rebuild из канонических записей и ссылки на выбранные RepositoryContext/artifacts. Проверить scout → architect → worker → reviewer → QA, retried attempt, continuation, restart и stale session fallback; обычный путь без scout остаётся доступен.
+По результатам завершённого пилота CLEW-126 схема checkpoint должна хранить выбранные RepositoryContext IDs/checksums/source revisions/sections отдельным reference-блоком, не смешивая его с progress. Ввести materialized current pointer, rebuild из канонических записей и ссылки на выбранные RepositoryContext/artifacts. Проверить scout → architect → worker → reviewer → QA, retried attempt, continuation, restart и stale session fallback; partial/unknown/omission markers не скрывать, а обычный путь без scout оставить доступным.
 
 ### S5. Retention, export и управление пользователем
 
@@ -213,7 +213,7 @@ S0 выполняется первым экспериментом контекс
 
 ## Карточки реализации
 
-Storage-карточки CLEW-105–122 остаются `planned`; CLEW-123–125 завершены, а CLEW-126 готовит пилот. Все они имеют размер S/M и `release: unassigned`. В очереди контекста первым идёт scout CLEW-123–126; независимая storage ветка начинается с CLEW-105. Номер карточки не определяет порядок исполнения.
+Storage-карточки CLEW-105–122 остаются `planned`; CLEW-123–126 завершены. Все они имеют размер S/M и `release: unassigned`. В очереди контекста следующим идёт checkpoint/handoff после завершённого scout pilot; независимая storage ветка начинается с CLEW-105. Номер карточки не определяет порядок исполнения.
 
 | Карточка                         | Размер | Результат                                               | Зависимости                  |
 | -------------------------------- | ------ | ------------------------------------------------------- | ---------------------------- |
