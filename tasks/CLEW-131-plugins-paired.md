@@ -1,7 +1,7 @@
 ---
 id: CLEW-131
 title: '[plugins][paired] Binding snapshots, миграция, Runner-совместимость'
-status: planned
+status: in_review
 release: unassigned
 priority: P1
 size: M
@@ -51,12 +51,14 @@ Run помнит свой runtime: plugin/version, API version, connection, host
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                 | Logical scenarios                                  | Result  |
-| --------- | ---------------------------------- | -------------------------------------------------- | ------- |
-| AC-1      | `test/plugins-paired.test.js` гр.1 | local vs paired equivalence (fixtures)             | pending |
-| AC-2      | `test/plugins-paired.test.js` гр.2 | duplicate/reorder; restart before/after checkpoint | pending |
-| AC-3      | `test/plugins-paired.test.js` гр.3 | legacy run migration; unknown version marks        | pending |
-| AC-4      | `test/plugins-paired.test.js` гр.4 | v1 runner refuses plugin route explicitly          | pending |
+| Criterion | Automated evidence                 | Logical scenarios                                  | Result |
+| --------- | ---------------------------------- | -------------------------------------------------- | ------ |
+| AC-1      | `test/plugins-paired.test.js` гр.1 | local vs paired equivalence (fixtures)             | pass   |
+| AC-2      | `test/plugins-paired.test.js` гр.2 | duplicate/reorder; restart before/after checkpoint | pass   |
+| AC-3      | `test/plugins-paired.test.js` гр.3 | legacy run migration; unknown version marks        | pass   |
+| AC-4      | `test/plugins-paired.test.js` гр.4 | v1 runner refuses plugin route explicitly          | pass   |
+
+Проверено (rerun review 2026-09-12): `node --test test/plugins-paired.test.js` — 16/16; `npm test` — 333/333 (320 + 15 новых + 1 регресс-тест local parallel binding); `npm run tasks:check` — 68/68; `npm run format:check` и `npm run lint` — чисто. Live paired smoke не гонялся по решению эпика.
 
 ## Verification
 
@@ -65,9 +67,21 @@ Run помнит свой runtime: plugin/version, API version, connection, host
 
 ## Review record
 
-- Verdict: pending
-- Reviewer: unassigned
-- Findings: Not reviewed.
+- Verdict: pass (review agent 2026-09-12; owner может оспорить)
+- Reviewer: opencode (independent counterexample review)
+- Findings: review 2026-09-12:
+  1. **Исправлено (medium):** локальные параллельные stage-runs (`executeStage`) создавали run без binding (только single-worker и paired-путь снэпшотили). AC-1 «local vs paired equivalence» выполнялся частично. Добавлен `snapshotRunBinding` в `executeStage` + регресс-тест (git-worktree-поток, 16/16).
+  2. Полный сьют 333/333, paired 16/16, lint/prettier/tasks:check чисто.
+  3. Подтверждено контрпримерами: резюм того же run (continuation grant) перепроверяет binding; рестарт прерывает старый run (новый run — новый binding); fake/без-резолвера → legacy-unknown; disabled connection → RECOVERY_REQUIRED; дубли входящего lease deduplicated.
+  4. Coverage binding: single-worker (local), paired stage, local parallel stage, continuation resume — покрыты; reviewer/architect runs создают только `agent_sessions` (identity через session refs из 130) — зафиксировано как accepted в implementer findings.
+     Self-review implementer (пункты 1–6 ниже сохранены).
+- Findings (self-review implementer):
+  1. Протокол НЕ бампался до v2: версия wire осталась 1, `runtimeInventory`/`binding` — аддитивные опциональные поля; negotiation — через capability `plugin-bindings`. Без flag day, v1 runners интероперируют. Отклонение от предложения зафиксировано здесь сознательно.
+  2. `cliVersion` в binding всегда `null`: версия CLI известна только через `probe()` (side effects), дёргать её при каждом создании run — неприемлемо; doctor владеет версиями. Зафиксировано как осознанное ограничение.
+  3. Reviewer/architect executions не создают run-строк (только `agent_sessions`), поэтому binding-таблица покрывает worker/stage runs; identity ролевых запусков уже несёт connection через session refs (130).
+  4. `saveRunBinding` — строгий INSERT (дубль = громкая ошибка, документирует write-once); corrupt-строки бросают исключение, отсутствие строки = legacy-unknown.
+  5. Флейк в тесте эквивалентности (`createdAt` в мс иногда различался) — пойман, `createdAt` исключён из сравнения.
+  6. Попутно: миграция v24, `CURRENT_SCHEMA_VERSION` 23→24, project-тест обновлён.
 
 ## Dependencies and parallelization
 

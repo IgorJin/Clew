@@ -28,7 +28,17 @@ import { analyzeTask } from './task-analysis.js';
 import { buildFinalizationReport } from './finalization.js';
 import { createProjectId, detectProject } from './project.js';
 import { pickFolder } from './folder-picker.js';
+import { loadConfig } from './config.js';
 import { buildRuntimeHost } from './plugins/host.js';
+import { PLUGIN_ERROR_CODE, PluginError } from './plugins/errors.js';
+import { validateConfigValue } from './plugins/validate-config.js';
+import {
+  RESERVED_CONNECTION_IDS,
+  listHostConnections,
+  removeHostConnection,
+  saveHostConnection,
+  saveUserAgent,
+} from './plugins/host-config.js';
 import {
   assertHarnessConnectionExclusive,
   legacyDefaultModel,
@@ -44,6 +54,7 @@ import {
 const SERVICE_COMMANDS = new Set([
   'approve',
   'approve-run',
+  'agents',
   'cleanup',
   'complete',
   'connections',
@@ -186,6 +197,17 @@ export class ClewService {
     this.runnerGateway = runnerGateway;
     this.editorLauncher = editorLauncher;
     this.folderPicker = folderPicker;
+    this.loginSessions = new Map();
+  }
+
+  /** Reload host config after a settings write so the daemon sees it. */
+  reloadConfig() {
+    this.config = loadConfig(this.cwd, {
+      ...process.env,
+      CLEW_USER_CONFIG: this.config.userConfigPath,
+    });
+
+    return this.config;
   }
 
   supports(args) {
@@ -215,6 +237,7 @@ export class ClewService {
     if (command === 'retry') return this.retry(subcommand, rest, signal);
     if (command === 'complete') return this.complete(subcommand, rest);
     if (command === 'connections') return this.connections(subcommand, rest);
+    if (command === 'agents') return this.agents(subcommand, rest);
     if (command === 'finish-worker') return this.finishWorker(subcommand, rest);
     if (command === 'run') return this.run(subcommand, rest, signal);
     if (command === 'pricing') return this.syncPricing(subcommand, rest);
@@ -837,26 +860,287 @@ export class ClewService {
    * enabled flag, and advertised capabilities. Connection configs,
    * binaries, endpoints, and credentials are never included.
    */
-  connections(subcommand, _args) {
-    if (subcommand && subcommand !== 'list') throw new Error('usage: clew connections list');
+  hostForSettings() {
+    return buildRuntimeHost(this.config, {
+      terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
+    });
+  }
 
-    const host = buildRuntimeHost(this.config, { terminalManager: this.terminalManager });
+  connections(subcommand = 'list', args = []) {
+    const host = this.hostForSettings();
+    const userConfigPath = this.config.userConfigPath;
 
-    return {
-      connections: host.connections.map((entry) => {
-        let capabilities;
+    if (!subcommand || subcommand === 'list')
+      return {
+        connections: host.connections.map((entry) => {
+          let capabilities;
 
-        try {
-          capabilities =
-            host.resolver.resolve({ connectionId: entry.id }).describe()?.capabilities ?? [];
-        } catch {
-          capabilities = [];
-        }
+          try {
+            capabilities =
+              host.resolver.resolve({ connectionId: entry.id }).describe()?.capabilities ?? [];
+          } catch {
+            capabilities = [];
+          }
 
-        return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled, capabilities };
-      }),
-      diagnostics: host.diagnostics,
+          return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled, capabilities };
+        }),
+        diagnostics: host.diagnostics,
+      };
+
+    if (subcommand === 'show') {
+      const id = args[0] ?? getOptionValue(args, '--id');
+
+      if (!id) throw new Error('usage: clew connections show ID');
+      const entry = host.connections.find((candidate) => candidate.id === id);
+
+      if (!entry)
+        throw new PluginError(PLUGIN_ERROR_CODE.UNKNOWN_ID, `unknown connection id "${id}"`, {
+          connectionId: id,
+        });
+      const stored = listHostConnections(userConfigPath).find((candidate) => candidate.id === id);
+      const manifest = host.registry.get(entry.plugin).manifest;
+
+      return {
+        id,
+        plugin: entry.plugin,
+        enabled: entry.enabled,
+        source: stored ? 'user' : 'legacy',
+        reserved: RESERVED_CONNECTION_IDS.includes(id),
+        config: stored?.config ?? {},
+        configSchema: manifest.configSchema,
+      };
+    }
+
+    if (subcommand === 'save') return this.saveConnection(host, args);
+    if (subcommand === 'remove') {
+      const id = args[0] ?? getOptionValue(args, '--id');
+
+      if (!id) throw new Error('usage: clew connections remove ID');
+      removeHostConnection(userConfigPath, id);
+      this.reloadConfig();
+
+      return { removed: true, id };
+    }
+    if (subcommand === 'login') return this.loginConnection(host, args);
+    if (subcommand === 'login-status') return this.loginStatus(args);
+
+    throw new Error('usage: clew connections list|show|save|remove|login|login-status');
+  }
+
+  saveConnection(host, args) {
+    const id = args[0] ?? getOptionValue(args, '--id');
+    const plugin = getOptionValue(args, '--plugin');
+
+    if (!id || !plugin)
+      throw new Error(
+        'usage: clew connections save ID --plugin PLUGIN [--bin PATH] [--base-url URL] [--model M] [--enabled true|false]',
+      );
+    if (!host.registry.has(plugin))
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.INVALID_CONFIG,
+        `unknown plugin "${plugin}"; allowed: ${host.registry
+          .list()
+          .map((entry) => entry.id)
+          .join(', ')}`,
+      );
+    const existing = listHostConnections(this.config.userConfigPath).find(
+      (candidate) => candidate.id === id,
+    );
+    const config = { ...(existing?.config ?? {}) };
+
+    for (const [flag, key] of [
+      ['--bin', 'bin'],
+      ['--base-url', 'baseUrl'],
+      ['--model', 'model'],
+    ]) {
+      const value = getOptionValue(args, flag);
+
+      if (value === undefined) continue;
+      if (value === '') delete config[key];
+      else config[key] = value;
+    }
+    const enabledFlag = getOptionValue(args, '--enabled');
+    const enabled = enabledFlag === undefined ? true : enabledFlag !== 'false';
+
+    validateConfigValue(
+      host.registry.get(plugin).manifest.configSchema,
+      config,
+      `connections["${id}"].config`,
+    );
+    saveHostConnection(this.config.userConfigPath, { id, plugin, enabled, config });
+    this.reloadConfig();
+
+    return { saved: true, id, plugin, enabled, config, path: this.config.userConfigPath };
+  }
+
+  async loginConnection(host, args) {
+    const id = args[0] ?? getOptionValue(args, '--id');
+    const withApiKey = args.includes('--with-api-key');
+
+    if (!id) throw new Error('usage: clew connections login ID [--with-api-key --api-key KEY]');
+
+    const adapter = host.resolver.resolve({ connectionId: id });
+
+    if (!withApiKey) {
+      if (typeof adapter.authenticate !== 'function')
+        throw new PluginError(
+          PLUGIN_ERROR_CODE.UNSUPPORTED_CAPABILITY,
+          `connection "${id}" does not support interactive authentication`,
+          { connectionId: id },
+        );
+
+      const session = {
+        sessionId: randomUUID(),
+        connectionId: id,
+        status: 'pending',
+        startedAt: new Date().toISOString(),
+      };
+      let resolveCode;
+
+      session.codeReady = new Promise((resolve) => {
+        resolveCode = resolve;
+      });
+      this.loginSessions.set(session.sessionId, session);
+      void adapter
+        .authenticate({
+          onDeviceCode: (payload) => {
+            session.verificationUrl = payload.verificationUrl;
+            session.userCode = payload.userCode;
+            resolveCode(true);
+          },
+          onOutput: (text) => {
+            session.output = `${session.output ?? ''}${text}`.slice(-4_000);
+          },
+        })
+        .then(
+          (result) => {
+            session.status = result.status;
+            session.detail = result.detail ?? null;
+          },
+          (error) => {
+            session.status = 'failed';
+            session.detail = error?.message ?? String(error);
+          },
+        );
+
+      // Give the CLI a moment to print the device code, then return so the UI
+      // can display it while the process waits for browser approval.
+      await Promise.race([session.codeReady, new Promise((resolve) => setTimeout(resolve, 2_500))]);
+
+      return this.publicLogin(session);
+    }
+
+    // --with-api-key: key arrives as a flag value so daemon/API callers
+    // (including the UI) can use it; stdin remains a CLI fallback.
+    // The key is piped to the child process only and is never persisted.
+    if (typeof adapter.loginWithApiKey !== 'function')
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.UNSUPPORTED_CAPABILITY,
+        `connection "${id}" does not support API key authentication`,
+        { connectionId: id },
+      );
+
+    let apiKey = getOptionValue(args, '--api-key');
+
+    if (apiKey === undefined && process.stdin && !process.stdin.isTTY) {
+      const keyBuffer = [];
+
+      for await (const chunk of process.stdin) keyBuffer.push(chunk);
+      apiKey = Buffer.concat(keyBuffer).toString('utf8').trim();
+    }
+
+    if (!apiKey)
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.INVALID_CONFIG,
+        'API key cannot be empty; pass --api-key KEY or pipe it via stdin',
+      );
+
+    const session = {
+      sessionId: randomUUID(),
+      connectionId: id,
+      status: 'pending',
+      startedAt: new Date().toISOString(),
     };
+
+    this.loginSessions.set(session.sessionId, session);
+
+    void adapter.loginWithApiKey(apiKey).then(
+      (result) => {
+        session.status = result.status;
+        session.detail = result.detail ?? null;
+      },
+      (error) => {
+        session.status = 'failed';
+        session.detail = error?.message ?? String(error);
+      },
+    );
+
+    // Give the API key authentication a moment to complete.
+    await Promise.race([
+      new Promise((r) => setTimeout(r, 2_500)),
+      new Promise((r) => setTimeout(r, 0)),
+    ]);
+
+    return this.publicLogin(session);
+  }
+
+  loginStatus(args) {
+    const sessionId = args[0] ?? getOptionValue(args, '--session');
+
+    if (!sessionId) throw new Error('usage: clew connections login-status SESSION-ID');
+    const session = this.loginSessions.get(sessionId);
+
+    if (!session)
+      throw new PluginError(PLUGIN_ERROR_CODE.UNKNOWN_ID, `unknown login session "${sessionId}"`);
+
+    return this.publicLogin(session);
+  }
+
+  publicLogin(session) {
+    return {
+      sessionId: session.sessionId,
+      connectionId: session.connectionId,
+      status: session.status,
+      ...(session.verificationUrl ? { verificationUrl: session.verificationUrl } : {}),
+      ...(session.userCode ? { userCode: session.userCode } : {}),
+      ...(session.detail ? { detail: session.detail } : {}),
+    };
+  }
+
+  agents(subcommand = 'list', args = []) {
+    if (!subcommand || subcommand === 'list') {
+      const { routes } = this.resolveRunRoutes([]);
+
+      return { roles: Object.values(routes) };
+    }
+
+    if (subcommand === 'set') {
+      const role = args[0] ?? getOptionValue(args, '--role');
+      const connection = getOptionValue(args, '--connection');
+
+      if (!role || !AGENT_ROLES.includes(role))
+        throw new Error(
+          `usage: clew agents set ROLE --connection ID [--model M] (roles: ${AGENT_ROLES.join(', ')})`,
+        );
+      if (!connection) throw new Error('--connection is required');
+      const host = this.hostForSettings();
+
+      if (!host.connections.some((entry) => entry.id === connection))
+        throw new PluginError(
+          PLUGIN_ERROR_CODE.HOST_POLICY_DENIED,
+          `connection "${connection}" is not available on this execution host`,
+          { connectionId: connection },
+        );
+      const model = getOptionValue(args, '--model', null);
+
+      saveUserAgent(this.config.userConfigPath, role, { connection, model: model || null });
+      this.reloadConfig();
+
+      return { saved: true, role, connection, model: model || null };
+    }
+
+    throw new Error('usage: clew agents list|set');
   }
 
   async session(subcommand, args) {
@@ -1394,6 +1678,9 @@ export class ClewService {
       status: ready ? 'ready' : 'unavailable',
       plugin: entry.plugin,
       capabilities,
+      // Secret-safe auth signal: a boolean only — never the account or
+      // raw `login status` output.
+      ...(probe?.auth ? { auth: probe.auth.ok === true } : {}),
       ...(ready && typeof probe.version?.version === 'string'
         ? { version: probe.version.version }
         : {}),
@@ -1424,6 +1711,7 @@ export class ClewService {
 
     const host = buildRuntimeHost(this.resolveCommandConfig(args), {
       terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
     });
     const entries = host.connections.filter(
       (entry) => !selectedConnection || entry.id === selectedConnection,
@@ -1542,7 +1830,10 @@ export class ClewService {
    */
   resolveRunRoutes(args, runtimeConfig = this.config) {
     const getFlag = (name) => getOptionValue(args, name);
-    const host = buildRuntimeHost(runtimeConfig, { terminalManager: this.terminalManager });
+    const host = buildRuntimeHost(runtimeConfig, {
+      terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
+    });
     const allowedConnections = host.connections.map((entry) => entry.id);
     const { sources, diagnostics } = collectRoleSources({
       getFlag,

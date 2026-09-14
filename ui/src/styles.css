@@ -2721,6 +2721,9 @@ textarea:focus {
 /* ── Settings ────────────────────────────────── */
 .settings-modal {
   width: min(560px, 100%);
+  max-height: min(85vh, 100%);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .settings-layout {
@@ -2789,6 +2792,218 @@ textarea:focus {
   align-items: center;
   gap: 4px;
   color: var(--accent);
+  font-size: 12px;
+}
+
+/* ── Settings · Connections (read-only projection) ── */
+.connection-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-summary {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.connection-summary.ok {
+  color: var(--green);
+}
+
+.connection-summary.warn {
+  color: var(--amber);
+}
+
+.connection-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--red);
+}
+
+.connection-list {
+  display: grid;
+  gap: 8px;
+}
+
+.connection-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.connection-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.connection-id {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.connection-state {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.connection-state.enabled,
+.connection-state.status-ready {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.connection-state.status-unavailable,
+.connection-state.status-incompatible {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.connection-state.status-disabled,
+.connection-state.disabled {
+  opacity: 0.7;
+}
+
+.connection-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.connection-plugin {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.connection-auth.ok {
+  color: var(--green);
+}
+
+.connection-auth.fail {
+  color: var(--red);
+}
+
+.connection-capabilities {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.capability-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.connection-diagnostics {
+  display: grid;
+  gap: 4px;
+}
+
+.connection-diagnostic {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.connection-notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--green);
+}
+
+.connection-login {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.connection-login a {
+  color: var(--accent);
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.connection-login input[type='password'] {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.connection-code {
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: var(--text);
+}
+
+.connection-editor {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.connection-editor label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.connection-editor input,
+.connection-editor select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.connection-editor .connection-enabled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.connection-roles {
+  display: grid;
+  gap: 6px;
+}
+
+.connection-role {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.connection-role select,
+.connection-role input {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
   font-size: 12px;
 }
 

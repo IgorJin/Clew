@@ -10,7 +10,7 @@
 
 import { PLUGIN_ERROR_CODE, PluginError } from './errors.js';
 
-const TYPES = new Set(['object', 'array', 'string', 'number', 'boolean', 'integer']);
+const TYPES = new Set(['object', 'array', 'string', 'number', 'boolean', 'integer', 'null']);
 
 function typeOf(value) {
   if (Array.isArray(value)) return 'array';

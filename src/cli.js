@@ -23,6 +23,7 @@ import {
   stopDaemon,
 } from './daemon.js';
 import { ClewService } from './control-service.js';
+import { buildRunnerHost, collectRunnerInventory } from './plugins/host.js';
 import { RunnerExecutionPort } from './runner-execution.js';
 import { RunnerService } from './runner.js';
 import { RunnerStore } from './runner-store.js';
@@ -222,13 +223,26 @@ async function runRunnerCommand(subcommand) {
     maxOutboxBytes: runnerConfig.outbox.maxBytes,
     reservedTerminalEntries: runnerConfig.outbox.reservedEntries,
   });
+  const runtimeInventory = collectRunnerInventory(runnerConfig.adapterConfig);
+  // CLEW-133: the Runner resolves executors through the plugin registry
+  // like the Controller side; legacy name branches stay as fallback.
+  const runnerHost = buildRunnerHost(runnerConfig.adapterConfig);
   const transport = new RunnerTransport({
     endpoint: runnerConfig.controllerUrl,
     credential: runnerConfig.credential,
     runnerId: runnerConfig.runnerId,
     productVersion: packageVersion,
-    capabilities: runnerConfig.capabilities,
+    // CLEW-131: the capability advertises binding support; legacy v1
+    // runners never send it, so the Controller can refuse plugin routes
+    // for them explicitly.
+    capabilities: [
+      ...runnerConfig.capabilities,
+      ...(runtimeInventory.length > 0 ? ['plugin-bindings'] : []),
+    ],
     workspaces: runnerConfig.workspaces.map(({ id }) => ({ id })),
+    // CLEW-131: safe runtime inventory makes this Runner accept
+    // plugin-bound leases; without it the Runner stays on the v1 route.
+    runtimeInventory,
     store,
     reconnect: {
       initialMs: runnerConfig.reconnect.minDelayMs,
@@ -239,6 +253,8 @@ async function runRunnerCommand(subcommand) {
     workspaces: runnerConfig.workspaces,
     worktreeRoot: join(runnerConfig.stateDir, 'worktrees'),
     adapterConfig: runnerConfig.adapterConfig,
+    runtimeResolver: runnerHost.resolver,
+    runtimeInventory,
   });
   const service = new RunnerService({ store, transport, executionPort });
   const controller = new AbortController();

@@ -192,6 +192,36 @@ test('merges agent connections with project-over-user precedence and exposes lay
   }
 });
 
+test('rejects project plugin config that smuggles host-level settings', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-agents-host-'));
+
+  try {
+    writeFileSync(
+      join(dir, '.clew.json'),
+      JSON.stringify({
+        agents: { worker: { connection: 'x', model: null } },
+        connections: [{ id: 'sneaky', plugin: 'clew.runtime.codex', bin: '/tmp/evil' }],
+      }),
+    );
+    assert.throws(
+      () => loadConfig(dir, { CLEW_USER_CONFIG: join(dir, 'missing.json') }),
+      /must not define host-level field "connections\.0\.bin"/,
+    );
+
+    // Host-level fields in the `plugins` section are rejected too.
+    writeFileSync(
+      join(dir, '.clew.json'),
+      JSON.stringify({ plugins: [{ id: 'p', endpoint: 'http://evil' }] }),
+    );
+    assert.throws(
+      () => loadConfig(dir, { CLEW_USER_CONFIG: join(dir, 'missing.json') }),
+      /must not define host-level field/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('loads standalone Runner config without consulting project config', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-runner-config-'));
   const userConfig = join(dir, 'user.json');

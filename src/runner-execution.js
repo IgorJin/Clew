@@ -72,6 +72,7 @@ export class RunnerExecutionPort {
     worktreeRoot = null,
     harnessFactory = null,
     runtimeResolver = null,
+    runtimeInventory = null,
     adapterConfig = {},
   } = {}) {
     this.workspaces = new Map(workspaces.map((workspace) => [workspace.id, workspace.path]));
@@ -88,6 +89,7 @@ export class RunnerExecutionPort {
     );
     this.harnessFactory = harnessFactory;
     this.runtimeResolver = runtimeResolver;
+    this.runtimeInventory = runtimeInventory;
     this.adapterConfig = adapterConfig;
     this.active = new Map();
   }
@@ -130,11 +132,58 @@ export class RunnerExecutionPort {
     throw new Error(`unsupported Runner architect: ${name}`);
   }
 
+  /** Check a plugin-bound lease against this Runner's inventory (CLEW-131).
+   *
+   * A Runner without inventory (legacy v1 route) refuses plugin-bound
+   * leases explicitly instead of executing them on a mismatched runtime.
+   */
+  requireBindingSupport(binding) {
+    if (!binding || typeof binding !== 'object')
+      throw new Error('Runner lease binding must be an object');
+
+    if (!this.runtimeInventory)
+      throw new Error(
+        'Runner does not support plugin-bound leases (legacy v1 route): refusing the plugin-bound lease explicitly; upgrade the Runner or offer a legacy harness route',
+      );
+
+    const entry = this.runtimeInventory.find((item) => item.plugin === binding.pluginId);
+
+    if (!entry)
+      throw new Error(
+        `unsupported Runner binding: plugin "${binding.pluginId}" is not installed on this Runner`,
+      );
+
+    if (entry.version !== binding.pluginVersion)
+      throw new Error(
+        `unsupported Runner binding: plugin "${binding.pluginId}" is at version ${entry.version} but the lease requires ${binding.pluginVersion}`,
+      );
+
+    const connection = (entry.connections ?? []).find((item) => item.id === binding.connectionId);
+
+    if (!connection || !connection.enabled)
+      throw new Error(
+        `unsupported Runner binding: connection "${binding.connectionId}" is unavailable on this Runner`,
+      );
+
+    const capabilities = entry.capabilities ?? [];
+    const missing = (binding.capabilitySnapshot ?? []).filter(
+      (capability) => !capabilities.includes(capability),
+    );
+
+    if (missing.length > 0)
+      throw new Error(
+        `unsupported Runner binding: this Runner lacks capabilities: ${missing.join(', ')}`,
+      );
+  }
+
   async accept(offer, { signal, onEvent } = {}) {
     const projectRoot = this.workspaces.get(offer.workspaceId);
 
     if (!projectRoot)
       throw new Error(`Runner workspace mapping is unavailable: ${offer.workspaceId}`);
+
+    if (offer.binding !== undefined && offer.binding !== null)
+      this.requireBindingSupport(offer.binding);
     const requirements = offer.requirements ?? {};
     const task = requirements.task;
 

@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { assertSecureRunnerEndpoint } from './runner-protocol.js';
+import { assertSafeProjectPluginConfig } from './plugins/project-config.js';
 
 const SECRET_KEY_PATTERN = /(?:authorization|api[_-]?key|token|password|secret|cookie)/i;
 
@@ -160,6 +161,10 @@ export function loadConfig(projectRoot = process.cwd(), env = process.env) {
   const projectConfig = readJsonIfPresent(projectConfigPath);
 
   assertSafeProjectConfig(projectConfig);
+  // CLEW-127 AC-4: project config must not smuggle host-level settings
+  // (binaries, endpoints, credentials) into the plugin sections. Wired
+  // here so it runs on the real load path, not just in unit tests.
+  assertSafeProjectPluginConfig(projectConfig);
 
   for (const role of ['worker', 'architect', 'reviewer', 'qa']) {
     assertAgentEntry(role, userConfig.agents?.[role], 'user config');

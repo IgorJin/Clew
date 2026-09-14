@@ -120,6 +120,10 @@ const PAYLOAD_ALLOWLIST = Object.freeze({
     'capabilities',
     'workspaces',
     'startedAt',
+    // CLEW-131: safe runtime inventory (plugin ids/versions/capabilities,
+    // connection ids — no configs, paths, or credentials). Optional, so v1
+    // runners keep registering unchanged.
+    'runtimeInventory',
   ]),
   [RUNNER_MESSAGE_KIND.REGISTERED]: new Set([
     'runnerId',
@@ -146,6 +150,9 @@ const PAYLOAD_ALLOWLIST = Object.freeze({
     'profile',
     'harness',
     'requirements',
+    // CLEW-131: immutable run binding (safe fields only). Optional, so v1
+    // offers validate unchanged.
+    'binding',
   ]),
   [RUNNER_MESSAGE_KIND.LEASE_ACCEPTED]: new Set(['runnerId', 'leaseId', 'epoch']),
   [RUNNER_MESSAGE_KIND.LEASE_REJECTED]: new Set(['runnerId', 'leaseId', 'epoch', 'reason']),

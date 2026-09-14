@@ -31,10 +31,14 @@ import {
   resolveCodexHarness,
   resolveCodexReviewer,
   resolveOpenCodeHarness,
+  selectCodexConnectionId,
+  selectOpenCodeConnectionId,
 } from './plugins/legacy.js';
 import { verificationEnvironment } from './trust.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 import { RUNNER_MESSAGE_KIND, createRunnerEnvelope } from './runner-protocol.js';
+import { buildRunBinding, checkBindingCompatible } from './plugins/binding.js';
+import { PLUGIN_ERROR_CODE, PluginError } from './plugins/errors.js';
 import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
 import { createArchitectureResult } from './architecture-result.js';
 
@@ -154,6 +158,8 @@ export class Scheduler {
       ? this.store.getRun(continuationGrant.correction_run_id)
       : null;
 
+    if (persistedRun) this.requireCompatibleBinding(persistedRun.id);
+
     if (!persistedRun) resumeSessionId = this.reconcileSingleWorker(row, resumeSessionId);
     else if (
       [
@@ -230,6 +236,17 @@ export class Scheduler {
 
         persistedRun = createdRun;
         runId = persistedRun.id;
+        if (!allocatedHere) this.requireCompatibleBinding(runId);
+        else
+          this.snapshotRunBinding({
+            runId,
+            taskId,
+            stageId,
+            attempt,
+            harnessName,
+            model: this.adapterConfig.models?.worker ?? null,
+            executionHost: 'local',
+          });
         if (!allocatedHere)
           workspace = {
             path: persistedRun.workspace,
@@ -719,6 +736,16 @@ export class Scheduler {
     };
 
     this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
+    const binding = this.snapshotRunBinding({
+      runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      harnessName,
+      model: requirements.model ?? null,
+      executionHost: runner.runnerId,
+      persist: false,
+    });
     const run = {
       id: runId,
       taskId,
@@ -729,6 +756,7 @@ export class Scheduler {
       profile: policy?.name ?? task.profile,
       policy,
       startedAt: new Date().toISOString(),
+      ...(binding ? { binding } : {}),
     };
     const lease = {
       id: leaseId,
@@ -754,6 +782,7 @@ export class Scheduler {
         profile: policy?.name ?? task.profile,
         harness: harnessName,
         requirements,
+        ...(binding ? { binding } : {}),
       },
     });
 
@@ -763,6 +792,8 @@ export class Scheduler {
       offer,
       requirements: lease.requirements,
     });
+
+    if (binding) this.store.saveRunBinding(runId, binding);
     let storedResult = null;
 
     while (!storedResult) {
@@ -1638,6 +1669,15 @@ export class Scheduler {
     };
 
     this.store.createRun(run);
+    this.snapshotRunBinding({
+      runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      harnessName,
+      model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
+      executionHost: 'local',
+    });
     this.store.appendEvent(taskId, 'STAGE_RUN_STARTED', {
       ...run,
       branch: stageWorkspace.branch,
@@ -1755,6 +1795,81 @@ export class Scheduler {
       });
       throw error;
     }
+  }
+
+  /** Snapshot an immutable binding for a newly allocated run (CLEW-131). */
+  snapshotRunBinding({
+    runId,
+    taskId = null,
+    stageId = null,
+    attempt = null,
+    harnessName,
+    model = null,
+    executionHost = 'local',
+    persist = true,
+  }) {
+    if (!this.runtimeResolver) return null;
+
+    let connectionId;
+
+    if (harnessName === HARNESS_NAME.CODEX)
+      connectionId = selectCodexConnectionId(this.adapterConfig);
+    else if (harnessName === HARNESS_NAME.OPENCODE)
+      connectionId = selectOpenCodeConnectionId(this.adapterConfig);
+    else return null;
+
+    let adapter;
+
+    try {
+      adapter = this.runtimeResolver.resolve({ connectionId });
+    } catch (error) {
+      // Unregistered names (fake in production hosts) stay binding-free
+      // and read as legacy-unknown; real misconfiguration stays loud.
+      if (error?.code === PLUGIN_ERROR_CODE.UNKNOWN_ID) return null;
+
+      throw error;
+    }
+
+    const binding = buildRunBinding({
+      runId,
+      taskId,
+      stageId,
+      attempt,
+      connectionId,
+      adapter,
+      registry: this.runtimeResolver.registry,
+      model,
+      executionHost,
+    });
+
+    if (persist) this.store.saveRunBinding(runId, binding);
+
+    return binding;
+  }
+
+  /** Require a saved binding to still match this host (CLEW-131).
+   *
+   * Legacy runs (no binding row) and hosts without a resolver proceed
+   * unchanged. Anything else that mismatches is explicit recovery — the
+   * run is never re-routed to a different runtime automatically.
+   */
+  requireCompatibleBinding(runId) {
+    const record = this.store.getRunBinding(runId);
+
+    if (record.status === 'legacy-unknown' || !this.runtimeResolver) return record;
+
+    const verdict = checkBindingCompatible(record.binding, {
+      registry: this.runtimeResolver.registry,
+      resolver: this.runtimeResolver,
+    });
+
+    if (!verdict.compatible)
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.RECOVERY_REQUIRED,
+        `${verdict.reason} (run ${runId})`,
+      );
+
+    return { status: 'bound', runId, binding: record.binding };
   }
 
   createHarnessAdapter(harnessName) {

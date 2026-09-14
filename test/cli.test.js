@@ -368,7 +368,14 @@ test('doctor reports per-connection readiness without failing fake setup', () =>
     assert.equal(result.ok, true);
     assert.deepEqual(
       result.checks.map((check) => check.name),
-      ['node', 'git', 'telemetry', 'connection:codex-default', 'connection:opencode-default'],
+      [
+        'node',
+        'git',
+        'telemetry',
+        'connection:codex-default',
+        'connection:opencode-default',
+        'connection:otel-main',
+      ],
     );
 
     const codex = result.checks.find((check) => check.name === 'connection:codex-default');
@@ -377,6 +384,11 @@ test('doctor reports per-connection readiness without failing fake setup', () =>
     assert.equal(codex.required, false);
     assert.equal(codex.status, 'unavailable');
     assert.equal(codex.plugin, 'clew.runtime.codex');
+
+    const otel = result.checks.find((check) => check.name === 'connection:otel-main');
+
+    assert.equal(otel.plugin, 'clew.telemetry.otel');
+    assert.equal(otel.status, 'disabled');
 
     const opencode = result.checks.find((check) => check.name === 'connection:opencode-default');
 

@@ -14,6 +14,7 @@ import { OPENCODE_DEFAULT_CONNECTION_ID, OPENCODE_RUNTIME_PLUGIN_ID } from './op
 import { registerCodexPlugin } from './codex/index.js';
 import { registerOpenCodePlugin } from './opencode/index.js';
 import { createCodexArchitect, createCodexReviewer } from './codex/role-services.js';
+import { OTEL_SINK_PLUGIN_ID, TELEMETRY_DEFAULT_CONNECTION_ID } from './telemetry/manifest.js';
 
 /** Role-service wrappers (CLEW-128 transition).
  *
@@ -245,6 +246,46 @@ export function legacyDefaultModel(role, pluginId) {
   if (role === 'reviewer' && pluginId === CODEX_RUNTIME_PLUGIN_ID) return LEGACY_REVIEWER_MODEL;
 
   return null;
+}
+
+/** Legacy OTel sink connection bridge (CLEW-132).
+ *
+ * Maps the classic observability settings (`enabled`, `endpoint`, queue
+ * bounds) to the `otel-main` connection. Telemetry stays off by default;
+ * an explicit disable resolves but never emits.
+ */
+export function buildLegacyTelemetryConnection({
+  enabled = false,
+  endpoint = null,
+  serviceName = null,
+  maxQueueSize = null,
+  exportTimeoutMs = null,
+} = {}) {
+  const config = {};
+
+  if (endpoint !== null && endpoint !== undefined) config.endpoint = endpoint;
+  if (serviceName !== null && serviceName !== undefined) config.serviceName = serviceName;
+  if (maxQueueSize !== null && maxQueueSize !== undefined) config.maxQueueSize = maxQueueSize;
+  if (exportTimeoutMs !== undefined && exportTimeoutMs !== null)
+    config.exportTimeoutMs = exportTimeoutMs;
+
+  const connection = {
+    id: TELEMETRY_DEFAULT_CONNECTION_ID,
+    plugin: OTEL_SINK_PLUGIN_ID,
+    enabled: enabled === true,
+    config,
+  };
+  const diagnostics = enabled
+    ? [
+        {
+          connection: TELEMETRY_DEFAULT_CONNECTION_ID,
+          source: 'observability',
+          message: `observability settings mapped to legacy connection "${TELEMETRY_DEFAULT_CONNECTION_ID}"; prefer an explicit connection instead`,
+        },
+      ]
+    : [];
+
+  return { connection, diagnostics };
 }
 
 /** Legacy harness-name to plugin-id map for doctor filtering (CLEW-130). */

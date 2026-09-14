@@ -22,6 +22,8 @@ export const AGENT_RUNTIME_OPTIONAL_METHODS = Object.freeze([
   'reconcile',
   'prepareSurface',
   'listModels',
+  // CLEW-133 follow-up: interactive authentication (e.g. device-code login).
+  'authenticate',
 ]);
 
 export const RUNTIME_ERROR_CLASS = Object.freeze({

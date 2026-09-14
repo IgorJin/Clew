@@ -21,14 +21,9 @@ export {
  * implementations until CLEW-128/129 move them behind the AgentRuntime port
  * from `src/plugins/`. New code must resolve executors through the plugin
  * registry in the composition root instead of branching on harness names
- * here. Legacy harness names map to plugin IDs below; the factories
- * themselves are not removed by this card.
+ * here. Legacy name-to-connection mapping lives in `src/plugins/legacy.js`;
+ * the factories themselves stay until CLEW-133 removes the unreachable ones.
  */
-export const LEGACY_HARNESS_PLUGIN_IDS = Object.freeze({
-  codex: 'clew.runtime.codex',
-  opencode: 'clew.runtime.opencode',
-  fake: 'clew.runtime.fake',
-});
 
 /** CLEW-129: OpenCode adapter implementation lives in
  * `src/plugins/opencode/harness.js` (re-exported below as a compatibility

@@ -6,7 +6,7 @@
  * second writer, it only borrows the single owned harness.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { PLUGIN_ERROR_CODE, PluginError } from '../errors.js';
 import { normalizeUsage } from '../normalize-usage.js';
 import { createRuntimeError, validateRuntimeResult } from '../runtime-contract.js';
@@ -26,6 +26,21 @@ export const CODEX_CAPABILITIES = Object.freeze([
 
 function connectionBin(config) {
   return typeof config?.bin === 'string' && config.bin ? config.bin : 'codex';
+}
+
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+
+function stripAnsi(value) {
+  return value.replace(ANSI_PATTERN, '');
+}
+
+/** Parse `codex login --device-auth` output into URL + one-time code. */
+export function parseDeviceAuthOutput(text) {
+  const clean = stripAnsi(text);
+  const verificationUrl = clean.match(/https:\/\/[^\s]+/)?.[0] ?? null;
+  const userCode = clean.match(/\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b/)?.[1] ?? null;
+
+  return { verificationUrl, userCode };
 }
 
 function mapHarnessError(error, session, bin) {
@@ -79,7 +94,80 @@ export class CodexAgentRuntime {
       plugin: CODEX_RUNTIME_PLUGIN_ID,
       apiVersion: '1',
       capabilities: [...CODEX_CAPABILITIES],
+      authentication: 'device-code',
     };
+  }
+
+  /** Start `codex login --device-auth` and wait for it to finish (CLEW-133).
+   *
+   * Emits the verification URL and one-time code through `onDeviceCode`
+   * while the process waits for the browser approval, then probes to
+   * confirm. No credentials pass through the caller.
+   */
+  async authenticate(hooks = {}) {
+    const bin = connectionBin(this.config);
+    const child = spawn(bin, ['login', '--device-auth'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    });
+    let buffer = '';
+    let emitted = false;
+    const consume = (chunk) => {
+      const text = stripAnsi(chunk.toString());
+
+      buffer += text;
+      hooks.onOutput?.(text);
+      const parsed = parseDeviceAuthOutput(buffer);
+
+      if (!emitted && parsed.verificationUrl && parsed.userCode) {
+        emitted = true;
+        hooks.onDeviceCode?.(parsed);
+      }
+    };
+
+    child.stdout.on('data', consume);
+    child.stderr.on('data', consume);
+    const spawnError = new Promise((_, reject) => child.once('error', reject));
+    const exitCode = await Promise.race([
+      spawnError,
+      new Promise((resolve) => child.once('exit', resolve)),
+    ]);
+
+    if (exitCode === 0) {
+      const probe = await this.probe();
+
+      return probe.status === 'ready'
+        ? { status: 'authenticated' }
+        : { status: 'failed', detail: 'login exited without a ready probe' };
+    }
+
+    return { status: 'failed', detail: `codex login exited with code ${exitCode}` };
+  }
+
+  async loginWithApiKey(apiKey) {
+    const bin = connectionBin(this.config);
+    const child = spawn(bin, ['login', '--with-api-key'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+    });
+
+    child.stdin.write(apiKey);
+    child.stdin.end();
+    const spawnError = new Promise((_, reject) => child.once('error', reject));
+    const exitCode = await Promise.race([
+      spawnError,
+      new Promise((resolve) => child.once('exit', resolve)),
+    ]);
+
+    if (exitCode === 0) {
+      const probe = await this.probe();
+
+      return probe.status === 'ready'
+        ? { status: 'authenticated' }
+        : { status: 'failed', detail: 'login exited without a ready probe' };
+    }
+
+    return { status: 'failed', detail: `codex login --with-api-key exited with code ${exitCode}` };
   }
 
   async probe() {

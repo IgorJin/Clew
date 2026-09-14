@@ -1,7 +1,7 @@
 ---
 id: CLEW-133
 title: '[plugins][release] Conformance без live-smoke и доки'
-status: planned
+status: in_review
 release: unassigned
 priority: P1
 size: M
@@ -50,12 +50,14 @@ evidence_policy: v1
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence                | Logical scenarios                       | Result  |
-| --------- | --------------------------------- | --------------------------------------- | ------- |
-| AC-1      | conformance matrix run (fixtures) | full matrix above                       | pending |
-| AC-2      | grep-gate CI                      | forbidden imports/config reads          | pending |
-| AC-3      | docs diff + config-matrix test    | new config; legacy flags; deferred list | pending |
-| AC-4      | quality gates log                 | lint/test/build                         | pending |
+| Criterion | Automated evidence                                                               | Logical scenarios                       | Result |
+| --------- | -------------------------------------------------------------------------------- | --------------------------------------- | ------ |
+| AC-1      | `test/plugins-conformance.test.js` (matrix 43 rows + 5 новых gap-тестов)         | full matrix above                       | pass   |
+| AC-2      | grep-gate CI + `conformance: production schedulers always carry a resolver`      | forbidden imports/config reads          | pass   |
+| AC-3      | docs diff (`PLUGIN-DI.md` Migration/Deferred/Compatibility) + legacy-matrix test | new config; legacy flags; deferred list | pass   |
+| AC-4      | quality gates log                                                                | lint/test/build                         | pass   |
+
+Проверено: `node --test test/plugins-conformance.test.js` — 9/9; `npm test` — 343/343 (334 + 9 новых); `npm run tasks:check` — 68/68; `npm run format:check` и `npm run lint` — чисто. Live smoke не гонялся по решению эпика (зафиксировано в `PLUGIN-DI.md`, раздел Deferred).
 
 ## Verification
 
@@ -64,9 +66,15 @@ evidence_policy: v1
 
 ## Review record
 
-- Verdict: pending
+- Verdict: pending (ждёт независимого review владельца)
 - Reviewer: unassigned
-- Findings: Not reviewed.
+- Findings: self-review implementer:
+  1. Матрица 43 строки: все замаплены на существующие тесты (структурная проверка в самом файле — несуществующая строка падает); 5 новых gap-тестов (duplicate completion, invalid plan/review, malformed model, harness identity).
+  2. Fourth-runtime proof: `clew.runtime.stub` резолвится и работает через generic-пути; scheduler/роли/lifecycle/UI не содержат его имени.
+  3. Чистка: удалён мёртвый `LEGACY_HARNESS_PLUGIN_IDS`; подключён resolver в `runner serve` (`buildRunnerHost`); legacy-ветки оставлены как fallback для тестов и прямого API — удаление только после P6-поверхностей (session/terminal), зафиксировано.
+  4. `needs_human` (lowercase, не `NEEDS_HUMAN`) — значение enum, тест поправлен.
+  5. Ручной стенд `scripts/plugins-stand.js` + runbook `docs/PLUGIN-STAND.md`: 32 проверки по всем разделам эпика, режимы `--keep/--step/--json/--section`, встроен в `npm run check` (`stand:plugins`).
+  6. Стенд поймал нюанс: sink с `unavailable` на старте полностью отключает core-эмиссию (state-gating как в старом коде) — «failing sink» проверяется отказом mid-flow, как в автотесте.
 
 ## Dependencies and parallelization
 

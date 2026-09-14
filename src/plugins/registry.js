@@ -8,6 +8,7 @@
 import { PLUGIN_ERROR_CODE, PluginError } from './errors.js';
 import { validatePluginManifest } from './manifest.js';
 import { assertAgentRuntime } from './runtime-contract.js';
+import { assertTelemetrySink } from './telemetry/contract.js';
 
 export class PluginRegistry {
   constructor() {
@@ -53,8 +54,20 @@ export class PluginRegistry {
 
   createAdapter(pluginId, connection) {
     const entry = this.get(pluginId);
+    const adapter = entry.factory(connection);
 
-    return assertAgentRuntime(entry.factory(connection), pluginId);
+    for (const { point } of entry.manifest.extensionPoints) {
+      if (point === 'AgentRuntime') assertAgentRuntime(adapter, pluginId);
+      else if (point === 'TelemetrySink') assertTelemetrySink(adapter, pluginId);
+      else
+        throw new PluginError(
+          PLUGIN_ERROR_CODE.INCOMPATIBLE,
+          `plugin "${pluginId}" declares no supported adapter contract for extension point "${point}"`,
+          { pluginId },
+        );
+    }
+
+    return adapter;
   }
 
   list() {

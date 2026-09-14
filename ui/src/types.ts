@@ -205,3 +205,42 @@ export type NextStep = {
   status?: string;
   analysis?: TaskAnalysis;
 };
+
+export type ConnectionProjection = {
+  id: string;
+  plugin: string;
+  enabled: boolean;
+  capabilities: string[];
+};
+
+export type ConnectionDiagnostic = {
+  connection?: string;
+  source?: string;
+  message?: string;
+};
+
+export type ConnectionsReport = {
+  connections: ConnectionProjection[];
+  diagnostics?: ConnectionDiagnostic[];
+  fixture?: boolean;
+};
+
+export type DoctorCheck = {
+  name: string;
+  status?: string;
+  required?: boolean;
+  ok?: boolean;
+  plugin?: string;
+  capabilities?: string[];
+  version?: string;
+  auth?: boolean;
+  reason?: string;
+  detail?: string;
+};
+
+export type DoctorReport = {
+  ok: boolean;
+  checks: DoctorCheck[];
+  diagnostics?: ConnectionDiagnostic[];
+  fixture?: boolean;
+};

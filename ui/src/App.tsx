@@ -30,6 +30,8 @@ import { rolesForProfile } from './api';
 import type {
   AgentRole,
   AgentSession,
+  ConnectionsReport,
+  DoctorReport,
   NextStep,
   Project,
   Run,
@@ -2675,7 +2677,10 @@ const AGENT_CONNECTIONS: { id: AgentConnectionId; label: string }[] = [
   { id: 'opencode', label: 'OpenCode CLI' },
 ];
 
-const SETTINGS_CHAPTERS = [{ key: 'agent', label: 'Agent' }] as const;
+const SETTINGS_CHAPTERS = [
+  { key: 'agent', label: 'Agent' },
+  { key: 'connections', label: 'Connections' },
+] as const;
 
 type SettingsChapter = (typeof SETTINGS_CHAPTERS)[number]['key'];
 
@@ -2685,6 +2690,618 @@ function readAgentConnection(): AgentConnectionId | null {
   return AGENT_CONNECTIONS.some((entry) => entry.id === stored)
     ? (stored as AgentConnectionId)
     : null;
+}
+
+type AgentRoute = { role: string; connection: string; model: string | null; source: string };
+
+type ConnectionEditor = {
+  id: string;
+  plugin: string;
+  bin: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+  isNew: boolean;
+};
+
+type LoginState = {
+  connectionId: string;
+  sessionId: string;
+  status: string;
+  verificationUrl?: string;
+  userCode?: string;
+  detail?: string;
+};
+
+const RUNTIME_PLUGINS = ['clew.runtime.codex', 'clew.runtime.opencode'];
+const RESERVED_CONNECTION_IDS = ['codex-default', 'opencode-default', 'otel-main'];
+const MODEL_SUGGESTIONS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-luna',
+  'gpt-5.3-codex',
+  'gpt-5.2-codex',
+  'gpt-5.1-codex',
+  'gpt-5.1-codex-max',
+  'gpt-5-codex',
+];
+const MODEL_SUGGESTIONS_ID = 'connection-model-suggestions';
+
+function ConnectionsChapter() {
+  const [report, setReport] = useState<ConnectionsReport | null>(null);
+  const [doctor, setDoctor] = useState<DoctorReport | null>(null);
+  const [agents, setAgents] = useState<AgentRoute[]>([]);
+  const [roleDraft, setRoleDraft] = useState<Record<string, { connection: string; model: string }>>(
+    {},
+  );
+  const [editor, setEditor] = useState<ConnectionEditor | null>(null);
+  const [login, setLogin] = useState<LoginState | null>(null);
+  const [apiKeyFor, setApiKeyFor] = useState<string | null>(null);
+  const [apiKeyValue, setApiKeyValue] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [connections, health, routes] = await Promise.all([
+        execute(['connections', 'list']),
+        execute(['doctor']),
+        execute(['agents', 'list']),
+      ]);
+      const nextConnections = connections as ConnectionsReport;
+
+      if (nextConnections?.fixture) {
+        setReport(null);
+        setDoctor(null);
+        setError('Connect to a running daemon to load connections.');
+        return;
+      }
+      setReport(nextConnections);
+      setDoctor(health as DoctorReport);
+      const roleList = (routes as { roles?: AgentRoute[] })?.roles ?? [];
+
+      setAgents(roleList);
+      setRoleDraft(
+        Object.fromEntries(
+          roleList.map((route) => [
+            route.role,
+            { connection: route.connection, model: route.model ?? '' },
+          ]),
+        ),
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Failed to load connections');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    if (!login || login.status !== 'pending') return;
+    const timer = window.setInterval(async () => {
+      try {
+        const state = (await execute([
+          'connections',
+          'login-status',
+          login.sessionId,
+        ])) as LoginState;
+
+        setLogin(state);
+        if (state.status === 'authenticated') {
+          setNotice(`Authenticated ${state.connectionId}.`);
+          void load();
+        } else if (state.status === 'failed') {
+          setError(state.detail ?? 'Codex login failed.');
+        }
+      } catch (pollError) {
+        setError(pollError instanceof Error ? pollError.message : 'Login status failed');
+      }
+    }, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [login, load]);
+
+  const findCheck = (id: string) =>
+    doctor?.checks?.find((check) => check.name === `connection:${id}`);
+  const connectionIds = report?.connections?.map((entry) => entry.id) ?? [];
+
+  const startEdit = async (id: string, isNew = false) => {
+    setNotice(null);
+    setError(null);
+    if (isNew) {
+      setEditor({
+        id: '',
+        plugin: RUNTIME_PLUGINS[0],
+        bin: '',
+        baseUrl: '',
+        model: '',
+        enabled: true,
+        isNew: true,
+      });
+      return;
+    }
+    try {
+      const detail = (await execute(['connections', 'show', id])) as {
+        id: string;
+        plugin: string;
+        enabled: boolean;
+        config?: { bin?: string; baseUrl?: string; model?: string };
+      };
+
+      setEditor({
+        id: detail.id,
+        plugin: detail.plugin,
+        bin: detail.config?.bin ?? '',
+        baseUrl: detail.config?.baseUrl ?? '',
+        model: detail.config?.model ?? '',
+        enabled: detail.enabled,
+        isNew: false,
+      });
+    } catch (editError) {
+      setError(editError instanceof Error ? editError.message : 'Failed to load connection');
+    }
+  };
+
+  const saveEditor = async () => {
+    if (!editor) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const args = [
+        'connections',
+        'save',
+        editor.id.trim(),
+        '--plugin',
+        editor.plugin,
+        '--enabled',
+        editor.enabled ? 'true' : 'false',
+      ];
+
+      if (editor.plugin === 'clew.runtime.codex') args.push('--bin', editor.bin.trim());
+      if (editor.plugin === 'clew.runtime.opencode') args.push('--base-url', editor.baseUrl.trim());
+      args.push('--model', editor.model.trim());
+      await execute(args);
+      setEditor(null);
+      setNotice('Connection saved.');
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Failed to save connection');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeConnection = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await execute(['connections', 'remove', id]);
+      setNotice(`Removed ${id}.`);
+      await load();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : 'Failed to remove connection');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startLogin = async (id: string) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const state = (await execute(['connections', 'login', id])) as LoginState;
+
+      setLogin(state);
+      if (state.status === 'pending' && !state.verificationUrl)
+        setNotice('Waiting for the device code…');
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitApiKey = async (id: string) => {
+    const key = apiKeyValue;
+
+    setApiKeyValue('');
+    if (!key.trim()) {
+      setError('API key cannot be empty.');
+
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const state = (await execute([
+        'connections',
+        'login',
+        id,
+        '--with-api-key',
+        '--api-key',
+        key,
+      ])) as LoginState;
+
+      setApiKeyFor(null);
+      setLogin(state);
+      if (state.status === 'authenticated') {
+        setNotice(`Authenticated ${state.connectionId}.`);
+        await load();
+      }
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'API key login failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveRole = async (role: string) => {
+    const draft = roleDraft[role];
+
+    if (!draft?.connection) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const args = ['agents', 'set', role, '--connection', draft.connection];
+
+      if (draft.model.trim()) args.push('--model', draft.model.trim());
+      await execute(args);
+      setNotice(`Saved ${role} route.`);
+      await load();
+    } catch (roleError) {
+      setError(roleError instanceof Error ? roleError.message : 'Failed to save role');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-chapter-panel">
+      <datalist id={MODEL_SUGGESTIONS_ID}>
+        {MODEL_SUGGESTIONS.map((model) => (
+          <option key={model} value={model} />
+        ))}
+      </datalist>
+      <p className="settings-notice">
+        Host connections resolved by the plugin registry. Edit a connection or sign in to Codex with
+        a device code; the service saves host connections and role routing in your host config. Git
+        change viewers are <strong>not</strong> plugin connections — they use{' '}
+        <code>changeViewer</code> and <code>task open-changes</code>.
+      </p>
+      <div className="connection-actions">
+        <button
+          type="button"
+          className="button small"
+          onClick={() => void load()}
+          disabled={loading}
+        >
+          <RefreshCw size={13} /> {loading ? 'Loading…' : 'Refresh'}
+        </button>
+        <button
+          type="button"
+          className="button small"
+          onClick={() => void startEdit('', true)}
+          disabled={busy}
+        >
+          Add connection
+        </button>
+        {doctor && (
+          <span className={`connection-summary ${doctor.ok ? 'ok' : 'warn'}`}>
+            doctor: {doctor.ok ? 'ready' : 'attention'}
+          </span>
+        )}
+      </div>
+      {error && <p className="connection-error">{error}</p>}
+      {notice && <p className="connection-notice">{notice}</p>}
+      {login && login.status === 'pending' && (
+        <div className="connection-login">
+          <span className="settings-notice">
+            Codex device login for <strong>{login.connectionId}</strong>
+          </span>
+          {login.verificationUrl && (
+            <a href={login.verificationUrl} target="_blank" rel="noreferrer">
+              {login.verificationUrl}
+            </a>
+          )}
+          {login.userCode && <code className="connection-code">{login.userCode}</code>}
+          <span className="settings-notice">Waiting for approval…</span>
+        </div>
+      )}
+      {apiKeyFor && (
+        <div className="connection-login">
+          <span className="settings-notice">
+            API key login for <strong>{apiKeyFor}</strong> (used once, never stored)
+          </span>
+          <label>
+            API key
+            <input
+              type="password"
+              value={apiKeyValue}
+              autoComplete="off"
+              onInput={(event) => setApiKeyValue((event.target as HTMLInputElement).value)}
+            />
+          </label>
+          <div className="connection-actions">
+            <button
+              type="button"
+              className="button primary small"
+              onClick={() => void submitApiKey(apiKeyFor)}
+              disabled={busy || !apiKeyValue.trim()}
+            >
+              Log in with API key
+            </button>
+            <button
+              type="button"
+              className="button small"
+              onClick={() => {
+                setApiKeyFor(null);
+                setApiKeyValue('');
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {editor && (
+        <div className="connection-editor">
+          <label>
+            ID
+            <input
+              value={editor.id}
+              disabled={!editor.isNew}
+              onInput={(event) =>
+                setEditor({ ...editor, id: (event.target as HTMLInputElement).value })
+              }
+            />
+          </label>
+          <label>
+            Plugin
+            <select
+              value={editor.plugin}
+              onInput={(event) =>
+                setEditor({ ...editor, plugin: (event.target as HTMLSelectElement).value })
+              }
+            >
+              {RUNTIME_PLUGINS.map((plugin) => (
+                <option key={plugin} value={plugin}>
+                  {plugin}
+                </option>
+              ))}
+            </select>
+          </label>
+          {editor.plugin === 'clew.runtime.codex' && (
+            <label>
+              bin
+              <input
+                value={editor.bin}
+                placeholder="/path/to/codex"
+                onInput={(event) =>
+                  setEditor({ ...editor, bin: (event.target as HTMLInputElement).value })
+                }
+              />
+            </label>
+          )}
+          {editor.plugin === 'clew.runtime.opencode' && (
+            <label>
+              baseUrl
+              <input
+                value={editor.baseUrl}
+                placeholder="http://127.0.0.1:4096"
+                onInput={(event) =>
+                  setEditor({ ...editor, baseUrl: (event.target as HTMLInputElement).value })
+                }
+              />
+            </label>
+          )}
+          <label>
+            model
+            <input
+              value={editor.model}
+              list={MODEL_SUGGESTIONS_ID}
+              placeholder="(runtime default)"
+              onInput={(event) =>
+                setEditor({ ...editor, model: (event.target as HTMLInputElement).value })
+              }
+            />
+          </label>
+          <label className="connection-enabled">
+            <input
+              type="checkbox"
+              checked={editor.enabled}
+              onChange={(event) =>
+                setEditor({ ...editor, enabled: (event.target as HTMLInputElement).checked })
+              }
+            />{' '}
+            enabled
+          </label>
+          <div className="connection-actions">
+            <button
+              type="button"
+              className="button primary small"
+              onClick={() => void saveEditor()}
+              disabled={busy || !editor.id.trim()}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="button small"
+              onClick={() => setEditor(null)}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {report?.connections?.length ? (
+        <div className="connection-list">
+          {report.connections.map((entry) => {
+            const check = findCheck(entry.id);
+            const reserved = RESERVED_CONNECTION_IDS.includes(entry.id);
+            const runtime =
+              entry.plugin === 'clew.runtime.codex' || entry.plugin === 'clew.runtime.opencode';
+
+            return (
+              <div key={entry.id} className="connection-card">
+                <div className="connection-head">
+                  <span className="connection-id">{entry.id}</span>
+                  <span className={`connection-state ${entry.enabled ? 'enabled' : 'disabled'}`}>
+                    {entry.enabled ? 'enabled' : 'disabled'}
+                  </span>
+                  {check && (
+                    <span className={`connection-state status-${check.status ?? 'unknown'}`}>
+                      {check.status ?? 'unknown'}
+                    </span>
+                  )}
+                  {typeof check?.auth === 'boolean' && (
+                    <span className={`connection-auth ${check.auth ? 'ok' : 'fail'}`}>
+                      auth: {check.auth ? 'ok' : 'failed'}
+                    </span>
+                  )}
+                </div>
+                <div className="connection-meta">
+                  <span className="connection-plugin">{entry.plugin}</span>
+                  {check?.version && <span className="connection-version">v{check.version}</span>}
+                  {check?.reason && <span className="connection-reason">{check.reason}</span>}
+                </div>
+                {entry.capabilities?.length ? (
+                  <div className="connection-capabilities">
+                    {entry.capabilities.map((capability) => (
+                      <span key={capability} className="capability-chip">
+                        {capability}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {runtime && (
+                  <div className="connection-actions">
+                    {entry.plugin === 'clew.runtime.codex' && (
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => void startLogin(entry.id)}
+                        disabled={busy}
+                      >
+                        Log in with Codex
+                      </button>
+                    )}
+                    {entry.plugin === 'clew.runtime.codex' && (
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => {
+                          setApiKeyFor(entry.id);
+                          setApiKeyValue('');
+                        }}
+                        disabled={busy}
+                      >
+                        API key
+                      </button>
+                    )}
+                    {!reserved && (
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => void startEdit(entry.id)}
+                        disabled={busy}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {!reserved && (
+                      <button
+                        type="button"
+                        className="button small"
+                        onClick={() => void removeConnection(entry.id)}
+                        disabled={busy}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {agents.length ? (
+        <div className="connection-roles">
+          <span className="settings-notice">Role routing (saved in your host config)</span>
+          {agents.map((route) => (
+            <div key={route.role} className="connection-role">
+              <span className="connection-id">{route.role}</span>
+              <select
+                value={roleDraft[route.role]?.connection ?? route.connection}
+                onInput={(event) =>
+                  setRoleDraft({
+                    ...roleDraft,
+                    [route.role]: {
+                      connection: (event.target as HTMLSelectElement).value,
+                      model: roleDraft[route.role]?.model ?? route.model ?? '',
+                    },
+                  })
+                }
+              >
+                {connectionIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={roleDraft[route.role]?.model ?? route.model ?? ''}
+                list={MODEL_SUGGESTIONS_ID}
+                placeholder="model"
+                onInput={(event) =>
+                  setRoleDraft({
+                    ...roleDraft,
+                    [route.role]: {
+                      connection: roleDraft[route.role]?.connection ?? route.connection,
+                      model: (event.target as HTMLInputElement).value,
+                    },
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="button small"
+                onClick={() => void saveRole(route.role)}
+                disabled={busy}
+              >
+                Save
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {report?.diagnostics?.length ? (
+        <div className="connection-diagnostics">
+          <span className="settings-notice">Migration diagnostics</span>
+          {report.diagnostics.map((diagnostic, index) => (
+            <div key={index} className="connection-diagnostic">
+              {diagnostic.message}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
@@ -2796,6 +3413,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
           )}
+          {chapter === 'connections' && <ConnectionsChapter />}
         </div>
       </section>
     </div>

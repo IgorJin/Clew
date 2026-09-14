@@ -1,4 +1,4 @@
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 
 const MIGRATIONS = Object.freeze([
   {
@@ -518,6 +518,16 @@ const MIGRATIONS = Object.freeze([
           );
         }
       }
+    },
+  },
+  {
+    version: 24,
+    apply(db) {
+      // CLEW-131: immutable per-run runtime bindings. Pre-plugin runs have
+      // no row and read as `legacy-unknown` without losing history.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS run_bindings (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE, task_id TEXT, binding TEXT NOT NULL, created_at TEXT NOT NULL);
+      `);
     },
   },
 ]);

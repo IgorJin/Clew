@@ -8,7 +8,7 @@ size: M
 depends_on: []
 parallel_group: null
 owner: null
-updated: 2026-09-11
+updated: 2026-09-12
 evidence_policy: v1
 ---
 
@@ -65,7 +65,7 @@ evidence_policy: v1
 | AC-3      | `test/plugins-contracts.test.js`, группа 3 (4 теста) + grep-gate в CI | scheduler/roles/control-service без прямых runtime-импортов; повторный resolve; свежие адаптеры после рестарта | pass   |
 | AC-4      | `test/plugins-contracts.test.js`, группа 4 (3 теста)                  | secret in project config; module path in project config                                                        | pass   |
 
-Проверено: `node --test test/plugins-contracts.test.js` — 17/17; `npm test` — 257/257 (baseline до изменений 240/240, один прогон дал единичный flake в чужом timing-тесте, два повторных прогона зелёные); `npm run tasks:check` — 68/68; `npm run format:check` и `npm run lint` — чисто. Live smoke не гонялся по решению эпика.
+Проверено (rerun review 2026-09-12): `node --test test/plugins-contracts.test.js` — 17/17; `npm test` — 333/333; `node --test test/config.test.js` — 11/11 (добавлен регресс на real-path rejection); `npm run tasks:check` — 68/68; `npm run format:check` и `npm run lint` — чисто. Live smoke не гонялся по решению эпика.
 
 ## Verification
 
@@ -76,8 +76,14 @@ evidence_policy: v1
 
 ## Review record
 
-- Verdict: pending (ждёт независимого review владельца)
-- Reviewer: unassigned
+- Verdict: pass (review agent 2026-09-12; owner может оспорить)
+- Reviewer: opencode (independent counterexample review)
+- Findings: review 2026-09-12:
+  1. **Исправлено (medium):** `assertSafeProjectPluginConfig` был dead-code — ни разу не вызывался из `loadConfig`. AC-4 «module path/binary в project-конфиге отклоняется» проходил только через unit-тест самой функции, но реальный путь загрузки конфига пропускал host-level поля (`bin/endpoint/credential`) в секциях `agents/plugins/connections` (секреты ловились старым `assertSafeProjectConfig`). Вшит в `loadConfig` + регресс-тест в `config.test.js` («rejects project plugin config that smuggles host-level settings»).
+  2. Подтверждено контрпримерами: grep-gate чист (в `architect/review` только комментарии); manifest-валидатор отклоняет string-entry в extensionPoints, неизвестный point, невалидный scope, non-semver version, non-string apiVersion; `validateConfigValue` отклоняет type-mismatch; неизвестные JSON-Schema keywords игнорируются намеренно (задокументировано в `validate-config.js`, ADR-0001).
+  3. **Wording-расхождение (accepted, scope boundary):** AC-1 упоминает «версия CLI», но registry/manifest валидирует только Plugin API и версии extension points; внешняя версия CLI — зона `probe()` (реализовано и покрыто в 128/129). Evidence-сценарий корректно указывает только «incompatible api».
+  4. Полный сьют 333/333, contracts 17/17, config 11/11, lint/prettier/tasks:check чисто.
+     Self-review implementer (пункты 1–7 ниже сохранены).
 - Findings: self-review implementer:
   1. Host-policy denial не был покрыт тестом при наличии кода — добавлен тест.
   2. `errorOf` helper после `assert.fail` имеет недостижимый `return null` — eslint чистый (`assert.fail` для линтера обычный вызов), оставлено как есть.
@@ -86,6 +92,7 @@ evidence_policy: v1
      Поправки из CLEW-128 (до независимого review):
   5. `validateRuntimeResult` разрешает `session.nativeSessionId: null` для незавершённых результатов (abort до создания native thread); покрыто тестом в группе 3.
   6. Grep-gate уточнён: запрещены импорты `plugins/registry|resolver|codex|opencode` и прямые биндинги `CodexHarness|CodexArchitect|CodexReviewer|codexLaunchError`; generic-мост `plugins/legacy.js` разрешён до CLEW-133.
+  7. Поправка из CLEW-132: `registry.createAdapter` проверяет контракт по extension point манифеста (`AgentRuntime`/`TelemetrySink`), а не только AgentRuntime — registry изначально generic по дизайну 127.
 
 ## Dependencies and parallelization
 
