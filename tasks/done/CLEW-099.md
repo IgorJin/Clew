@@ -1,14 +1,14 @@
 ---
 id: CLEW-099
 title: Settings modal with Agent chapter (UI only, no availability checks)
-status: in_review
+status: done
 release: v0.10
 priority: P1
 size: S
 depends_on: []
 parallel_group: null
 owner: null
-updated: 2026-09-09
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -83,9 +83,8 @@ The operator clicks the gear icon, opens the settings modal, switches to the `Ag
 ## Review record
 
 - Verdict: pass
-- Reviewer: counterexample-oriented review, 2026-09-09
-- Findings: One issue found and fixed during review: the committed production bundle `ui/dist` (served by the daemon) had gone stale relative to `ui/src`; `npm run build --prefix ui` was re-run and the new bundle verified to contain the settings modal. Two non-blocking UX notes were then also addressed: (1) the modal now traps Tab focus (pattern matches `FinalizationGate`); (2) the Escape handler moved to a document-capture listener with `stopPropagation`, so an open settings modal closes without also closing the command palette underneath. Remaining accepted trade-offs, consistent with repo precedent (CLEW-098 review): (3) in private-browsing mode the selection lives only until the modal unmounts — the documented `writePreference` trade-off; (4) the checkmark icon next to "Selected" marks selection state, not readiness — acceptable because the chapter notice explicitly disclaims verification. AC-1 through AC-6 hold: 60/60 UI tests (including a focus-trap test), backend suite green, eslint and `tsc --noEmit` clean. `done` still requires merge to `main`.
-- Re-verified 2026-09-10 after CLEW-101–103 landed: settings modal source untouched by the keyboard work, its tests still pass, `ui/dist` rebuilt and repacked (v0.10 bundle verified to contain the modal), and the new scope rules keep task shortcuts out of the modal. No new findings.
+- Reviewer: independent counterexample review, 2026-09-11
+- Findings: The settings modal, Agent chapter, local preference persistence, focus trap, Escape capture, and daemon-independent behavior were reviewed against AC-1 through AC-6. The production bundle was rebuilt after the earlier stale-bundle finding, and the current UI/backend/lint/typecheck gates remain green. No new blocking issue was found; the result is present on `main`.
 
 ## Dependencies and parallelization
 
@@ -103,6 +102,4 @@ None.
 
 ## Completion record
 
-Not completed.
-
-Included in the v0.10 Keyboard-first controls mini-release as an already-built adjacent UI slice. It remains UI-only and does not expand the release into plugin availability or execution wiring.
+Completed on 2026-09-11 in the v0.10.0 release line. The settings modal, Agent chapter, local preference persistence, focus handling, and daemon-independent UI tests are on `main`; `npm run check` passes with the settings slice included. Availability and execution wiring remain explicitly out of scope for this card.

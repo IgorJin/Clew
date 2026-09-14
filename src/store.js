@@ -348,7 +348,7 @@ export class Store {
   createRun(run) {
     this.db
       .prepare(
-        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,commit_sha,started_at,finished_at,profile,policy,runtime_namespace,execution_mode,workspace_ref,runner_id,base_sha,branch,provenance_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO runs (id,task_id,stage_id,attempt,status,harness,session_id,turn_id,workspace,commit_sha,started_at,finished_at,profile,policy,runtime_namespace,execution_mode,workspace_ref,runner_id,base_sha,branch,provenance_status,scout_context_id,scout_context_checksum,scout_context_revision,scout_context_sections) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       )
       .run(
         run.id,
@@ -372,6 +372,12 @@ export class Store {
         run.baseSha ?? run.base_sha ?? null,
         run.branch ?? null,
         run.baseSha && run.branch ? 'available' : 'unavailable',
+        run.scoutContextId ?? run.scout_context_id ?? null,
+        run.scoutContextChecksum ?? run.scout_context_checksum ?? null,
+        run.scoutContextRevision ?? run.scout_context_revision ?? null,
+        run.scoutContextSections
+          ? JSON.stringify(run.scoutContextSections)
+          : (run.scout_context_sections ?? null),
       );
   }
   registerRunner({
@@ -1820,6 +1826,12 @@ function parseRun(run) {
     ...run,
     baseSha: run.base_sha ?? null,
     provenanceStatus: run.provenance_status ?? 'unavailable',
+    scoutContextId: run.scout_context_id ?? null,
+    scoutContextChecksum: run.scout_context_checksum ?? null,
+    scoutContextRevision: run.scout_context_revision ?? null,
+    scoutContextSections: run.scout_context_sections
+      ? JSON.parse(run.scout_context_sections)
+      : null,
     policy: run.policy ? JSON.parse(run.policy) : null,
     runtimeNamespace: run.runtime_namespace ? JSON.parse(run.runtime_namespace) : null,
   };

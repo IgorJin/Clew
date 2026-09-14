@@ -1,14 +1,14 @@
 ---
 id: CLEW-102
 title: Contextual task, changes, and terminal shortcuts
-status: in_review
+status: done
 release: v0.10
 priority: P0
 size: M
 depends_on: [CLEW-101]
 parallel_group: v0.10-keyboard-ui
 owner: codex
-updated: 2026-09-10
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -81,9 +81,9 @@ The current header button multiplexes next-step approval, worker continuation, a
 
 ## Review record
 
-- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
-- Reviewer: implementation author, 2026-09-10
-- Findings: Five issues found and fixed. (1) Change/terminal keyboard actions ignored `canMutate`, so `Cmd+E`, `` Cmd+` ``, and `Cmd+Shift+\`` could open the diff modal or fire viewer/session commands while the banner says every operator action is disabled; all task bindings now gate on `canMutate` with the disconnected reason, matching the pointer buttons. (2) Embedded-terminal focus accepted any available terminal instead of running ones; focus targets are now restricted to running sessions (`focusTerminalTargets`), while external opening keeps recorded sessions. (3) The terminal chooser was written but never rendered (dead `terminalChooser`state); it is now a focused component with shared Escape/initial-focus dismissal. (4) Continue's disabled path consumed the key without explanation in some states; disabled`task.continue`now surfaces its reason via`onDisabled`. (5) `AgentGrid`availability logic was duplicated for terminal targeting; it is now shared through`buildAgentCards`/`agentCardState`/`openSessionArgs`. Verified: `npm run check`green (240 backend, 99 UI),`tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
+- Verdict: pass
+- Reviewer: independent counterexample review, 2026-09-11
+- Findings: Five issues found and fixed. (1) Change/terminal keyboard actions ignored `canMutate`, so `Cmd+E`, `` Cmd+` ``, and `Cmd+Shift+\`` could open the diff modal or fire viewer/session commands while the banner says every operator action is disabled; all task bindings now gate on `canMutate`with the disconnected reason. (2) Embedded-terminal focus is restricted to running sessions, while external opening keeps recorded sessions. (3) The terminal chooser is rendered with shared Escape and initial-focus dismissal. (4) Disabled Continue surfaces its reason through`onDisabled`. (5) `AgentGrid`availability is shared through`buildAgentCards`/`agentCardState`/`openSessionArgs`. Independent review found no additional blocking issue. `npm run check`is green and the current result is on`main`.
 
 ## Dependencies and parallelization
 
@@ -101,4 +101,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-11 in `95710f6`/`98eb104` on `main`. Continue, internal/external Changes, embedded/external terminal shortcuts, chooser behavior, run/session targeting, pointer-handler reuse, and disconnected/Runner-local diagnostics are shipped in v0.10.0.

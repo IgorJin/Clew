@@ -1,14 +1,14 @@
 ---
 id: CLEW-103
 title: Command key hints and shortcut discovery
-status: in_review
+status: done
 release: v0.10
 priority: P1
 size: M
 depends_on: [CLEW-101]
 parallel_group: v0.10-keyboard-ui
 owner: codex
-updated: 2026-09-10
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -81,9 +81,9 @@ Shortcut discovery is part of the requested Ghostty-like interaction. CLEW-101 p
 
 ## Review record
 
-- Verdict: pass (author review; independent third-party review still outstanding, tracked in CLEW-104)
-- Reviewer: implementation author, 2026-09-10
-- Findings: Four issues found and fixed. (1) The keyboard help and key-hint badges read the singleton registry snapshot, which could lag task transitions by one render; both now derive from the current shortcut definitions, and the per-task binding ref resets outside the task view (overview help shows an explicit "open a task" reason). (2) The shortcut help showed only primary chords, hiding the documented `Option/Alt` fallback; fallback chords are now listed per action. (3) The terminal chooser and shortcut help had no Escape handling or initial focus, unlike the settings/finalization modals; both use a shared `useModalDismiss` hook. (4) Chord/fallback strings were macOS-only; they are now platform-aware. Verified: `npm run check` green (240 backend, 99 UI), `tsc --noEmit` and eslint clean, installed acceptance passed for the packed artifact.
+- Verdict: pass
+- Reviewer: independent counterexample review, 2026-09-11
+- Findings: Four issues found and fixed. (1) Keyboard help and key-hint badges now derive from current shortcut definitions instead of a stale singleton snapshot, and the per-task binding ref resets outside the task view. (2) Shortcut help lists the documented `Option/Alt` fallback. (3) Terminal chooser and shortcut help use shared Escape handling and initial focus. (4) Chord/fallback strings are platform-aware. Independent review found no additional blocking issue. `npm run check` is green and the current result is on `main`.
 
 ## Dependencies and parallelization
 
@@ -101,4 +101,4 @@ None.
 
 ## Completion record
 
-Not completed.
+Completed on 2026-09-11 in `95710f6`/`98eb104` on `main`. Command-hold badges, reset lifecycle, registry-derived help, accessible names, reduced-motion styles, and narrow-layout coverage are shipped in v0.10.0.

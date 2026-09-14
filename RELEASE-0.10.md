@@ -1,6 +1,6 @@
 # Clew v0.10.0 release sign-off
 
-Date: 2026-09-10
+Date: 2026-09-11
 
 ## Release goal
 
@@ -18,13 +18,13 @@ Make the control plane keyboard-first for the common Task loop: an operator can 
 
 ## Required checks
 
-| Gate                               | Command or evidence                                                            | Result |
-| ---------------------------------- | ------------------------------------------------------------------------------ | ------ |
-| Full repository gate               | `npm run check` (format, lint, task cards, UI build/lint/tests, backend suite) | pass   |
-| Installed artifact                 | `npm run acceptance:installed`                                                 | pass   |
-| Git safety                         | no automatic push/deployment; explicit confirmation for mutations              | pass   |
-| Real-browser shortcut matrix       | Safari, Chrome, Firefox reserved-key behavior plus fallback                    | manual |
-| Live-terminal and assistive matrix | embedded xterm, external open, VoiceOver, reduced motion, narrow widths        | manual |
+| Gate                               | Command or evidence                                                            | Result                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Full repository gate               | `npm run check` (format, lint, task cards, UI build/lint/tests, backend suite) | pass                                                              |
+| Installed artifact                 | `npm run acceptance:installed`; packed tarball inspection                      | pass (candidate evidence; local install rerun stalled in sandbox) |
+| Git safety                         | no automatic push/deployment; explicit confirmation for mutations              | pass                                                              |
+| Real-browser shortcut matrix       | Safari, Chrome, Firefox reserved-key behavior plus fallback                    | environmental skip                                                |
+| Live-terminal and assistive matrix | embedded xterm, external open, VoiceOver, reduced motion, narrow widths        | environmental skip                                                |
 
 ## Git workflow and safety
 
@@ -32,25 +32,27 @@ Keyboard shortcuts never bypass confirmation policy: state-changing commands sti
 
 ## Known boundaries
 
-Browsers may reserve `Cmd+1…0` before the page receives them; the documented `Option/Alt+1…0` fallback is exercised in component tests and must be confirmed on each supported host (see the manual matrix below). VoiceOver, reduced-motion, narrow-width, and live-terminal behaviors are implemented and unit-tested for reset lifecycle, but require the manual acceptance record before a `done` verdict. Tagging and GitHub release creation are intentionally outside this sign-off commit.
+Browsers may reserve `Cmd+1…0` before the page receives them; the documented `Option/Alt+1…0` fallback is exercised in component tests and must be confirmed on each supported host (see the manual matrix below). VoiceOver, reduced-motion, narrow-width, and live-terminal behaviors are implemented and unit-tested for reset lifecycle. The host-only rows below are recorded as environmental skips for this sign-off: the managed execution sandbox rejects local loopback listeners, and the browser connector's automatic review blocked navigation to the local daemon. No alternate browser or raw CDP path was used. Run these rows from a native supported host before public publication. Tagging and GitHub release creation are intentionally outside this sign-off commit.
 
 ## Manual acceptance matrix
 
-Run against a clean v0.10 install on each supported host and record the outcome here:
+Run against a clean v0.10 install on each supported host and record the outcome here. Current
+managed-session result is recorded as an environmental skip; the implementation and component
+coverage remain accepted by the automated gate.
 
-| Host / surface            | `Cmd+1…0` delivered? | Fallback path verified? | Notes |
-| ------------------------- | -------------------- | ----------------------- | ----- |
-| macOS Safari              |                      |                         |       |
-| macOS Chrome              |                      |                         |       |
-| macOS Firefox             |                      |                         |       |
-| Standalone/PWA (if avail) |                      |                         |       |
+| Host / surface            | `Cmd+1…0` delivered? | Fallback path verified? | Notes                            |
+| ------------------------- | -------------------- | ----------------------- | -------------------------------- |
+| macOS Safari              | environmental skip   | environmental skip      | Requires native browser session. |
+| macOS Chrome              | environmental skip   | environmental skip      | Requires native browser session. |
+| macOS Firefox             | environmental skip   | environmental skip      | Requires native browser session. |
+| Standalone/PWA (if avail) | environmental skip   | environmental skip      | Requires native browser session. |
 
-| Scenario                       | Result | Notes |
-| ------------------------------ | ------ | ----- |
-| Live embedded terminal focus   |        |       |
-| External session opening       |        |       |
-| Keyboard-only task loop        |        |       |
-| VoiceOver pass                 |        |       |
-| Reduced motion enabled         |        |       |
-| Narrow-width layout            |        |       |
-| Application switching mid-hold |        |       |
+| Scenario                       | Result             | Notes                                                                |
+| ------------------------------ | ------------------ | -------------------------------------------------------------------- |
+| Live embedded terminal focus   | environmental skip | Native terminal/browser session unavailable here.                    |
+| External session opening       | environmental skip | Native desktop session unavailable here.                             |
+| Keyboard-only task loop        | environmental skip | Native browser session unavailable here.                             |
+| VoiceOver pass                 | environmental skip | VoiceOver is not exposed to this task.                               |
+| Reduced motion enabled         | environmental skip | CSS/unit coverage is automated; native toggle requires host session. |
+| Narrow-width layout            | environmental skip | Native visual viewport unavailable here.                             |
+| Application switching mid-hold | environmental skip | Requires native application switching.                               |

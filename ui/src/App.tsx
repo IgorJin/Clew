@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
+import type { ComponentChildren } from 'preact';
 import {
   Activity,
   AlertTriangle,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-preact';
 import { execute, loadTasks, subscribeToEvents, type ConnectionState } from './api';
 import { rolesForProfile } from './api';
+import clewLogo from './assets/clew-logo.svg';
 import type {
   AgentRole,
   AgentSession,
@@ -112,6 +114,150 @@ const kindLabel: Record<string, string> = {
   worker_turn_interrupted: 'Worker turn interrupted',
   worker_output: 'Output',
 };
+
+type ThreadWorkflowStatus =
+  | 'CREATED'
+  | 'DISCUSSION'
+  | 'ARCHITECTURE'
+  | 'EXECUTION'
+  | 'VERIFICATION'
+  | 'TESTING'
+  | 'READY_FOR_DEPLOY'
+  | 'DEPLOYED';
+
+const threadStatusLabel: Record<ThreadWorkflowStatus, string> = {
+  CREATED: 'CREATED',
+  DISCUSSION: 'DISCUSSION',
+  ARCHITECTURE: 'ARCHITECTURE',
+  EXECUTION: 'EXECUTION',
+  VERIFICATION: 'VERIFICATION',
+  TESTING: 'TESTING',
+  READY_FOR_DEPLOY: 'READY FOR DEPLOY',
+  DEPLOYED: 'DEPLOYED',
+};
+
+const threadStateStatus: Partial<Record<TaskState, ThreadWorkflowStatus>> = {
+  DRAFT: 'CREATED',
+  PLAN_READY: 'ARCHITECTURE',
+  QUEUED: 'EXECUTION',
+  RECOVERING: 'EXECUTION',
+  EXECUTING: 'EXECUTION',
+  VERIFYING: 'VERIFICATION',
+  REVIEWING: 'TESTING',
+  WAITING_FOR_HUMAN: 'DISCUSSION',
+  READY: 'READY_FOR_DEPLOY',
+  READY_TO_FINISH: 'READY_FOR_DEPLOY',
+  MERGED: 'DEPLOYED',
+  RELEASED: 'DEPLOYED',
+  COMPLETED: 'DEPLOYED',
+};
+
+function threadStatusForItem(entry: ThreadItem): ThreadWorkflowStatus | null {
+  switch (entry.kind) {
+    case 'task_created':
+      return 'CREATED';
+    case 'plan_approval_required':
+    case 'plan_rejected':
+      return 'DISCUSSION';
+    case 'plan_versioned':
+    case 'plan_validated':
+    case 'plan_approved':
+      return 'ARCHITECTURE';
+    case 'run_started':
+      return 'EXECUTION';
+    case 'review_findings':
+      return 'VERIFICATION';
+    case 'verification_recorded':
+    case 'review_recorded':
+      return 'TESTING';
+    case 'task_ready':
+      return 'READY_FOR_DEPLOY';
+    case 'task_completed':
+    case 'integration_completed':
+    case 'result_exported':
+      return 'DEPLOYED';
+    case 'task_state_changed': {
+      const rawState = entry.summary.match(/\bto\s+([A-Z_]+)/i)?.[1]?.toUpperCase();
+
+      return rawState ? (threadStateStatus[rawState as TaskState] ?? null) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+function threadStatusTransitions(items: ThreadItem[]) {
+  const transitions = new Map<
+    string,
+    { from: ThreadWorkflowStatus | null; to: ThreadWorkflowStatus }
+  >();
+  let current: ThreadWorkflowStatus = 'CREATED';
+
+  for (const entry of items) {
+    const next = threadStatusForItem(entry);
+
+    if (!next || (entry.kind !== 'task_created' && next === current)) continue;
+    transitions.set(entry.id, {
+      from: entry.kind === 'task_created' ? null : current,
+      to: next,
+    });
+    current = next;
+  }
+
+  return transitions;
+}
+
+function workerResponseText(entry: ThreadItem): string | null {
+  if (entry.kind === 'worker_output') return entry.summary.replace(/^Worker output:\s*/, '');
+  if (entry.kind !== 'worker_waiting') return null;
+
+  const output = entry.summary.replace(/^Worker response ready:\s*/, '');
+
+  return output.startsWith('; terminal is waiting') ? null : output;
+}
+
+function workerResponsePreview(value: string): string {
+  const preview = value.replace(/\s+/g, ' ').trim();
+
+  if (!preview) return 'Worker response recorded';
+  return preview.length > 180 ? `${preview.slice(0, 180)}…` : preview;
+}
+
+const complexityLevel: Record<string, number> = {
+  quick: 1,
+  standard: 2,
+  deep: 3,
+};
+
+function complexityLabel(profile: string) {
+  if (profile === 'deep') return 'high complexity';
+  if (profile === 'standard') return 'medium complexity';
+  return 'low complexity';
+}
+
+function ComplexityChevrons({ profile }: { profile: string }) {
+  return (
+    <span
+      className="complexity-chevrons"
+      aria-label={complexityLabel(profile)}
+      title={complexityLabel(profile)}
+    >
+      {[1, 2, 3].map((level) => (
+        <ChevronRight
+          key={level}
+          size={11}
+          strokeWidth={3}
+          aria-hidden="true"
+          className={
+            level <= (complexityLevel[profile] ?? 1)
+              ? 'complexity-chevron complexity-chevron-active'
+              : 'complexity-chevron'
+          }
+        />
+      ))}
+    </span>
+  );
+}
 
 type ProjectAwareness = { running: number; waiting: number };
 
@@ -400,15 +546,19 @@ function scopedTasks(all: Task[], projectId: string | null): Task[] {
   return all.filter((task) => task.projectId === projectId);
 }
 
-function Logo() {
+function Logo({ projectControls }: { projectControls?: ComponentChildren }) {
   return (
     <div className="brand">
       <span className="brand-mark">
-        <GitBranch size={14} />
+        <img src={clewLogo} alt="" aria-hidden="true" />
       </span>
       <span>clew</span>
-      <span className="brand-slash">/</span>
-      <span className="brand-context">control plane</span>
+      {projectControls && (
+        <>
+          <span className="brand-slash">/</span>
+          {projectControls}
+        </>
+      )}
     </div>
   );
 }
@@ -510,6 +660,45 @@ function ProjectSwitcher({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ProjectToolbar({
+  projects,
+  projectId,
+  view,
+  awareness,
+  onSelectProject,
+  onSelectView,
+  onAddProject,
+}: {
+  projects: Project[];
+  projectId: string;
+  view: 'overview' | 'tasks';
+  awareness: Record<string, ProjectAwareness>;
+  onSelectProject: (projectId: string) => void;
+  onSelectView: (view: 'overview' | 'tasks') => void;
+  onAddProject: () => void;
+}) {
+  return (
+    <div className="topbar-project-controls">
+      <ProjectSwitcher
+        projects={projects}
+        currentId={projectId}
+        awareness={awareness}
+        onSelect={onSelectProject}
+        onAdd={onAddProject}
+      />
+      <button
+        className="icon-button view-toggle"
+        aria-label="Overview"
+        aria-pressed={view === 'overview'}
+        title={view === 'overview' ? 'Back to tasks' : 'Overview board'}
+        onClick={() => onSelectView(view === 'overview' ? 'tasks' : 'overview')}
+      >
+        <LayoutDashboard size={14} />
+      </button>
     </div>
   );
 }
@@ -890,80 +1079,137 @@ function ShortcutHelp({ shortcuts, onClose }: { shortcuts: Shortcut[]; onClose: 
   );
 }
 
+function SkeletonBlock({ className }: { className: string }) {
+  return <span className={`skeleton-block ${className}`} aria-hidden="true" />;
+}
+
+function ProjectLoadingSkeleton() {
+  return (
+    <div className="app project-loading-skeleton" role="status" aria-label="Loading project">
+      <header className="topbar">
+        <Logo projectControls={<SkeletonBlock className="skeleton-project-switcher" />} />
+        <div className="topbar-right">
+          <SkeletonBlock className="skeleton-connection" />
+          <SkeletonBlock className="skeleton-icon" />
+        </div>
+      </header>
+      <div className="workspace">
+        <aside className="sidebar skeleton-sidebar" aria-hidden="true">
+          <SkeletonBlock className="skeleton-new-task" />
+          <div className="skeleton-filter-row">
+            <SkeletonBlock className="skeleton-filter-label" />
+            <SkeletonBlock className="skeleton-filter-icon" />
+          </div>
+          <div className="skeleton-task-list">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <div className="skeleton-task-row" key={index}>
+                <div className="skeleton-task-head">
+                  <SkeletonBlock className="skeleton-task-id" />
+                  <SkeletonBlock className="skeleton-task-status" />
+                </div>
+                <SkeletonBlock className={`skeleton-task-title skeleton-task-title-${index + 1}`} />
+                <SkeletonBlock className="skeleton-task-meta" />
+                <SkeletonBlock className="skeleton-task-progress" />
+              </div>
+            ))}
+          </div>
+        </aside>
+        <main className="content">
+          <div className="content-inner skeleton-content">
+            <SkeletonBlock className="skeleton-eyebrow" />
+            <SkeletonBlock className="skeleton-heading" />
+            <SkeletonBlock className="skeleton-description skeleton-description-wide" />
+            <SkeletonBlock className="skeleton-description" />
+            <div className="skeleton-action-row">
+              <SkeletonBlock className="skeleton-button" />
+              <SkeletonBlock className="skeleton-button skeleton-button-short" />
+            </div>
+            <div className="skeleton-agent-grid">
+              {[0, 1, 2].map((index) => (
+                <div className="skeleton-agent-card" key={index}>
+                  <SkeletonBlock className="skeleton-agent-label" />
+                  <SkeletonBlock className="skeleton-agent-title" />
+                  <SkeletonBlock className="skeleton-agent-line" />
+                  <SkeletonBlock className="skeleton-agent-line skeleton-agent-line-short" />
+                </div>
+              ))}
+            </div>
+            <div className="skeleton-panel">
+              <div className="skeleton-panel-head">
+                <SkeletonBlock className="skeleton-panel-label" />
+                <SkeletonBlock className="skeleton-panel-button" />
+              </div>
+              {[0, 1, 2, 3].map((index) => (
+                <div className="skeleton-activity-row" key={index}>
+                  <SkeletonBlock className="skeleton-activity-icon" />
+                  <div className="skeleton-activity-copy">
+                    <SkeletonBlock className="skeleton-activity-title" />
+                    <SkeletonBlock className="skeleton-activity-line" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function ProjectSidebar({
-  projects,
-  projectId,
-  view,
   tasks,
   selectedTaskId,
   statusFilter,
-  awareness,
   hints,
-  onSelectProject,
-  onSelectView,
   onSelectTask,
   onSetStatusFilter,
   onCreateTask,
-  onAddProject,
 }: {
-  projects: Project[];
-  projectId: string;
-  view: 'overview' | 'tasks';
   tasks: Task[];
   selectedTaskId: string | null;
   statusFilter: string | null;
-  awareness: Record<string, ProjectAwareness>;
   hints: Map<string, ShortcutMetadata> | null;
-  onSelectProject: (projectId: string) => void;
-  onSelectView: (view: 'overview' | 'tasks') => void;
   onSelectTask: (taskId: string) => void;
   onSetStatusFilter: (filter: string | null) => void;
   onCreateTask: () => void;
-  onAddProject: () => void;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   return (
     <aside className="sidebar">
-      <div className="sidebar-switcher-row">
-        <ProjectSwitcher
-          projects={projects}
-          currentId={projectId}
-          awareness={awareness}
-          onSelect={onSelectProject}
-          onAdd={onAddProject}
-        />
+      <button className="button primary sidebar-new-task" onClick={onCreateTask}>
+        <Plus size={14} /> New task
+      </button>
+      <div className="sidebar-filters-disclosure">
         <button
-          className="icon-button view-toggle"
-          aria-label="Overview"
-          aria-pressed={view === 'overview'}
-          title={view === 'overview' ? 'Back to tasks' : 'Overview board'}
-          onClick={() => onSelectView(view === 'overview' ? 'tasks' : 'overview')}
+          className="sidebar-filters-toggle"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((open) => !open)}
         >
-          <LayoutDashboard size={14} />
+          <span>Filters</span>
+          <ChevronDown size={13} className={filtersOpen ? 'filters-caret-open' : ''} />
         </button>
-      </div>
-      <div className="sidebar-heading">
-        <span>Tasks</span>
-        <button className="text-button" onClick={onCreateTask}>
-          + New
-        </button>
-        <span className="count">{tasks.length}</span>
-      </div>
-      <div className="sidebar-filters">
-        {[
-          { key: null, label: 'All' },
-          { key: 'waiting', label: 'Waiting' },
-          { key: 'active', label: 'Active' },
-          { key: 'other', label: 'Other' },
-          { key: 'error', label: 'Failed' },
-        ].map((f) => (
-          <button
-            key={f.key ?? 'all'}
-            className={`filter-chip${statusFilter === f.key ? ' active' : ''}`}
-            onClick={() => onSetStatusFilter(f.key)}
-          >
-            {f.label}
-          </button>
-        ))}
+        {filtersOpen && (
+          <div className="sidebar-filters">
+            <label className="sidebar-filter-field">
+              <span>Status</span>
+              <select
+                aria-label="Status"
+                value={statusFilter ?? 'all'}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  onSetStatusFilter(value === 'all' ? null : value);
+                }}
+              >
+                <option value="all">All</option>
+                <option value="waiting">Waiting</option>
+                <option value="active">Active</option>
+                <option value="other">Other</option>
+                <option value="error">Failed</option>
+              </select>
+            </label>
+          </div>
+        )}
       </div>
       <div className="task-list">
         {tasks.map((entry, index) => (
@@ -989,7 +1235,10 @@ function ProjectSidebar({
               </span>
             )}
             <span className="task-meta">
-              {entry.profile} · {entry.attempts ? `${entry.attempts} runs` : 'not started'}
+              {entry.profile}
+              <ComplexityChevrons profile={entry.profile} />
+              <span aria-hidden="true">·</span>
+              {entry.attempts ? `${entry.attempts} runs` : 'not started'}
             </span>
             <Wave state={entry.state} />
             {index < 10 && (
@@ -1007,23 +1256,83 @@ function ProjectSidebar({
 
 export function Thread({ items }: { items: ThreadItem[] }) {
   const newestCursor = Math.max(0, ...items.map((e) => e.cursor));
+  const statusTransitions = threadStatusTransitions(items);
+  const [expandedOutputId, setExpandedOutputId] = useState<string | null>(null);
+  const expandedOutputRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!expandedOutputId) return undefined;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!expandedOutputRef.current?.contains(event.target as Node)) setExpandedOutputId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpandedOutputId(null);
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [expandedOutputId]);
 
   return (
     <div className="thread">
       {[...items].reverse().map((entry) => (
         <div
-          className={`thread-item${entry.cursor === newestCursor ? ' thread-item-new' : ''}`}
+          className={`thread-item${entry.cursor === newestCursor ? ' thread-item-new' : ''}${statusTransitions.has(entry.id) ? ' thread-item-status' : ''}`}
           key={entry.id}
         >
           <div className="thread-marker">{iconFor(entry.kind)}</div>
           <div className="thread-content">
             <div className="thread-meta">
               <span className="thread-kind">
-                {kindLabel[entry.kind] ?? entry.kind.replaceAll('_', ' ')}
+                {statusTransitions.has(entry.id)
+                  ? 'Task status changed'
+                  : (kindLabel[entry.kind] ?? entry.kind.replaceAll('_', ' '))}
               </span>
               <time>{formatTime(entry.at)}</time>
             </div>
-            <p>{entry.summary}</p>
+            {statusTransitions.has(entry.id) ? (
+              <div className="thread-status-transition">
+                {statusTransitions.get(entry.id)!.from && (
+                  <span>{threadStatusLabel[statusTransitions.get(entry.id)!.from!]}</span>
+                )}
+                {statusTransitions.get(entry.id)!.from && <span aria-hidden="true">→</span>}
+                <strong>{threadStatusLabel[statusTransitions.get(entry.id)!.to]}</strong>
+              </div>
+            ) : (
+              (() => {
+                const workerOutput = workerResponseText(entry);
+                const expanded = expandedOutputId === entry.id;
+
+                if (!workerOutput) return <div className="thread-summary">{entry.summary}</div>;
+
+                return (
+                  <div className="thread-output" ref={expanded ? expandedOutputRef : undefined}>
+                    <button
+                      type="button"
+                      className="thread-output-preview"
+                      aria-label={expanded ? 'Collapse worker response' : 'Expand worker response'}
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedOutputId(expanded ? null : entry.id)}
+                    >
+                      <span className="thread-output-excerpt">
+                        {workerResponsePreview(workerOutput)}
+                      </span>
+                    </button>
+                    {expanded && (
+                      <div className="thread-output-tooltip" role="tooltip">
+                        <pre>{workerOutput}</pre>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()
+            )}
             <div className="source">
               <span>{entry.stageId ?? 'task'}</span>
               {entry.runId && (
@@ -1314,19 +1623,23 @@ function ChangeActions({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const available = changes?.result?.state === 'available';
-  const label = available
-    ? `Changes +${changes.result!.summary.additions} −${changes.result!.summary.deletions}`
+  const summary = available ? changes.result!.summary : undefined;
+  const changeButtonLabel = summary
+    ? summary.additions || summary.deletions
+      ? `+${summary.additions}, -${summary.deletions}`
+      : 'No diff'
     : changes?.loading
-      ? 'Changes…'
+      ? 'Loading…'
       : !run || changes?.result?.state === 'unavailable' || changes?.error
-        ? 'Changes unavailable'
-        : 'Changes';
+        ? 'Unavailable'
+        : 'Diff';
   const unavailable = !run || changes?.result?.state === 'unavailable';
 
   return (
     <div className="changes-control">
       <button
         className="button secondary small changes-main key-hint-anchor"
+        aria-label={changeButtonLabel}
         disabled={disabled || unavailable}
         title={!run ? 'No persisted run for this agent' : undefined}
         onClick={() => {
@@ -1334,11 +1647,27 @@ function ChangeActions({
           onOpenEditor();
         }}
       >
-        <FileDiff size={12} /> {label}
+        <FileDiff size={12} />
+        {summary ? (
+          summary.additions || summary.deletions ? (
+            <>
+              <span className="change-count change-count-additions">+{summary.additions}</span>
+              <span className="change-count change-count-deletions">-{summary.deletions}</span>
+            </>
+          ) : (
+            <span className="change-count-empty">No diff</span>
+          )
+        ) : changes?.loading ? (
+          'Loading…'
+        ) : !run || changes?.result?.state === 'unavailable' || changes?.error ? (
+          'Unavailable'
+        ) : (
+          'Diff'
+        )}
         <KeyHint metadata={hints?.get('task.changes.external')} position="corner" />
       </button>
       <button
-        className="button secondary small changes-menu-toggle"
+        className="button secondary small changes-suffix"
         disabled={disabled || !run}
         aria-label={`Change actions for ${run?.stageId ?? 'agent'}`}
         aria-expanded={menuOpen}
@@ -2167,6 +2496,17 @@ function describeAction(args: string[], task: Task) {
       summary: 'Clew will mark this task as completed using the verified revision.',
       effects: ['No new worker run will start.', 'The primary checkout will not be changed.'],
       confirmLabel: 'Complete task',
+    };
+
+  if (command === 'interrupt')
+    return {
+      title: 'Cancel task',
+      summary: 'Clew will request cancellation for this task.',
+      effects: [
+        'The current worker run will be interrupted when the scheduler acknowledges the request.',
+        'The task will move to Cancelled and cannot be continued afterward.',
+      ],
+      confirmLabel: 'Cancel task',
     };
 
   if (command === 'retry')
@@ -3452,9 +3792,10 @@ export default function App() {
   const [nextStep, setNextStep] = useState<NextStep | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
-  const [descExpanded, setDescExpanded] = useState(true);
+  const [descExpanded, setDescExpanded] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const stepDetailsRef = useRef<HTMLDivElement>(null);
   const [changesByRun, setChangesByRun] = useState<Record<string, ChangeLoad>>({});
   const [diffRunId, setDiffRunId] = useState<string | null>(null);
   const [selectedChangeRunId, setSelectedChangeRunId] = useState<string | null>(null);
@@ -3467,6 +3808,25 @@ export default function App() {
   const refreshTimer = useRef<number | undefined>(undefined);
   const routeRef = useRef(route);
   routeRef.current = route;
+
+  useEffect(() => {
+    if (!selectedStep) return undefined;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!stepDetailsRef.current?.contains(event.target as Node)) setSelectedStep(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSelectedStep(null);
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [selectedStep]);
 
   useEffect(() => {
     const onPopState = () => setRoute(routeFromLocation());
@@ -4144,6 +4504,9 @@ export default function App() {
   if (!project) {
     const unavailable = connection === 'disconnected' || connection === 'incompatible';
     const waiting = connection === 'reconnecting';
+
+    if (waiting) return <ProjectLoadingSkeleton />;
+
     return (
       <div className="app">
         <header className="topbar">
@@ -4174,12 +4537,10 @@ export default function App() {
               ? 'This UI cannot safely read the daemon response. Update Clew and reload.'
               : connection === 'disconnected'
                 ? 'Start the local daemon, then retry the connection.'
-                : waiting
-                  ? 'Loading your projects.'
-                  : 'Add a local Git project to start managing agentic development.'}
+                : 'Add a local Git project to start managing agentic development.'}
           </p>
           <div className="empty-actions">
-            {unavailable || waiting ? (
+            {unavailable ? (
               <button className="button secondary" onClick={() => void refresh()}>
                 <RefreshCw size={14} /> Retry
               </button>
@@ -4206,7 +4567,19 @@ export default function App() {
     return (
       <div className="app">
         <header className="topbar">
-          <Logo />
+          <Logo
+            projectControls={
+              <ProjectToolbar
+                projects={projects}
+                projectId={project.id}
+                view={route.view}
+                awareness={awareness}
+                onSelectProject={selectProject}
+                onSelectView={selectView}
+                onAddProject={() => setAddProjectOpen(true)}
+              />
+            }
+          />
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
@@ -4223,20 +4596,13 @@ export default function App() {
         </header>
         <div className="workspace">
           <ProjectSidebar
-            projects={projects}
-            projectId={project.id}
-            view={route.view}
             tasks={[]}
             selectedTaskId={null}
             statusFilter={statusFilter}
-            awareness={awareness}
             hints={hints}
-            onSelectProject={selectProject}
-            onSelectView={selectView}
             onSelectTask={selectTask}
             onSetStatusFilter={setStatusFilter}
             onCreateTask={() => setCreateOpen(true)}
-            onAddProject={() => setAddProjectOpen(true)}
           />
           <main className="content">
             <div className="content-inner">
@@ -4279,7 +4645,19 @@ export default function App() {
     return (
       <div className="app">
         <header className="topbar">
-          <Logo />
+          <Logo
+            projectControls={
+              <ProjectToolbar
+                projects={projects}
+                projectId={project.id}
+                view="overview"
+                awareness={awareness}
+                onSelectProject={selectProject}
+                onSelectView={selectView}
+                onAddProject={() => setAddProjectOpen(true)}
+              />
+            }
+          />
           <div className="topbar-right">
             <Connection state={connection} />
             <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
@@ -4299,25 +4677,17 @@ export default function App() {
             >
               <RefreshCw size={14} />
             </button>
-            <span className="avatar">LC</span>
           </div>
         </header>
         <div className="workspace">
           <ProjectSidebar
-            projects={projects}
-            projectId={project.id}
-            view="overview"
             tasks={sortedTasks}
             selectedTaskId={task?.id ?? null}
             statusFilter={statusFilter}
-            awareness={awareness}
             hints={hints}
-            onSelectProject={selectProject}
-            onSelectView={selectView}
             onSelectTask={selectTask}
             onSetStatusFilter={setStatusFilter}
             onCreateTask={() => setCreateOpen(true)}
-            onAddProject={() => setAddProjectOpen(true)}
           />
           <main className="content">
             <div className="content-inner">
@@ -4367,6 +4737,7 @@ export default function App() {
       'approve-run',
       'complete',
       'continue',
+      'interrupt',
       'reject-run',
       'retry',
       'run',
@@ -4388,6 +4759,8 @@ export default function App() {
           current.map((entry) => {
             if (entry.id !== task.id) return entry;
             if (args[0] === 'complete') return { ...entry, state: 'COMPLETED' as TaskState };
+            if (args[0] === 'interrupt')
+              return { ...entry, state: 'CANCELLED' as TaskState, attention: null };
             if (args[0] === 'approve')
               return { ...entry, state: 'PLAN_READY' as TaskState, attention: null };
             if (args[0] === 'run') return { ...entry, state: 'EXECUTING' as TaskState };
@@ -4417,6 +4790,18 @@ export default function App() {
   const canRestartWorker =
     task.state === 'READY' ||
     (task.state === 'WAITING_FOR_HUMAN' && task.attention !== 'PLAN_APPROVAL_REQUIRED');
+  const canCancelTask = [
+    'DRAFT',
+    'PLAN_READY',
+    'QUEUED',
+    'RECOVERING',
+    'EXECUTING',
+    'WAITING_FOR_HUMAN',
+    'READY',
+    'READY_TO_FINISH',
+    'FAILED',
+  ].includes(task.state);
+  const taskDone = ['COMPLETED', 'RELEASED', 'CANCELLED'].includes(task.state);
   const interactiveWorker =
     task.runStatus === 'RUNNING' && task.terminalActive === true && Boolean(task.runId);
   const pendingHarnessApproval = task.harnessApprovals?.find((a) => !a.decision);
@@ -4640,7 +5025,7 @@ export default function App() {
       };
     if (nextStep?.status === 'PENDING')
       return {
-        label: 'Approve start',
+        label: 'Next step',
         icon: <Check size={13} />,
         enabled: canMutate,
         reason: canMutate
@@ -4730,7 +5115,19 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <Logo />
+        <Logo
+          projectControls={
+            <ProjectToolbar
+              projects={projects}
+              projectId={project.id}
+              view="tasks"
+              awareness={awareness}
+              onSelectProject={selectProject}
+              onSelectView={selectView}
+              onAddProject={() => setAddProjectOpen(true)}
+            />
+          }
+        />
         <div className="topbar-right">
           <Connection state={connection} />
           <GlobalAttention items={attentionItems} onSelect={selectProjectAndTask} />
@@ -4746,36 +5143,27 @@ export default function App() {
           <button className="icon-button" aria-label="Refresh tasks" onClick={() => void refresh()}>
             <RefreshCw size={14} />
           </button>
-          <span className="avatar">LC</span>
         </div>
       </header>
       <div className="workspace">
         <ProjectSidebar
-          projects={projects}
-          projectId={project.id}
-          view="tasks"
           tasks={sortedTasks}
           selectedTaskId={task.id}
           statusFilter={statusFilter}
-          awareness={awareness}
           hints={taskHints}
-          onSelectProject={selectProject}
-          onSelectView={selectView}
           onSelectTask={selectTask}
           onSetStatusFilter={setStatusFilter}
           onCreateTask={() => setCreateOpen(true)}
-          onAddProject={() => setAddProjectOpen(true)}
         />
         <main className="content">
           <div className="content-inner">
             <section className="task-header">
               <div className="eyebrow">
-                <button className="breadcrumb-project" onClick={() => selectView('tasks')}>
-                  {project.name}
-                </button>
-                <span className="eyebrow-slash">/</span>
                 {task.id}
-                <span className="eyebrow-tag">{task.profile}</span>
+                <span className="eyebrow-tag">
+                  {task.profile}
+                  <ComplexityChevrons profile={task.profile} />
+                </span>
               </div>
               <div className="task-title-row">
                 <div className="task-title-copy">
@@ -4809,7 +5197,7 @@ export default function App() {
                     onRefresh={() => changeRun && void refreshRunChanges(changeRun.id)}
                   />
                   <button
-                    className="button secondary key-hint-anchor"
+                    className="button primary key-hint-anchor"
                     disabled={!canMutate || !mainAction.enabled}
                     title={mainAction.reason}
                     onClick={mainAction.run}
@@ -4831,81 +5219,92 @@ export default function App() {
                       <Check size={13} /> Finish worker
                     </button>
                   )}
-                  <button
-                    className="button primary"
-                    disabled={
-                      !canMutate ||
-                      !['READY', 'READY_TO_FINISH', 'MERGED'].includes(task.state) ||
-                      !task.finalization
-                    }
-                    onClick={() => setFinishOpen(true)}
-                  >
-                    <Check size={13} /> {task.state === 'MERGED' ? 'Mark released' : 'Finish work'}
-                  </button>
+                  {!taskDone && (
+                    <button
+                      className="button danger-outline"
+                      disabled={!canMutate || !canCancelTask}
+                      title={
+                        canCancelTask
+                          ? undefined
+                          : 'This task cannot be cancelled from its current state'
+                      }
+                      onClick={() =>
+                        void act(['interrupt', task.id], 'Task cancellation requested')
+                      }
+                    >
+                      <X size={13} /> Cancel task
+                    </button>
+                  )}
                 </div>
               </div>
               <button className="description-toggle" onClick={() => setDescExpanded(!descExpanded)}>
                 {descExpanded ? '▾' : '▸'} Description
               </button>
               {descExpanded && <p className="description-text">{task.goal}</p>}
-              <StepIndicator
-                state={task.state}
-                selected={selectedStep}
-                onSelect={(key) => {
-                  const closing = selectedStep === key;
+              <div className="stepper-anchor" ref={stepDetailsRef}>
+                <StepIndicator
+                  state={task.state}
+                  selected={selectedStep}
+                  onSelect={(key) => {
+                    const closing = selectedStep === key;
 
-                  setSelectedStep(closing ? null : key);
-                  if (!closing && key === 'execute' && !nextStep) void explainNextStep();
-                }}
-              />
-              {selectedStep && (
-                <section className="step-details" aria-label={`${selectedStep} step details`}>
-                  <span className="eyebrow">Selected step</span>
-                  <h3>
-                    {selectedStep === 'plan'
-                      ? 'Plan'
-                      : selectedStep === 'execute'
-                        ? 'Execute'
-                        : selectedStep === 'review'
-                          ? 'Review'
-                          : 'Done'}
-                  </h3>
-                  <p>{stepDetail.explanation}</p>
-                  <dl className="step-detail-grid">
-                    <div>
-                      <dt>Status</dt>
-                      <dd>{selectedStepStatus}</dd>
-                    </div>
-                    <div>
-                      <dt>Prerequisites</dt>
-                      <dd>{stepDetail.prerequisites}</dd>
-                    </div>
-                    <div>
-                      <dt>Available action</dt>
-                      <dd>{stepDetail.action}</dd>
-                    </div>
-                    <div>
-                      <dt>Approval</dt>
-                      <dd>{stepDetail.approval}</dd>
-                    </div>
-                    <div>
-                      <dt>Side effects</dt>
-                      <dd>{stepDetail.sideEffects}</dd>
-                    </div>
-                  </dl>
-                  {selectedStep === 'execute' && nextStep && (
-                    <div className="next-step-details">
-                      <span>
-                        {nextStep.currentStep} → {nextStep.resultingStep ?? '—'}
-                      </span>
-                      <span>
-                        Harness: {nextStep.inputs?.harness ?? '—'} · Model:{' '}
-                        {nextStep.inputs?.model ?? '—'}
-                      </span>
-                    </div>
-                  )}
-                </section>
-              )}
+                    setSelectedStep(closing ? null : key);
+                    if (!closing && key === 'execute' && !nextStep) void explainNextStep();
+                  }}
+                />
+                {selectedStep && (
+                  <section
+                    className="step-details"
+                    role="tooltip"
+                    aria-label={`${selectedStep} step details`}
+                  >
+                    <span className="eyebrow">Selected step</span>
+                    <h3>
+                      {selectedStep === 'plan'
+                        ? 'Plan'
+                        : selectedStep === 'execute'
+                          ? 'Execute'
+                          : selectedStep === 'review'
+                            ? 'Review'
+                            : 'Done'}
+                    </h3>
+                    <p>{stepDetail.explanation}</p>
+                    <dl className="step-detail-grid">
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{selectedStepStatus}</dd>
+                      </div>
+                      <div>
+                        <dt>Prerequisites</dt>
+                        <dd>{stepDetail.prerequisites}</dd>
+                      </div>
+                      <div>
+                        <dt>Available action</dt>
+                        <dd>{stepDetail.action}</dd>
+                      </div>
+                      <div>
+                        <dt>Approval</dt>
+                        <dd>{stepDetail.approval}</dd>
+                      </div>
+                      <div>
+                        <dt>Side effects</dt>
+                        <dd>{stepDetail.sideEffects}</dd>
+                      </div>
+                    </dl>
+                    {selectedStep === 'execute' && nextStep && (
+                      <div className="next-step-details">
+                        <span>
+                          {nextStep.currentStep} → {nextStep.resultingStep ?? '—'}
+                        </span>
+                        <span>
+                          Harness: {nextStep.inputs?.harness ?? '—'} · Model:{' '}
+                          {nextStep.inputs?.model ?? '—'}
+                        </span>
+                      </div>
+                    )}
+                  </section>
+                )}
+              </div>
               {(task.attention || pendingHarnessApproval) && (
                 <div className="attention-actions">
                   <span className="attention-label">
@@ -4958,30 +5357,6 @@ export default function App() {
                   )}
                 </div>
               )}
-              <div className="metrics">
-                <div className="metric">
-                  <span className="metric-label">Revision</span>
-                  <span className="metric-value">{task.revision ?? '—'}</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">Review</span>
-                  <span className="metric-value">
-                    {!task.reviewed
-                      ? 'Pending'
-                      : task.findings
-                        ? `${task.findings} findings`
-                        : 'Passed'}
-                  </span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">Runs</span>
-                  <span className="metric-value">{task.attempts}</span>
-                </div>
-                <div className="metric">
-                  <span className="metric-label">Profile</span>
-                  <span className="metric-value">{task.profile}</span>
-                </div>
-              </div>
             </section>
 
             {(notice || task.interactionStatus === 'waiting_for_operator') && (

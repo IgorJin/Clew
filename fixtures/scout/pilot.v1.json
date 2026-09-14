@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "pilotId": "CLEW-126",
+  "scenarios": [
+    {
+      "id": "local-bug-fix",
+      "kind": "local_bug_fix",
+      "taskId": "PILOT-LOCAL-FIX",
+      "title": "Fix an isolated authorization guard",
+      "profile": "quick",
+      "scopePaths": ["src/auth.js", "test/auth.test.js"],
+      "consumers": [{ "role": "worker", "stageId": "worker" }],
+      "selectedSections": ["components", "checks", "observations"],
+      "mapStatus": "complete",
+      "findings": {
+        "helpful": ["components", "checks"],
+        "extra": ["observations"],
+        "incorrect": [],
+        "missing": ["dependency revision"],
+        "decision": "Keep component and recommended-check sections selectable; do not add dependency or execution evidence to the RepositoryContext v1 input."
+      }
+    },
+    {
+      "id": "cross-module-change",
+      "kind": "cross_module_change",
+      "taskId": "PILOT-CROSS-MODULE",
+      "title": "Change an order flow across billing and orders",
+      "profile": "standard",
+      "scopePaths": ["src/orders", "src/billing", "test/orders.test.js"],
+      "consumers": [{ "role": "worker", "stageId": "worker" }],
+      "selectedSections": ["components", "relationships", "checks", "observations"],
+      "mapStatus": "complete",
+      "findings": {
+        "helpful": ["components", "relationships"],
+        "extra": ["checks"],
+        "incorrect": [],
+        "missing": ["runtime dependency version"],
+        "decision": "Keep relationships as source-backed edges and leave dependency versions to a later checkpoint/artifact contract."
+      }
+    },
+    {
+      "id": "ambiguous-scope",
+      "kind": "ambiguous_scope",
+      "taskId": "PILOT-AMBIGUOUS",
+      "title": "Decide which command and daemon boundary owns a configuration change",
+      "profile": "deep",
+      "scopePaths": ["src"],
+      "consumers": [
+        { "role": "architect", "stageId": "architect" },
+        { "role": "worker", "stageId": "worker" }
+      ],
+      "selectedSections": ["components", "relationships", "observations", "unknowns", "omissions"],
+      "mapStatus": "partial",
+      "findings": {
+        "helpful": ["unknowns", "omissions", "relationships"],
+        "extra": ["observations"],
+        "incorrect": [],
+        "missing": ["validated ownership decision"],
+        "decision": "Keep partial status, unknowns, and omissions mandatory inputs for ambiguous work; do not turn an inferred ownership guess into a Task Contract fact."
+      }
+    }
+  ]
+}

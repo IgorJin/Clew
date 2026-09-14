@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "contextId": "scout-3fd5bc6c73ca747f4cd2082f",
+  "task": {
+    "taskId": "CLEW-123",
+    "projectId": "PROJECT-CLEW",
+    "contractFingerprint": "0733e16d33c72a786a2a87a1095daeb8e423c97aa5d04884a059a728e9e61675"
+  },
+  "source": {
+    "repositoryId": "clew",
+    "revision": "0123456789abcdef0123456789abcdef01234567",
+    "scope": {
+      "paths": ["src", "test"]
+    },
+    "generatedAt": "2026-09-11T10:05:00.000Z",
+    "attemptId": "attempt-124"
+  },
+  "components": [
+    {
+      "id": "domain",
+      "path": "src/domain.js",
+      "symbol": "validateTaskContract",
+      "purpose": "Validates and normalizes the public Task Contract.",
+      "references": [
+        {
+          "path": "src/domain.js",
+          "revision": "0123456789abcdef0123456789abcdef01234567",
+          "lineStart": 268,
+          "lineEnd": 360
+        }
+      ]
+    }
+  ],
+  "relationships": [],
+  "checks": [],
+  "observations": [
+    {
+      "kind": "observed",
+      "statement": "Task contracts are normalized by validateTaskContract.",
+      "references": [
+        {
+          "path": "src/domain.js",
+          "revision": "0123456789abcdef0123456789abcdef01234567",
+          "lineStart": 268,
+          "lineEnd": 360
+        }
+      ]
+    }
+  ],
+  "unknowns": [
+    {
+      "question": "What depends on the storage implementation?",
+      "reason": "The request scope excluded storage modules.",
+      "references": []
+    }
+  ],
+  "omissions": [
+    {
+      "reason": "scope_limit",
+      "detail": "Only src/domain.js was inspected."
+    }
+  ],
+  "provenance": {
+    "status": "partial",
+    "runtime": {
+      "harness": "fake",
+      "sessionId": "session-124"
+    },
+    "checksum": "555ba40907cfe27e186d949542068bec97f91baeeb0bddf7c5aa6e1caa31f345"
+  }
+}

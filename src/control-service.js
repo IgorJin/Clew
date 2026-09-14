@@ -50,6 +50,7 @@ import {
   resolveAgentRoutes,
   routeSourceOf,
 } from './plugins/role-routing.js';
+import { ScoutRunner } from './scout-runner.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
@@ -93,6 +94,7 @@ const TASK_COMMANDS = new Set([
   'open-changes',
   'result',
   'show',
+  'scout',
   'thread',
   'usage',
 ]);
@@ -112,6 +114,32 @@ function getOptionValues(args, name) {
     if (args[index] === name && args[index + 1]) values.push(args[index + 1]);
 
   return values;
+}
+
+function getScoutSelection(args) {
+  const hasContextOption = args.includes('--scout-context');
+  const hasSectionsOption = args.includes('--scout-sections');
+  const contextId = getOptionValue(args, '--scout-context');
+  const skip = args.includes('--no-scout');
+  const rawSections = getOptionValue(args, '--scout-sections');
+
+  if (hasContextOption && (!contextId || contextId.startsWith('--')))
+    throw new Error('--scout-context requires a context ID');
+  if (hasSectionsOption && (!rawSections || rawSections.startsWith('--')))
+    throw new Error('--scout-sections requires a comma-separated section list');
+  if (contextId && skip) throw new Error('use either --scout-context or --no-scout, not both');
+  if (rawSections && !contextId) throw new Error('--scout-sections requires --scout-context');
+  if (!contextId && !skip) return null;
+  const sections = rawSections
+    ? rawSections
+        .split(',')
+        .map((section) => section.trim())
+        .filter(Boolean)
+    : null;
+
+  if (rawSections && !sections.length) throw new Error('--scout-sections must not be empty');
+
+  return { contextId: contextId ?? null, skip, sections };
 }
 
 function readMarkdownTask(file, cwd) {
@@ -189,6 +217,7 @@ export class ClewService {
     runnerGateway = null,
     editorLauncher = null,
     folderPicker = pickFolder,
+    scoutRunner = null,
   }) {
     this.cwd = resolve(cwd);
     this.store = store;
@@ -198,6 +227,7 @@ export class ClewService {
     this.editorLauncher = editorLauncher;
     this.folderPicker = folderPicker;
     this.loginSessions = new Map();
+    this.scoutRunner = scoutRunner ?? new ScoutRunner({ cwd: this.cwd, store, config });
   }
 
   /** Reload host config after a settings write so the daemon sees it. */
@@ -224,7 +254,7 @@ export class ClewService {
     if (!this.supports(args)) throw new Error(`unsupported service command: ${args.join(' ')}`);
     const [command, subcommand, ...rest] = args;
 
-    if (command === 'task') return this.task(subcommand, rest);
+    if (command === 'task') return this.task(subcommand, rest, signal);
     if (command === 'project') return this.project(subcommand, rest);
     if (command === 'session') return this.session(subcommand, rest);
     if (command === 'continue') return this.continueTask(subcommand, rest, signal);
@@ -372,8 +402,9 @@ export class ClewService {
     throw new Error(`unsupported project command: ${subcommand}`);
   }
 
-  task(subcommand, args) {
+  task(subcommand, args, signal) {
     if (subcommand === 'create') return this.createTask(args);
+    if (subcommand === 'scout') return this.scoutRunner.execute(args, signal);
     if (subcommand === 'next-step') return this.nextStep(args[0]);
     if (subcommand === 'open-changes') return this.openChanges(args[0], args);
     if (subcommand === 'changes' || subcommand === 'inspect-changes')
@@ -1265,6 +1296,7 @@ export class ClewService {
     this.store.setTaskState(taskId, TASK_STATE.QUEUED);
     this.assertRunFlagExclusivity(args);
     const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
+    const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
@@ -1272,6 +1304,8 @@ export class ClewService {
       this.harnessSelectionFor(args, routes, 'reviewer', '--review-harness', null),
       this.harnessSelectionFor(args, routes, 'architect', '--architect', null),
       previousRuns.length === 1 ? previousRuns.at(-1).session_id : null,
+      [],
+      scoutSelection ? { scoutContext: scoutSelection } : {},
     );
 
     return { action, result };
@@ -1343,6 +1377,7 @@ export class ClewService {
 
     this.assertRunFlagExclusivity(args);
     const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
+    const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
@@ -1356,6 +1391,7 @@ export class ClewService {
         forceSingleWorker: true,
         stageId,
         continuationGrantId: grant.id,
+        ...(scoutSelection ? { scoutContext: scoutSelection } : {}),
       },
     );
 
@@ -1764,6 +1800,7 @@ export class ClewService {
 
   run(taskId, args, signal, options = {}) {
     if (!taskId) throw new Error('task id is required');
+    const scoutSelection = getScoutSelection(args);
 
     this.assertRunFlagExclusivity(args);
     const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
@@ -1776,7 +1813,7 @@ export class ClewService {
       this.harnessSelectionFor(args, routes, 'architect', '--architect', null),
       null,
       [],
-      options,
+      scoutSelection ? { ...options, scoutContext: scoutSelection } : options,
     );
   }
 
@@ -1908,6 +1945,7 @@ export class ClewService {
       },
       runtimeResolver: host.resolver,
       executionPort,
+      scoutRunner: this.scoutRunner,
     });
   }
 
@@ -1923,7 +1961,7 @@ export class ClewService {
       },
       worktreeRoot: resolve(
         this.cwd,
-        getOptionValue(args, '--worktree-root', this.config.worktreeRoot),
+        getOptionValue(args, '--worktree-root', this.config.worktreeRoot ?? '.'),
       ),
     };
   }

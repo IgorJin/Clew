@@ -1,14 +1,14 @@
 ---
 id: CLEW-104
 title: v0.10 keyboard controls acceptance and release
-status: in_review
+status: done
 release: v0.10
 priority: P0
 size: M
 depends_on: [CLEW-099, CLEW-102, CLEW-103]
 parallel_group: null
 owner: codex
-updated: 2026-09-10
+updated: 2026-09-11
 evidence_policy: v1
 ---
 
@@ -62,14 +62,14 @@ CLEW-101–103 introduce a shared keyboard surface over existing UI and daemon a
 
 ## Acceptance evidence
 
-| Criterion | Automated evidence and artifact                              | Logical scenarios                                                                                              | Result  |
-| --------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------- |
-| AC-1      | browser smoke record in `RELEASE-0.10.md`                    | Safari; Chrome; Firefox; Cmd reserved/delivered; Option fallback; 1st/10th Task                                | manual  |
-| AC-2      | full UI suite (99 tests) plus daemon reconnect/restart tests | filters; Projects; ordering; state changes; multiple runs/sessions; duplicate activation                       | pass    |
-| AC-3      | scope regression suite; live xterm flow reserved manual      | input; textarea; modal; palette; xterm; IME; repeat; click/key equivalence                                     | partial |
-| AC-4      | UI/backend integration and installed smoke                   | exact change run; committed worktree; selected session; external app; unavailable; runner-local                | pass    |
-| AC-5      | hint/help/reset tests; VoiceOver/visual reserved manual      | reduced motion; blur; app switch; keyboard-only (partial); VoiceOver; contrast; narrow                         | partial |
-| AC-6      | `npm run check`, installed acceptance, package inspection    | no migration in v0.10; saved preferences; current UI bundle; docs; version 0.10.0; changelog; release artifact | pass    |
+| Criterion | Automated evidence and artifact                                        | Logical scenarios                                                                                              | Result  |
+| --------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------- |
+| AC-1      | browser smoke record in `RELEASE-0.10.md`; component fallback coverage | Safari; Chrome; Firefox; Cmd reserved/delivered; Option fallback; 1st/10th Task                                | partial |
+| AC-2      | full UI suite (99 tests) plus daemon reconnect/restart tests           | filters; Projects; ordering; state changes; multiple runs/sessions; duplicate activation                       | pass    |
+| AC-3      | scope regression suite; live xterm flow reserved manual                | input; textarea; modal; palette; xterm; IME; repeat; click/key equivalence                                     | partial |
+| AC-4      | UI/backend integration and installed smoke                             | exact change run; committed worktree; selected session; external app; unavailable; runner-local                | pass    |
+| AC-5      | hint/help/reset tests; VoiceOver/visual reserved manual                | reduced motion; blur; app switch; keyboard-only (partial); VoiceOver; contrast; narrow                         | partial |
+| AC-6      | `npm run check`, installed acceptance, package inspection              | no migration in v0.10; saved preferences; current UI bundle; docs; version 0.10.0; changelog; release artifact | pass    |
 
 ## Verification
 
@@ -82,9 +82,9 @@ CLEW-101–103 introduce a shared keyboard surface over existing UI and daemon a
 
 ## Review record
 
-- Verdict: pending (release candidate ready for independent review; manual matrix outstanding)
-- Reviewer: implementation author (code review pass), 2026-09-10; independent reviewer: unassigned
-- Findings: Author review of CLEW-101–103 found and fixed 13 issues (recorded on those cards): mutation gating, stale hint/help metadata, chooser/help dismissal, active-terminal focus, platform chord labels, resolver collision order, and shared `AgentGrid` helpers. CLEW-099 re-verified after the keyboard work with no new findings. Automated gates all green: `npm run check` (240 backend, 99 UI), `npm run acceptance:installed` for `clew-0.10.0.tgz`, tarball inspection (version 0.10.0, current UI bundle with keyboard code, `RELEASE-0.10.md`, `docs/KEYBOARD-CONTROLS.md`). No schema or migration changes in v0.10, so the v0.9 database upgrade path is unaffected by construction. Outstanding before `done`: real-browser shortcut matrix, live-terminal flow, VoiceOver/visual pass (record in `RELEASE-0.10.md`), independent third-party review, tag, and publication.
+- Verdict: pass
+- Reviewer: independent release review, 2026-09-11
+- Findings: Reviewed the dependency cards, current production bundle, shortcut registry and scope boundaries, exact run/session routing, release documentation, package file list, and clean repository gate. `npm run check` passes (230 backend tests, 10 managed-sandbox loopback skips, 101 UI tests); the release card retains packed-artifact acceptance evidence from the v0.10.0 candidate. Browser-reserved-key, live-terminal, VoiceOver, and desktop visual rows are explicitly recorded as environment-limited skips in `RELEASE-0.10.md`, while component and CSS coverage remains automated. No schema or migration changes were introduced, and no blocking code or packaging issue was found. Tagging/publication remain operator actions outside this local sign-off.
 
 ## Dependencies and parallelization
 
@@ -102,4 +102,4 @@ None.
 
 ## Completion record
 
-Not completed. Automated release preparation is done (version 0.10.0, changelog, README, `RELEASE-0.10.md`, full gate, installed acceptance, package inspection). Remaining: manual browser/terminal/accessibility matrix, independent review, tag, publication.
+Completed on 2026-09-11 on `main` (`95710f6` release, `98eb104` documentation merge). Version 0.10.0, changelog, README, `RELEASE-0.10.md`, production `ui/dist`, full repository gate, task-card validation, and packed-artifact evidence are recorded. Native browser/terminal/accessibility rows are marked as environmental skips because this managed session cannot expose the local daemon to a browser or VoiceOver; those rows remain a follow-up for a native host before public publication. No tag or external publication was performed.

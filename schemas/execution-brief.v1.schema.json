@@ -78,7 +78,59 @@
         },
         "evidence": { "type": "array" },
         "revision": { "type": ["string", "null"] },
-        "dependencyRevisions": { "type": "array", "items": { "type": "string" } }
+        "dependencyRevisions": { "type": "array", "items": { "type": "string" } },
+        "scout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "contextId", "checksum", "task", "source", "status", "sections"],
+          "properties": {
+            "version": { "const": 1 },
+            "contextId": { "type": "string", "minLength": 1 },
+            "checksum": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "task": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["taskId", "projectId", "contractFingerprint"],
+              "properties": {
+                "taskId": { "type": "string", "minLength": 1 },
+                "projectId": { "type": "string", "minLength": 1 },
+                "contractFingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+              }
+            },
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repositoryId", "revision", "scope", "generatedAt", "attemptId"],
+              "properties": {
+                "repositoryId": { "type": "string", "minLength": 1 },
+                "revision": { "type": "string", "minLength": 7 },
+                "generatedAt": { "type": "string", "format": "date-time" },
+                "attemptId": { "type": "string", "minLength": 1 },
+                "scope": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["paths"],
+                  "properties": {
+                    "paths": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            },
+            "status": { "enum": ["complete", "partial"] },
+            "sections": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "components": { "type": "array" },
+                "relationships": { "type": "array" },
+                "checks": { "type": "array" },
+                "observations": { "type": "array" },
+                "unknowns": { "type": "array" },
+                "omissions": { "type": "array" }
+              }
+            }
+          }
+        }
       }
     },
     "requiredEvidence": { "type": "array" },

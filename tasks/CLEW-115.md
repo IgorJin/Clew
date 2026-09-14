@@ -29,8 +29,8 @@ evidence_policy: v1
 ## Scope
 
 - Собирать Execution Brief из применимого checkpoint, обязательного контракта и выбранных evidence refs; добавить bounded artifact resolver на execution host.
-- Заменить тонкое подключение scout из CLEW-125 общим сборщиком по выводам CLEW-126, сохранив явный выбор/отказ, context IDs и freshness. Различать repository context и накопленный progress; не включать всю карту автоматически каждой роли.
-- Проверять revision, plan version, evidence freshness; отдельно ограничить автоматически включаемый контекст по token estimate с явными omissions.
+- Заменить тонкое подключение scout из CLEW-125 общим сборщиком по выводам завершённого [CLEW-126](./done/CLEW-126.md), сохранив явный выбор/отказ, context IDs, checksums, source revisions, selected sections и freshness. Различать repository context и накопленный progress; не включать всю карту автоматически каждой роли.
+- Проверять revision, plan version, evidence freshness; отдельно ограничить автоматически включаемый контекст по приблизительному token estimate с явными omissions. Для partial context не скрывать unknowns/omissions, а recommended checks не считать выполненным evidence.
 - Проверить resume и fresh-session fallback для architect/worker/reviewer/integration/optional QA; сохранить allowlist Runner v1 и explicit unavailable remote bodies.
 
 ## Out of scope
@@ -73,7 +73,7 @@ evidence_policy: v1
 
 ## Dependencies and parallelization
 
-Зависит от [CLEW-108](./CLEW-108.md), [CLEW-114](./CLEW-114.md); через 114 обязательно завершение scout пилота [CLEW-126](./CLEW-126.md). Все должны быть done до ready. Используется уточнённый по пилоту контракт; общая память репозитория и автоматическое повторное исследование остаются вне Scope.
+Зависит от [CLEW-108](./CLEW-108.md), [CLEW-114](./CLEW-114.md); через 114 обязательно завершение scout пилота [CLEW-126](./done/CLEW-126.md). Все должны быть done до ready. Используется уточнённый по пилоту контракт; общая память репозитория и автоматическое повторное исследование остаются вне Scope.
 
 ## Risks
 

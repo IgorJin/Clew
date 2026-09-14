@@ -28,6 +28,7 @@ import { RunnerExecutionPort } from './runner-execution.js';
 import { RunnerService } from './runner.js';
 import { RunnerStore } from './runner-store.js';
 import { RunnerTransport } from './runner-transport.js';
+import { scoutHumanPreview } from './scout-runner.js';
 
 const cwd = process.cwd();
 const stateDir = join(cwd, '.clew');
@@ -123,9 +124,14 @@ async function printDaemonLogs(rest) {
 }
 function printHelp() {
   console.log(
-    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID] [--project ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT] [--harness fake|codex|opencode] [--connection ID]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--connection ID] [--execution local|paired] [--review-harness fake|codex] [--review-connection ID] [--architect fake|codex] [--architect-connection ID]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew connections list\n  clew doctor [--harness codex|opencode] [--connection ID]`,
+    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID] [--project ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT] [--harness fake|codex|opencode] [--connection ID] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--connection ID] [--execution local|paired] [--review-harness fake|codex] [--review-connection ID] [--architect fake|codex] [--architect-connection ID] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew connections list\n  clew doctor [--harness codex|opencode] [--connection ID]`,
   );
   console.log('  clew task architecture TASK | brief TASK [--run RUN-ID]');
+  console.log(
+    '  clew task scout TASK [--harness fake|codex|opencode] [--revision SHA] [--path PATH] [--timeout-ms MS]',
+  );
+  console.log('  clew task scout show TASK [--request-id ID] [--context ID] [--human]');
+  console.log('  clew task scout cancel TASK [--request-id ID]');
   console.log('  clew finish-worker TASK [--run RUN-ID]');
   console.log('  clew task next-step ID');
   console.log('  clew task approve-step ID --action ACTION-ID [--harness opencode]');
@@ -154,7 +160,9 @@ function printHelp() {
     '  clew session open TASK [--stage STAGE] [--role ROLE] [--harness HARNESS] [--surface plain|live|none]',
   );
   console.log('  clew session capabilities [--harness HARNESS]');
-  console.log('  clew continue TASK --message TEXT [--actor ACTOR]');
+  console.log(
+    '  clew continue TASK --message TEXT [--actor ACTOR] [--scout-context ID | --no-scout] [--scout-sections LIST]',
+  );
 }
 
 function isProcessAlive(pid) {
@@ -383,6 +391,8 @@ export async function main(args) {
           }
           printResult(await service.execute(['task', 'result', rest[0]]), []);
         } else if (command === 'task' && subcommand === 'result') printResult(result, rest);
+        else if (command === 'task' && subcommand === 'scout' && rest.includes('--human'))
+          console.log(scoutHumanPreview(result));
         else if (command === 'task' && subcommand === 'usage' && rest.includes('--human'))
           console.log(
             `Task: ${result.taskId}\nStatus: ${result.status}\nTurns: ${result.turns}\nPriced: ${result.pricedTurns}\nTotal: ${JSON.stringify(result.total)}`,

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "requestId": "request-123",
+  "attemptId": "attempt-123",
+  "task": {
+    "taskId": "CLEW-123",
+    "projectId": "PROJECT-CLEW",
+    "contractFingerprint": "0733e16d33c72a786a2a87a1095daeb8e423c97aa5d04884a059a728e9e61675"
+  },
+  "repository": {
+    "repositoryId": "clew",
+    "revision": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "scope": {
+    "paths": ["src", "test"]
+  }
+}

@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CLEW-125 — Scout context handoff</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --surface: #121a2d;
+        --surface-2: #18233a;
+        --surface-3: #202f4b;
+        --text: #edf3ff;
+        --muted: #9eacc8;
+        --line: #2b3b5d;
+        --cyan: #61d7e8;
+        --green: #76e0a4;
+        --amber: #f3c46f;
+        --red: #ff8e9e;
+        --purple: #b9a2ff;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+        --sans:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        color: var(--text);
+        background: radial-gradient(circle at 88% 0%, #20345c 0, var(--bg) 34rem), var(--bg);
+        font-family: var(--sans);
+        line-height: 1.55;
+      }
+      a {
+        color: var(--cyan);
+      }
+      .wrap {
+        width: min(1180px, calc(100% - 36px));
+        margin: 0 auto;
+      }
+      .hero {
+        padding: 64px 0 42px;
+        border-bottom: 1px solid var(--line);
+      }
+      .eyebrow {
+        color: var(--cyan);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 860px;
+        margin: 16px 0 12px;
+        font-size: clamp(34px, 6vw, 68px);
+        line-height: 1.03;
+        letter-spacing: -0.04em;
+      }
+      h2 {
+        margin: 0 0 16px;
+        font-size: 25px;
+        letter-spacing: -0.02em;
+      }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+      p {
+        margin: 0 0 14px;
+      }
+      .lede {
+        max-width: 780px;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 25px;
+      }
+      .pill,
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 6px 10px;
+        color: var(--muted);
+        background: rgba(18, 26, 45, 0.78);
+        font: 12px var(--mono);
+      }
+      .pill strong {
+        color: var(--text);
+      }
+      main {
+        padding: 34px 0 76px;
+      }
+      section {
+        margin: 0 0 50px;
+        scroll-margin-top: 24px;
+      }
+      .section-intro {
+        max-width: 800px;
+        color: var(--muted);
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .metric {
+        min-height: 126px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 18px;
+        background: linear-gradient(145deg, rgba(32, 47, 75, 0.9), rgba(18, 26, 45, 0.9));
+      }
+      .metric .value {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text);
+        font: 700 31px/1 var(--mono);
+      }
+      .metric .label {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .metric.good .value {
+        color: var(--green);
+      }
+      .metric.info .value {
+        color: var(--cyan);
+      }
+      .metric.warn .value {
+        color: var(--amber);
+      }
+      .grid-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 20px;
+        background: rgba(18, 26, 45, 0.84);
+      }
+      .card p:last-child {
+        margin-bottom: 0;
+      }
+      .card.accent-cyan {
+        border-color: rgba(97, 215, 232, 0.5);
+      }
+      .card.accent-green {
+        border-color: rgba(118, 224, 164, 0.5);
+      }
+      .card.accent-amber {
+        border-color: rgba(243, 196, 111, 0.5);
+      }
+      .card.accent-purple {
+        border-color: rgba(185, 162, 255, 0.5);
+      }
+      .card-title {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 12px;
+      }
+      .tag {
+        padding: 4px 8px;
+        border-radius: 7px;
+        font-size: 11px;
+      }
+      .tag.cyan {
+        color: var(--cyan);
+        border-color: rgba(97, 215, 232, 0.38);
+      }
+      .tag.green {
+        color: var(--green);
+        border-color: rgba(118, 224, 164, 0.38);
+      }
+      .tag.amber {
+        color: var(--amber);
+        border-color: rgba(243, 196, 111, 0.38);
+      }
+      .tag.red {
+        color: var(--red);
+        border-color: rgba(255, 142, 158, 0.38);
+      }
+      .tag.purple {
+        color: var(--purple);
+        border-color: rgba(185, 162, 255, 0.38);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(18, 26, 45, 0.84);
+      }
+      th,
+      td {
+        padding: 13px 15px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--cyan);
+        background: rgba(32, 47, 75, 0.7);
+        font: 700 12px var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      td {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      td strong {
+        color: var(--text);
+      }
+      code,
+      pre {
+        font-family: var(--mono);
+      }
+      code {
+        color: var(--cyan);
+      }
+      pre {
+        margin: 0;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        color: #dbe7ff;
+        background: #0a0f1c;
+        font-size: 12px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .json-key {
+        color: var(--purple);
+      }
+      .json-string {
+        color: var(--green);
+      }
+      .json-number {
+        color: var(--amber);
+      }
+      .flow {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(100px, 1fr));
+        align-items: stretch;
+        gap: 0;
+        margin-top: 25px;
+      }
+      .flow-node {
+        min-height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 15px;
+        background: var(--surface);
+      }
+      .flow-node .step {
+        color: var(--muted);
+        font: 11px var(--mono);
+      }
+      .flow-node .node-title {
+        margin-top: 12px;
+        color: var(--text);
+        font-weight: 700;
+      }
+      .flow-node .node-copy {
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .flow-node.input {
+        border-color: rgba(243, 196, 111, 0.55);
+      }
+      .flow-node.context {
+        border-color: rgba(185, 162, 255, 0.55);
+      }
+      .flow-node.guard {
+        border-color: rgba(97, 215, 232, 0.55);
+      }
+      .flow-node.persist {
+        border-color: rgba(118, 224, 164, 0.55);
+      }
+      .flow-arrow {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--cyan);
+        font: 22px var(--mono);
+      }
+      .flow-notes {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-top: 16px;
+      }
+      .flow-note {
+        border-left: 2px solid var(--line);
+        padding: 3px 0 3px 13px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .flow-note strong {
+        color: var(--text);
+      }
+      .role-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .role {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        background: var(--surface);
+      }
+      .role .role-name {
+        color: var(--text);
+        font-weight: 700;
+      }
+      .role .role-status {
+        display: block;
+        margin-top: 9px;
+        font: 12px var(--mono);
+      }
+      .role.receive .role-status {
+        color: var(--green);
+      }
+      .role.skip .role-status {
+        color: var(--muted);
+      }
+      .role.receive {
+        border-color: rgba(118, 224, 164, 0.45);
+      }
+      .role.skip {
+        opacity: 0.78;
+      }
+      .example-number {
+        display: inline-flex;
+        width: 27px;
+        height: 27px;
+        align-items: center;
+        justify-content: center;
+        margin-right: 7px;
+        border-radius: 50%;
+        color: var(--bg);
+        background: var(--cyan);
+        font: 700 13px var(--mono);
+      }
+      .callout {
+        border: 1px solid rgba(243, 196, 111, 0.45);
+        border-radius: 14px;
+        padding: 16px 18px;
+        color: #f7e2b5;
+        background: rgba(79, 58, 22, 0.26);
+      }
+      .callout strong {
+        color: var(--amber);
+      }
+      .check {
+        color: var(--green);
+        font-weight: 700;
+      }
+      .cross {
+        color: var(--red);
+        font-weight: 700;
+      }
+      details {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(18, 26, 45, 0.84);
+      }
+      details + details {
+        margin-top: 9px;
+      }
+      summary {
+        cursor: pointer;
+        padding: 13px 16px;
+        color: var(--text);
+        font-weight: 700;
+      }
+      details pre {
+        border: 0;
+        border-top: 1px solid var(--line);
+        border-radius: 0 0 12px 12px;
+      }
+      .source {
+        color: var(--muted);
+        font: 12px var(--mono);
+      }
+      .foot {
+        padding-top: 20px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 13px;
+      }
+      @media (max-width: 900px) {
+        .metric-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .flow {
+          grid-template-columns: 1fr;
+          gap: 7px;
+        }
+        .flow-node {
+          min-height: 0;
+        }
+        .flow-arrow {
+          transform: rotate(90deg);
+          min-height: 22px;
+        }
+        .role-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      @media (max-width: 650px) {
+        .wrap {
+          width: min(100% - 24px, 1180px);
+        }
+        .hero {
+          padding-top: 38px;
+        }
+        .metric-grid,
+        .grid-2,
+        .flow-notes,
+        .role-grid {
+          grid-template-columns: 1fr;
+        }
+        th,
+        td {
+          padding: 10px;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+        h1 {
+          font-size: 42px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap">
+        <div class="eyebrow">CLEW / CLEW-125 / IMPLEMENTATION REPORT</div>
+        <h1>Scout context handoff: что изменилось</h1>
+        <p class="lede">
+          Практический отчёт о том, как RepositoryContext проходит от включения Scout до
+          architect/worker, где он проверяется, что сохраняется в Run и что намеренно не передаётся
+          дальше.
+        </p>
+        <div class="meta">
+          <span class="pill"><strong>Статус</strong> done</span>
+          <span class="pill"><strong>Дата отчёта</strong> 2026-09-12</span>
+          <span class="pill"><strong>HEAD</strong> 996b89a</span>
+          <span class="pill"><strong>Миграция</strong> schema 24</span>
+          <span class="pill"><strong>Тесты</strong> 252 pass / 0 fail</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section id="summary">
+        <h2>Что добавилось в результате CLEW-125</h2>
+        <p class="section-intro">
+          До этой задачи Scout умел создавать локальную карту репозитория, но она не была частью
+          запуска Task. Теперь карту можно явно выбрать для запуска, проверить на свежесть и
+          передать как bounded data block в существующий Execution Brief.
+        </p>
+        <div class="metric-grid">
+          <div class="metric info">
+            <span class="value">16 KiB</span
+            ><span class="label">жёсткий предел выбранного блока в brief</span>
+          </div>
+          <div class="metric warn">
+            <span class="value">64 KiB</span
+            ><span class="label">предел полного RepositoryContext v1</span>
+          </div>
+          <div class="metric good">
+            <span class="value">24</span
+            ><span class="label">версия схемы SQLite с provenance Run</span>
+          </div>
+          <div class="metric good">
+            <span class="value">252</span
+            ><span class="label"
+              >серверных теста прошли; 10 пропущены только из-за loopback sandbox</span
+            >
+          </div>
+        </div>
+      </section>
+
+      <section id="before-after">
+        <h2>До и после</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Область</th>
+              <th>До CLEW-125</th>
+              <th>После CLEW-125</th>
+              <th>Практический эффект</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Включение</strong></td>
+              <td>Scout не был частью обычного Task flow.</td>
+              <td>
+                Опциональный проектный <code>.env</code>: <code>ENABLE_SCOUT=1</code>. По умолчанию
+                путь прежний.
+              </td>
+              <td>Можно сравнивать одинаковые задачи с Scout и без него.</td>
+            </tr>
+            <tr>
+              <td><strong>Выбор карты</strong></td>
+              <td>Была только отдельная карта Scout.</td>
+              <td>
+                <code>--scout-context ID</code>, выбор sections через <code>--scout-sections</code>,
+                явный bypass через <code>--no-scout</code>.
+              </td>
+              <td>Версия контекста выбирается явно, случайная подмена запрещена.</td>
+            </tr>
+            <tr>
+              <td><strong>Проверка</strong></td>
+              <td>Основной запуск не знал о применимости карты.</td>
+              <td>
+                До worktree/harness проверяются Task fingerprint, Project/repository identity,
+                revision, checksum и структура.
+              </td>
+              <td>Устаревшая или повреждённая карта останавливает только её использование.</td>
+            </tr>
+            <tr>
+              <td><strong>Передача</strong></td>
+              <td>В brief не было repository context.</td>
+              <td>
+                В brief добавляется только bounded block с identity, source references, выбранными
+                sections и unknowns.
+              </td>
+              <td>Основной Task Contract и permissions остаются отдельными и обязательными.</td>
+            </tr>
+            <tr>
+              <td><strong>Надёжность</strong></td>
+              <td>Не было provenance Scout в Run.</td>
+              <td>
+                Run хранит ID, checksum, revision и sections; история фиксирует selected/skipped
+                решение.
+              </td>
+              <td>Можно восстановить, какую карту реально видел worker.</td>
+            </tr>
+            <tr>
+              <td><strong>Граница ролей</strong></td>
+              <td>Не было явного правила consumer.</td>
+              <td>Карту получают Quick/Standard worker и Deep architect/worker.</td>
+              <td>
+                QA, reviewer, integration и paired Runner не получают local Scout payload в v0.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="code-map">
+        <h2>Карта изменений в коде</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Файл</th>
+              <th>Изменение</th>
+              <th>Роль в потоке</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>src/config.js</code></td>
+              <td>
+                Читает только <code>ENABLE_SCOUT</code> из проектного <code>.env</code>; env
+                override имеет приоритет.
+              </td>
+              <td>Configuration boundary</td>
+            </tr>
+            <tr>
+              <td><code>src/scout-context.js</code></td>
+              <td>Добавляет selection helper и лимит 16 KiB для bounded brief.</td>
+              <td>Нормализация и отбор данных</td>
+            </tr>
+            <tr>
+              <td><code>src/scout-runner.js</code></td>
+              <td>Решает context ID, проверяет применимость и возвращает provenance.</td>
+              <td>Producer и freshness guard</td>
+            </tr>
+            <tr>
+              <td><code>src/scheduler.js</code></td>
+              <td>
+                Выбирает карту до worktree, передаёт её по ролям и сохраняет provenance; повторяет
+                выбор при retry/restart.
+              </td>
+              <td>Главный handoff boundary</td>
+            </tr>
+            <tr>
+              <td>
+                <code>src/execution-brief.js</code><br /><code
+                  >schemas/execution-brief.v1.schema.json</code
+                >
+              </td>
+              <td>
+                Добавляет строго ограниченный <code>context.scout</code> и untrusted label в prompt.
+              </td>
+              <td>Contract/schema boundary</td>
+            </tr>
+            <tr>
+              <td><code>src/migrations.js</code><br /><code>src/store.js</code></td>
+              <td>Schema 24 и четыре nullable поля Run: ID, checksum, revision, sections.</td>
+              <td>Durable provenance</td>
+            </tr>
+            <tr>
+              <td><code>src/control-service.js</code><br /><code>src/cli.js</code></td>
+              <td>
+                Парсит <code>--scout-context</code>, <code>--scout-sections</code>,
+                <code>--no-scout</code> и показывает их в help.
+              </td>
+              <td>Операторский интерфейс</td>
+            </tr>
+            <tr>
+              <td><code>test/scout-handoff.test.js</code></td>
+              <td>Добавляет 6 групповых сценариев handoff и отказов.</td>
+              <td>Acceptance evidence</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="flow">
+        <h2>Поток данных</h2>
+        <p class="section-intro">
+          Каждая стрелка — отдельная граница. Полная карта остаётся локальным JSON-файлом; в
+          execution boundary попадает только выбранный блок, а в Run — его provenance.
+        </p>
+        <div class="flow" aria-label="Поток Scout context">
+          <div class="flow-node input">
+            <span class="step">01 / CONFIG</span>
+            <div class="node-title">.env</div>
+            <div class="node-copy">
+              <code>ENABLE_SCOUT=1</code><br />явное включение возможности
+            </div>
+          </div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-node context">
+            <span class="step">02 / PRODUCER</span>
+            <div class="node-title">ScoutRunner</div>
+            <div class="node-copy">read-only commit snapshot<br />→ RepositoryContext JSON</div>
+          </div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-node guard">
+            <span class="step">03 / GUARD</span>
+            <div class="node-title">resolveContext</div>
+            <div class="node-copy">
+              fingerprint · repo · revision<br />checksum · size · sections
+            </div>
+          </div>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <div class="flow-node persist">
+            <span class="step">04 / HANDOFF</span>
+            <div class="node-title">Execution Brief</div>
+            <div class="node-copy">untrusted bounded data<br />Task Contract остаётся главным</div>
+          </div>
+        </div>
+        <div class="flow-notes">
+          <div class="flow-note">
+            <strong>Источник.</strong> Карта строится на выбранной commit revision; dirty checkout
+            отмечается отдельно.
+          </div>
+          <div class="flow-note">
+            <strong>Решение.</strong> Scheduler сначала валидирует ID и применимость, потом создаёт
+            worktree и запускает harness.
+          </div>
+          <div class="flow-note">
+            <strong>Аудит.</strong> Run и Task events дают две точки восстановления выбора:
+            provenance исполнения и история решения.
+          </div>
+        </div>
+      </section>
+
+      <section id="roles">
+        <h2>Кто получает карту</h2>
+        <div class="role-grid">
+          <div class="role receive">
+            <div class="role-name">Quick worker</div>
+            <span class="role-status">✓ получает</span>
+          </div>
+          <div class="role receive">
+            <div class="role-name">Standard worker</div>
+            <span class="role-status">✓ получает</span>
+          </div>
+          <div class="role receive">
+            <div class="role-name">Deep architect</div>
+            <span class="role-status">✓ получает</span>
+          </div>
+          <div class="role receive">
+            <div class="role-name">Deep worker</div>
+            <span class="role-status">✓ получает</span>
+          </div>
+          <div class="role skip">
+            <div class="role-name">QA / reviewer / integration</div>
+            <span class="role-status">— не получают в v0</span>
+          </div>
+        </div>
+        <div class="callout" style="margin-top: 16px">
+          <strong>Почему так:</strong> CLEW-125 проверяет полезность карты именно для понимания и
+          реализации. QA/reviewer и общий checkpoint-механизм остаются следующим расширением после
+          пилота CLEW-126 и задач CLEW-114/115.
+        </div>
+      </section>
+
+      <section id="examples">
+        <h2>Реальные примеры из fixtures и тестов</h2>
+        <div class="grid-2">
+          <div class="card accent-amber">
+            <div class="card-title">
+              <h3><span class="example-number">1</span>Включение и запуск</h3>
+              <span class="tag amber">config + CLI</span>
+            </div>
+            <p>
+              Флаг читается из корневого <code>.env</code>; явная переменная окружения имеет
+              приоритет. Выбор карты происходит отдельно и не запускает новый Scout автоматически.
+            </p>
+            <pre><span class="json-key">.env</span>
+ENABLE_SCOUT=1
+
+<span class="json-key"># выбор готовой карты</span>
+clew run TASK --scout-context scout-cb3825cf6717d6d9f3cc099f \\
+  --scout-sections components,unknowns
+
+<span class="json-key"># обычный путь</span>
+clew run TASK --no-scout</pre>
+          </div>
+          <div class="card accent-purple">
+            <div class="card-title">
+              <h3><span class="example-number">2</span>Полный RepositoryContext</h3>
+              <span class="tag purple">fixtures/scout/complete</span>
+            </div>
+            <p>
+              Это реальный fixture <code>fixtures/scout/complete.v1.json</code>: задача CLEW-123,
+              проект PROJECT-CLEW, репозиторий <code>clew</code>, область <code>src</code> и
+              <code>test</code>.
+            </p>
+            <pre>{
+  <span class="json-key">"contextId"</span>: <span class="json-string">"scout-cb3825cf6717d6d9f3cc099f"</span>,
+  <span class="json-key">"taskId"</span>: <span class="json-string">"CLEW-123"</span>,
+  <span class="json-key">"projectId"</span>: <span class="json-string">"PROJECT-CLEW"</span>,
+  <span class="json-key">"revision"</span>: <span class="json-string">"0123456789abcdef...01234567"</span>,
+  <span class="json-key">"scope"</span>: [<span class="json-string">"src"</span>, <span class="json-string">"test"</span>],
+  <span class="json-key">"components"</span>: [<span class="json-string">"domain"</span>, <span class="json-string">"tests"</span>],
+  <span class="json-key">"relationship"</span>: <span class="json-string">"tests verifies domain"</span>,
+  <span class="json-key">"check"</span>: <span class="json-string">"node --test test/scout-context.test.js"</span>,
+  <span class="json-key">"unknown"</span>: <span class="json-string">"Which harness will be selected..."</span>
+}</pre>
+          </div>
+          <div class="card accent-cyan">
+            <div class="card-title">
+              <h3><span class="example-number">3</span>Что реально попадает в brief</h3>
+              <span class="tag cyan">selected block</span>
+            </div>
+            <p>
+              Для того же fixture выбор sections <code>components,unknowns</code> уменьшает
+              компактный JSON с <strong>2 299</strong> до <strong>1 152 UTF-8 bytes</strong>. Это
+              конкретный пример отбора, а не обещание постоянного коэффициента сжатия.
+            </p>
+            <pre>{
+  <span class="json-key">"version"</span>: <span class="json-number">1</span>,
+  <span class="json-key">"contextId"</span>: <span class="json-string">"scout-cb3825cf6717d6d9f3cc099f"</span>,
+  <span class="json-key">"checksum"</span>: <span class="json-string">"5c76837e...a578af30"</span>,
+  <span class="json-key">"task"</span>: { <span class="json-key">"taskId"</span>: <span class="json-string">"CLEW-123"</span>, ... },
+  <span class="json-key">"source"</span>: { <span class="json-key">"revision"</span>: <span class="json-string">"012345..."</span>, ... },
+  <span class="json-key">"status"</span>: <span class="json-string">"complete"</span>,
+  <span class="json-key">"sections"</span>: {
+    <span class="json-key">"components"</span>: [<span class="json-string">"domain"</span>, <span class="json-string">"tests"</span>],
+    <span class="json-key">"unknowns"</span>: [<span class="json-string">"Which harness will be selected..."</span>]
+  }
+}</pre>
+          </div>
+          <div class="card accent-green">
+            <div class="card-title">
+              <h3><span class="example-number">4</span>Проверки отказа</h3>
+              <span class="tag green">before execution</span>
+            </div>
+            <p>Тесты группы 2 проверяют, что карта не проходит дальше и worktree не создаётся.</p>
+            <pre><span class="cross">✕</span> scout context ... is stale: contractFingerprint changed
+<span class="cross">✕</span> scout context ... is stale: revision changed
+<span class="cross">✕</span> is unavailable: scout context ... was not found
+<span class="cross">✕</span> published scout context is corrupt
+<span class="cross">✕</span> scout context brief exceeds 16384 UTF-8 bytes
+<span class="cross">✕</span> Scout is disabled; set ENABLE_SCOUT=1 to enable it</pre>
+          </div>
+        </div>
+      </section>
+
+      <section id="storage">
+        <h2>Что сохраняется и где</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Данные</th>
+              <th>Место</th>
+              <th>Пример</th>
+              <th>Зачем</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Полная карта</strong></td>
+              <td><code>.clew/scout/&lt;task&gt;/&lt;context&gt;.json</code></td>
+              <td>components, relationships, checks, observations, unknowns, omissions</td>
+              <td>Повторный просмотр и повторное явное использование.</td>
+            </tr>
+            <tr>
+              <td><strong>Выбор</strong></td>
+              <td>Task events</td>
+              <td><code>SCOUT_CONTEXT_SELECTED</code> / <code>SCOUT_CONTEXT_SKIPPED</code></td>
+              <td>Продолжение после Deep plan approval и аудит решения.</td>
+            </tr>
+            <tr>
+              <td><strong>Provenance Run</strong></td>
+              <td>SQLite <code>runs</code>, migration 24</td>
+              <td><code>scout_context_id</code>, checksum, revision, sections</td>
+              <td>Доказательство того, какую карту реально использовал stage.</td>
+            </tr>
+            <tr>
+              <td><strong>Execution Brief</strong></td>
+              <td>Event + harness input</td>
+              <td><code>context.scout</code> с identity/source/status/sections</td>
+              <td>Bounded handoff; full карта и transcript не копируются.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="grid-2" style="margin-top: 16px">
+          <div class="card">
+            <h3>Пример Run provenance</h3>
+            <pre>
+scout_context_id       = scout-cb3825cf6717d6d9f3cc099f
+scout_context_checksum = 5c76837e0c7f137a...a578af30
+scout_context_revision = 0123456789abcdef...01234567
+scout_context_sections = ["components", "unknowns"]</pre>
+          </div>
+          <div class="card">
+            <h3>Гарантия границы</h3>
+            <p>
+              Prompt помечает карту как <code>untrusted data</code> и прямо говорит, что она не
+              меняет Task Contract. Acceptance criteria, permissions, required evidence и review
+              policy формируются отдельно.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="verification">
+        <h2>Реальная проверка</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Проверка</th>
+              <th>Результат</th>
+              <th>Что доказывает</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <code
+                  >node --test test/scout-handoff.test.js test/execution-brief.test.js
+                  test/scout-context.test.js test/scout-execution.test.js</code
+                >
+              </td>
+              <td class="check">25 pass / 0 fail</td>
+              <td>
+                Передача по профилям, role boundary, stale/missing/corrupt/oversized, retry/restart,
+                paired и CLI.
+              </td>
+            </tr>
+            <tr>
+              <td><code>npm test</code></td>
+              <td class="check">252 pass / 10 skips / 0 fail</td>
+              <td>
+                Полный серверный regression suite. Skips — тесты loopback listeners, запрещённые
+                sandbox.
+              </td>
+            </tr>
+            <tr>
+              <td><code>npm run lint</code></td>
+              <td class="check">pass</td>
+              <td>Стиль и статические ошибки JavaScript.</td>
+            </tr>
+            <tr>
+              <td><code>npm run tasks:check</code></td>
+              <td class="check">61 cards</td>
+              <td>
+                Task cards и зависимости валидны; CLEW-125 перемещена в <code>tasks/done</code>.
+              </td>
+            </tr>
+            <tr>
+              <td>Prettier + <code>git diff --check</code></td>
+              <td class="check">pass</td>
+              <td>Форматирование и отсутствие whitespace errors в затронутых файлах.</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="source" style="margin-top: 12px">
+          Тестовая матрица находится в <code>test/scout-handoff.test.js</code>; карточка результата
+          — <code>tasks/done/CLEW-125.md</code>.
+        </p>
+      </section>
+
+      <section id="limits">
+        <h2>Ограничения и следующий шаг</h2>
+        <div class="grid-2">
+          <div class="card accent-amber">
+            <h3>Что пока не измерено</h3>
+            <p>
+              Автоматические fixtures доказывают корректность потока и границ, но не полезность
+              содержания для реального разработчика, сокращение времени или экономию токенов на
+              живых моделях. Это задача пилота CLEW-126 на трёх сопоставимых задачах.
+            </p>
+          </div>
+          <div class="card accent-purple">
+            <h3>Что сознательно отложено</h3>
+            <p>
+              Общая карта памяти между задачами, auto-refresh по diff, checkpoint engine, передача
+              Scout в QA/reviewer, remote/paired payload и постоянная политика compaction/retention.
+            </p>
+          </div>
+        </div>
+        <div class="callout" style="margin-top: 16px">
+          <strong>Следующая задача:</strong> CLEW-126 — провести пилот на локальном исправлении,
+          изменении со связью между модулями и неоднозначной задаче; записать полезные/лишние
+          ссылки, unknowns, размер brief и стоимость.
+        </div>
+      </section>
+
+      <div class="foot">
+        Отчёт описывает рабочее дерево на базе HEAD
+        <code>996b89affadac0a95857fd725ceac138eb1de81f</code>; изменения CLEW-125 ещё не
+        закоммичены. Пути и команды в примерах соответствуют текущему репозиторию Clew.
+      </div>
+    </main>
+  </body>
+</html>

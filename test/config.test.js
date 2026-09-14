@@ -84,6 +84,37 @@ test('resolves user, project, and environment config precedence', () => {
   }
 });
 
+test('Scout is opt-in through project .env or ENABLE_SCOUT, not config files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'clew-scout-flag-'));
+
+  try {
+    const userConfig = join(dir, 'user.json');
+
+    writeFileSync(userConfig, JSON.stringify({ scoutEnabled: true }));
+    writeFileSync(join(dir, '.clew.json'), JSON.stringify({ scoutEnabled: true }));
+    writeFileSync(join(dir, '.env'), 'ENABLE_SCOUT=1\n');
+    assert.equal(loadConfig(dir, { CLEW_USER_CONFIG: userConfig }).scoutEnabled, true);
+    assert.equal(
+      loadConfig(dir, { CLEW_USER_CONFIG: userConfig, ENABLE_SCOUT: '0' }).scoutEnabled,
+      false,
+    );
+    for (const value of ['', '0', 'false', 'off', 'typo'])
+      assert.equal(
+        loadConfig(dir, { CLEW_USER_CONFIG: userConfig, ENABLE_SCOUT: value }).scoutEnabled,
+        false,
+      );
+    for (const value of ['1', 'true', 'yes', 'on', ' TRUE '])
+      assert.equal(
+        loadConfig(dir, { CLEW_USER_CONFIG: userConfig, ENABLE_SCOUT: value }).scoutEnabled,
+        true,
+      );
+    rmSync(join(dir, '.env'));
+    assert.equal(loadConfig(dir, { CLEW_USER_CONFIG: userConfig }).scoutEnabled, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('rejects secrets and absolute paths in project config', () => {
   const dir = mkdtempSync(join(tmpdir(), 'clew-config-security-'));
 

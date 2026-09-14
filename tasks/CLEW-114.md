@@ -29,7 +29,7 @@ evidence_policy: v1
 ## Scope
 
 - Добавить checkpoint schema/store: sourceCursor, task/plan versions, revisions, stage references, findings, pending decisions и nextAction.
-- Использовать выводы пилота [CLEW-126](./CLEW-126.md): хранить выбранные RepositoryContext IDs/checksums и provenance отдельно от прогресса Task. Перенос локальной карты v0 в ArtifactStore сохраняет source revision и не требует повторного scout run.
+- Использовать выводы завершённого пилота [CLEW-126](./done/CLEW-126.md): хранить выбранные RepositoryContext IDs, checksums, source revisions и selected sections в отдельном reference-блоке, не смешивая их с прогрессом Task. Сохранять partial/unknown/omission markers и не превращать recommended checks в execution evidence. Перенос локальной карты v0 в ArtifactStore сохраняет source revision и не требует повторного scout run.
 - Публиковать checkpoints на существующих durable boundaries; обновлять current pointer через compare-and-swap/transaction, чтобы параллельные Stages не затёрли друг друга.
 - Реализовать lazy rebuild из канонических данных, checksum, detection stale/corrupt и Stage references для превышения 64/256 КиБ.
 
@@ -73,7 +73,7 @@ Prompt selection, cross-task memory и формальная QA-политика.
 
 ## Dependencies and parallelization
 
-Зависит от [CLEW-105](./CLEW-105.md), [CLEW-107](./CLEW-107.md), [CLEW-109](./CLEW-109.md) и пилота [CLEW-126](./CLEW-126.md). Все должны быть done до ready. Checkpoint contract уточняется по результатам scout v0; расширенная память репозитория не является зависимостью. Ownership ограничен Scope; при изменении общего store/schema согласовать контракт с соседними карточками.
+Зависит от [CLEW-105](./CLEW-105.md), [CLEW-107](./CLEW-107.md), [CLEW-109](./CLEW-109.md) и пилота [CLEW-126](./done/CLEW-126.md). Все должны быть done до ready. Checkpoint contract уточняется по результатам scout v0; расширенная память репозитория не является зависимостью. Ownership ограничен Scope; при изменении общего store/schema согласовать контракт с соседними карточками.
 
 ## Risks
 

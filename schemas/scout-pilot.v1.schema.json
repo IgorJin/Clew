@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clew.local/schemas/scout-pilot.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "pilotId", "scenarios"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "pilotId": { "type": "string", "const": "CLEW-126" },
+    "scenarios": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?:\\.|(?![\\\\/])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*/$).+)$"
+    },
+    "section": {
+      "enum": ["components", "relationships", "checks", "observations", "unknowns", "omissions"]
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "taskId",
+        "title",
+        "profile",
+        "scopePaths",
+        "consumers",
+        "selectedSections",
+        "mapStatus",
+        "findings"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": {
+          "enum": ["local_bug_fix", "cross_module_change", "ambiguous_scope"]
+        },
+        "taskId": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "profile": { "enum": ["quick", "standard", "deep"] },
+        "scopePaths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/repositoryPath" }
+        },
+        "consumers": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/consumer" }
+        },
+        "selectedSections": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/section" }
+        },
+        "mapStatus": { "enum": ["complete", "partial"] },
+        "findings": { "$ref": "#/$defs/findings" }
+      }
+    },
+    "consumer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "stageId"],
+      "properties": {
+        "role": { "enum": ["architect", "worker"] },
+        "stageId": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["helpful", "extra", "incorrect", "missing", "decision"],
+      "properties": {
+        "helpful": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/section" }
+        },
+        "extra": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/section" }
+        },
+        "incorrect": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missing": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "decision": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    }
+  }
+}

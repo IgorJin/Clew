@@ -528,6 +528,17 @@ const MIGRATIONS = Object.freeze([
       db.exec(`
         CREATE TABLE IF NOT EXISTS run_bindings (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE, task_id TEXT, binding TEXT NOT NULL, created_at TEXT NOT NULL);
       `);
+      // CLEW-126: bounded scout context persisted on the run.
+      const columns = db.prepare('PRAGMA table_info(runs)').all();
+
+      if (!columns.some((column) => column.name === 'scout_context_id'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_id TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_checksum'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_checksum TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_revision'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_revision TEXT');
+      if (!columns.some((column) => column.name === 'scout_context_sections'))
+        db.exec('ALTER TABLE runs ADD COLUMN scout_context_sections TEXT');
     },
   },
 ]);
