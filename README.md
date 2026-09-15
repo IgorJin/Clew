@@ -1,19 +1,86 @@
 # Clew
 
-Clew is a local, task-centric control plane for AI-assisted development. It keeps a durable task thread across native coding harnesses, isolated Git worktrees, verification, independent review, retries, Deep execution plans, and human approvals.
+> Локальный task-centric control plane для разработки с AI-агентами.
+>
+> **Язык / Language:** [Русский (по умолчанию)](#russian) · [English](#english)
 
-This repository contains the `v0.10.0` implementation. For a detailed Russian-language usage guide and concrete cases, see [`DONE.md`](./DONE.md). Agent changes are reviewed from the task header and transferred manually as described in [`docs/GIT-WORKFLOW.md`](./docs/GIT-WORKFLOW.md).
+<a id="russian"></a>
 
-## Requirements
+## Русский
 
-- macOS or Linux;
-- Node.js 22.5 or newer (Clew uses the built-in `node:sqlite` module);
-- Git 2.30 or newer;
-- for native flows: Codex CLI `0.148.0` and/or OpenCode CLI/server `1.18.23`.
+### Что такое Clew
 
-Windows has not been validated for v0.1.
+Clew связывает привычные coding harnesses — Codex, OpenCode и будущие адаптеры — с устойчивым жизненным циклом задачи. Агент пишет код и работает с инструментами, а Clew хранит цель, попытки, worktree, проверки, ревью, решения человека и итоговый результат.
 
-## Clean install and quality gate
+Коротко: **агент выполняет работу, Clew держит нить задачи от первого запуска до принятия результата.**
+
+![Экран задачи Clew: worker, reviewer, этапы и история событий](./docs/assets/stand-opencode.png)
+
+<p align="center"><sub>Пример интерфейса: worker, reviewer, этапы выполнения и причинная история событий.</sub></p>
+
+### Зачем это нужно
+
+Обычная сессия агента заканчивается вместе с окном терминала. Разработка — нет: задачу нужно продолжить после сбоя, проверить на конкретной ревизии, показать изменения, повторить неудачный этап или попросить человека принять решение.
+
+Clew добавляет над нативным агентом именно этот слой координации:
+
+- **Задача вместо эфемерного чата.** Цель, критерии приёмки, запуски, сообщения и решения сохраняются в одном Task Thread.
+- **Нативные harnesses вместо нового «агента».** Codex и OpenCode сохраняют свои инструменты, сессии, approvals и контекст.
+- **Изоляция вместо случайных изменений.** Запуски работают в управляемых Git worktrees и связываются с ревизией, попыткой и evidence.
+- **Проверяемый результат вместо красивого ответа.** `READY` появляется только при наличии нужных проверок; `COMPLETED` остаётся решением человека.
+- **Продолжение вместо ручного восстановления.** Можно продолжить задачу, повторить этап, открыть изменения, посмотреть историю или создать follow-up.
+
+### Что уже умеет Clew
+
+| Возможность          | Что получает разработчик                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| Долгоживущие задачи  | Цель, acceptance criteria, статусы, события, сообщения и история запусков                         |
+| Codex и OpenCode     | Единая точка запуска через нативные Codex App Server и OpenCode Server                            |
+| Профили выполнения   | `quick`, `standard` и `deep` с разным уровнем планирования, ревью и контроля                      |
+| Git worktrees        | Изолированное рабочее пространство для каждого запуска и понятная связь с commit SHA              |
+| Проверки и ревью     | Command evidence, pinned verification, структурированное ревью и ограниченные retries             |
+| Task Screen и CLI    | Локальный daemon, Web UI, Task Thread, просмотр изменений, история и диагностические команды      |
+| Local-first и Runner | Работа на одной машине или выполнение стадий на одном настроенном Runner-хосте                    |
+| Операционные данные  | Экспорт результата, безопасная очистка, usage/cost-данные и опциональная OpenTelemetry-телеметрия |
+
+### Как проходит задача
+
+```text
+Task
+  ↓
+Scout / Plan (опционально)
+  ↓
+Worker: Codex или OpenCode
+  ↓
+Checks + evidence
+  ↓
+Review и bounded retry
+  ↓
+READY
+  ↓
+Решение человека: continue / complete / follow-up
+```
+
+Профиль выбирает глубину процесса:
+
+| Профиль    | Когда использовать                       | Что происходит                                                                          |
+| ---------- | ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `quick`    | Небольшая задача или быстрый эксперимент | Один worker без обязательного отдельного ревью                                          |
+| `standard` | Обычная фича или исправление             | Worker, структурированное ревью и ограниченный retry                                    |
+| `deep`     | Большая или рискованная задача           | Архитектор, schema-valid DAG, approval gate, параллельные worktrees, интеграция и ревью |
+
+### Быстрый старт
+
+#### Требования
+
+- macOS или Linux;
+- Node.js 22.5 или новее;
+- Git 2.30 или новее;
+- для native flows — Codex CLI `0.148.0` и/или OpenCode CLI/server `1.18.23`.
+
+Windows пока не проходил проверку для этой версии.
+
+#### Установка и проверка
 
 ```sh
 git clone https://github.com/IgorJin/Clew.git
@@ -23,152 +90,282 @@ npm run check
 node bin/clew.js --help
 ```
 
-`npm run check` runs Prettier, ESLint, the UI build/tests, the backend suite, task-card validation, and syntax checks. Runtime dependencies provide WebSocket transport, structured logging, and the managed terminal; ESLint and Prettier are development-only dependencies.
+#### Первый запуск без внешних credentials
 
-## Quick start without external credentials
-
-Run this inside a Git repository that has at least one commit:
+Выполните команды в Git-репозитории, где уже есть хотя бы один commit:
 
 ```sh
 node /path/to/Clew/bin/clew.js init
+
 node /path/to/Clew/bin/clew.js task create \
   --id DEMO-1 \
   --title "First Clew task" \
-  --goal "Prove task-centric execution" \
+  --description "Prove task-centric execution" \
   --accept "the fixture verification passes" \
   --profile quick
+
 node /path/to/Clew/bin/clew.js run DEMO-1 --harness fake
 node /path/to/Clew/bin/clew.js status DEMO-1
 node /path/to/Clew/bin/clew.js events DEMO-1
 ```
 
-State is stored in `.clew/clew.sqlite`; owned worktrees are stored under `.clew/worktrees/`. The fake harness is deterministic and requires no account.
+`fake` — детерминированный harness для demo и тестов; аккаунт провайдера не нужен. Состояние хранится в `.clew/clew.sqlite`, а управляемые worktrees — в `.clew/worktrees/`.
 
-The product profiles default to native Codex as specified; `--harness fake` is an explicit deterministic test/demo route.
+#### Подключение Codex или OpenCode
 
-## Native harnesses
-
-Diagnose the exact supported boundary before running it:
+Сначала проверьте границу совместимости:
 
 ```sh
-node bin/clew.js doctor --harness codex
-node bin/clew.js doctor --harness opencode
+node /path/to/Clew/bin/clew.js doctor --harness codex
+node /path/to/Clew/bin/clew.js doctor --harness opencode
+```
+
+Затем выберите адаптер явно:
+
+```sh
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness codex
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness opencode
+```
+
+OpenCode должен быть запущен отдельно, обычно так:
+
+```sh
+opencode serve --hostname 127.0.0.1 --port 4096
+```
+
+Codex работает через `codex app-server` по JSON-RPC stdio. Одного сообщения о завершении недостаточно: для состояния `READY` Clew ожидает хотя бы один успешный command-evidence.
+
+### Команды, которые нужны чаще всего
+
+| Задача                           | Команда                                                          |
+| -------------------------------- | ---------------------------------------------------------------- |
+| Следить за статусом              | `node bin/clew.js status TASK --watch`                           |
+| Открыть Task Thread              | `node bin/clew.js task thread TASK --follow`                     |
+| Продолжить работу с сообщением   | `node bin/clew.js continue TASK --message "..."`                 |
+| Посмотреть результат             | `node bin/clew.js task result TASK --human`                      |
+| Посмотреть изменения             | `node bin/clew.js task open-changes TASK`                        |
+| Повторить этап                   | `node bin/clew.js retry TASK worker --actor NAME --reason "..."` |
+| Перепроверить конкретную ревизию | `node bin/clew.js verify TASK --revision SHA --actor NAME`       |
+| Принять результат                | `node bin/clew.js complete TASK --revision SHA --actor NAME`     |
+| Проверить worktrees              | `node bin/clew.js worktree list`                                 |
+
+### Режимы эксплуатации
+
+По умолчанию Clew работает локально: CLI, daemon, UI, хранилище и harness находятся на одной машине. `clew daemon start` поднимает loopback-only daemon и сообщает URL интерфейса.
+
+Для разделения control plane и выполнения можно использовать один предварительно настроенный Runner:
+
+```sh
+node bin/clew.js daemon start
+node bin/clew.js runner serve
+node bin/clew.js run TASK --execution paired
+```
+
+Удалённые endpoints требуют `wss://`; `ws://` разрешён только для loopback. Runner не является кластерным scheduler: автоматического failover и нескольких Runner в текущей версии нет.
+
+### Что Clew не делает
+
+Clew — это не новая модель и не самостоятельный coding agent. Нативные harnesses отвечают за выбор инструментов, контекст, shell/browser behavior, approvals и редактирование; Clew отвечает за задачу, выполнение, evidence, ревью и принятие.
+
+В текущей версии также нет multi-Runner scheduler, автоматического failover, PR/merge automation, автоматического разрешения merge conflicts или автоматического provisioning портов, баз данных и контейнеров.
+
+### Документация
+
+- [`DONE.md`](./DONE.md) — подробный русскоязычный usage guide и конкретные сценарии;
+- [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) — поддерживаемые версии и конфигурация;
+- [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — диагностика типичных проблем;
+- [`docs/UI.md`](./docs/UI.md) и [`docs/CONTROL-PLANE-V1.md`](./docs/CONTROL-PLANE-V1.md) — Web UI, API и WebSocket;
+- [`docs/TASK-DATA-LIFECYCLE.md`](./docs/TASK-DATA-LIFECYCLE.md) — жизненный цикл данных задачи;
+- [`VISION.md`](./VISION.md) — долгосрочное направление;
+- [`ROADMAP.md`](./ROADMAP.md) — текущие релизные результаты и следующий план;
+- [`RELEASE.md`](./RELEASE.md) — release gate и sign-off.
+
+Подробнее о плагинах, Scout, Controller/Runner и операционных контрактах — в каталоге [`docs/`](./docs/).
+
+### Лицензия
+
+MIT. Публичное npm-имя `clew` принадлежит другому проекту, поэтому этот репозиторий распространяется через GitHub Releases и не публикуется в этот namespace.
+
+[Перейти к English version ↓](#english)
+
+<a id="english"></a>
+
+## English
+
+### What is Clew?
+
+Clew connects familiar coding harnesses — Codex, OpenCode, and future adapters — to a durable task lifecycle. The agent writes code and uses tools; Clew keeps the goal, attempts, worktree, checks, review, human decisions, and final result together.
+
+In one sentence: **the agent does the work; Clew keeps the thread from the first run to human acceptance.**
+
+The screenshot above shows the task screen with a worker, reviewer, stages, and a causal event timeline.
+
+### Why it exists
+
+A normal agent session ends when its terminal or chat window ends. Software work does not: a task may need to resume after a failure, be verified against a specific revision, expose its changes, retry a failed stage, or wait for a human decision.
+
+Clew adds that coordination layer above the native agent:
+
+- **A task instead of an ephemeral chat.** Goals, acceptance criteria, runs, messages, and decisions live in one Task Thread.
+- **Native harnesses instead of another agent loop.** Codex and OpenCode keep their own tools, sessions, approvals, and context.
+- **Isolation instead of accidental edits.** Runs use managed Git worktrees and remain connected to a revision, attempt, and evidence.
+- **Evidence instead of a polished answer.** `READY` requires the expected checks; `COMPLETED` remains a human decision.
+- **Continuation instead of manual recovery.** Continue a task, retry a stage, inspect changes, read history, or create a follow-up.
+
+### What Clew provides today
+
+| Capability             | What you get                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| Durable tasks          | Goals, acceptance criteria, statuses, events, messages, and run history            |
+| Codex and OpenCode     | One launch surface for the native Codex App Server and OpenCode Server             |
+| Execution profiles     | `quick`, `standard`, and `deep` with different planning, review, and control depth |
+| Git worktrees          | Isolated workspaces for runs with explicit commit provenance                       |
+| Checks and review      | Command evidence, pinned verification, structured review, and bounded retries      |
+| Task Screen and CLI    | Local daemon, Web UI, Task Thread, change inspection, history, and diagnostics     |
+| Local-first and Runner | One-machine execution or stage execution on one configured Runner host             |
+| Operational data       | Result export, safe cleanup, usage/cost data, and optional OpenTelemetry traces    |
+
+### How a task moves
+
+```text
+Task
+  ↓
+Scout / Plan (optional)
+  ↓
+Worker: Codex or OpenCode
+  ↓
+Checks + evidence
+  ↓
+Review and bounded retry
+  ↓
+READY
+  ↓
+Human decision: continue / complete / follow-up
+```
+
+Choose a profile based on the amount of control the task needs:
+
+| Profile    | Use it for                      | What it does                                                                            |
+| ---------- | ------------------------------- | --------------------------------------------------------------------------------------- |
+| `quick`    | Small tasks or fast experiments | One worker without a required separate review                                           |
+| `standard` | Normal features and fixes       | Worker, structured review, and bounded retry                                            |
+| `deep`     | Large or higher-risk work       | Architect, schema-valid DAG, approval gate, parallel worktrees, integration, and review |
+
+### Quick start
+
+#### Requirements
+
+- macOS or Linux;
+- Node.js 22.5 or newer;
+- Git 2.30 or newer;
+- for native flows, Codex CLI `0.148.0` and/or OpenCode CLI/server `1.18.23`.
+
+Windows has not been validated for this version.
+
+#### Install and verify
+
+```sh
+git clone https://github.com/IgorJin/Clew.git
+cd Clew
+npm ci
+npm run check
+node bin/clew.js --help
+```
+
+#### First run without external credentials
+
+Run this in a Git repository with at least one commit:
+
+```sh
+node /path/to/Clew/bin/clew.js init
+
+node /path/to/Clew/bin/clew.js task create \
+  --id DEMO-1 \
+  --title "First Clew task" \
+  --description "Prove task-centric execution" \
+  --accept "the fixture verification passes" \
+  --profile quick
+
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness fake
+node /path/to/Clew/bin/clew.js status DEMO-1
+node /path/to/Clew/bin/clew.js events DEMO-1
+```
+
+`fake` is a deterministic harness for demos and tests; no provider account is required. State lives in `.clew/clew.sqlite`, and managed worktrees live in `.clew/worktrees/`.
+
+#### Connect Codex or OpenCode
+
+Check the supported boundary first:
+
+```sh
+node /path/to/Clew/bin/clew.js doctor --harness codex
+node /path/to/Clew/bin/clew.js doctor --harness opencode
 ```
 
 Then select the adapter explicitly:
 
 ```sh
-node bin/clew.js run DEMO-1 --harness codex
-node bin/clew.js run DEMO-1 --harness opencode
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness codex
+node /path/to/Clew/bin/clew.js run DEMO-1 --harness opencode
 ```
 
-OpenCode requires a running server, normally `opencode serve --hostname 127.0.0.1 --port 4096`. Codex uses `codex app-server` over JSON-RPC stdio. Native completion alone is insufficient for `READY`: Clew requires at least one passing command evidence item.
-
-## Standard and Deep flows
-
-Standard adds structured review and bounded retry. Blocking findings are added to the worker prompt; the first retry resumes its native session and a repeated failure starts fresh.
-
-Deep adds a schema-valid DAG, approval gate, bounded parallel worktrees, deterministic commit integration, optional per-stage harness routing, broad verification, review, and restart recovery:
+OpenCode normally needs a separate server:
 
 ```sh
-node bin/clew.js run DEMO-DEEP --profile deep --harness fake --architect fake
-node bin/clew.js plan DEMO-DEEP
-node bin/clew.js approve DEMO-DEEP --actor your-name
-node bin/clew.js run DEMO-DEEP --profile deep --harness fake
+opencode serve --hostname 127.0.0.1 --port 4096
 ```
 
-## Controller and Runner
+Codex runs through `codex app-server` over JSON-RPC stdio. A native completion message alone is not enough for `READY`: Clew expects at least one successful command-evidence item.
 
-v0.6 can keep Controller/UI on one host and execute leased stages on one configured Runner host. Local execution remains the default. Put the shared credential in environment variables or restrictive `0600` files, and define the Runner's logical workspace mappings only in the user config on the Runner host.
+### Frequently used commands
 
-```json
-{
-  "controllerRunner": {
-    "runnerId": "runner-1",
-    "credentialFile": "/secure/controller-runner.token"
-  },
-  "runner": {
-    "id": "runner-1",
-    "controllerUrl": "wss://controller.example/runner/v1",
-    "credentialFile": "/secure/controller-runner.token",
-    "stateDir": "/var/lib/clew-runner",
-    "workspaces": {
-      "clew": "/absolute/path/to/Clew"
-    }
-  }
-}
-```
+| Action                   | Command                                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| Watch status             | `node bin/clew.js status TASK --watch`                           |
+| Open the Task Thread     | `node bin/clew.js task thread TASK --follow`                     |
+| Continue with a message  | `node bin/clew.js continue TASK --message "..."`                 |
+| Inspect the result       | `node bin/clew.js task result TASK --human`                      |
+| Inspect changes          | `node bin/clew.js task open-changes TASK`                        |
+| Retry a stage            | `node bin/clew.js retry TASK worker --actor NAME --reason "..."` |
+| Verify a pinned revision | `node bin/clew.js verify TASK --revision SHA --actor NAME`       |
+| Accept the result        | `node bin/clew.js complete TASK --revision SHA --actor NAME`     |
+| Inspect worktrees        | `node bin/clew.js worktree list`                                 |
 
-Start `clew daemon start` on Controller and `clew runner serve` on the execution host, then use `clew run TASK --execution paired`. `ws://` is accepted only on loopback; remote endpoints require `wss://`. v0.6 supports one preconfigured Runner, no automatic failover, and no Docker/pairing workflow. Accepted work becomes `RECOVERING` after ambiguous loss and is never silently duplicated. Terminal ownership stays on the Runner host, and the Controller UI labels it instead of proxying PTY bytes.
+### Operating modes
 
-Release packages are attached to GitHub Releases. The public npm name `clew` belongs to an unrelated project, so this repository does not publish to that namespace.
+Clew runs locally by default: the CLI, daemon, UI, storage, and harness are on one machine. `clew daemon start` starts a loopback-only daemon and reports the UI URL.
 
-## Operations
+To separate the control plane from execution, use one preconfigured Runner:
 
 ```sh
-node bin/clew.js status DEMO-1 --watch
-node bin/clew.js interrupt DEMO-1 --actor your-name
-node bin/clew.js task result DEMO-1
-node bin/clew.js task history DEMO-1 --stage worker --attempt 1
-node bin/clew.js retry DEMO-1 worker --actor your-name --reason "rerun after inspection"
-node bin/clew.js verify DEMO-1 --revision <worker-sha> --actor your-name
-node bin/clew.js task result DEMO-1 --human
-node bin/clew.js task usage DEMO-1 --human
-node bin/clew.js pricing sync --url https://pricing.example/catalog.json --source provider-catalog
-node bin/clew.js complete DEMO-1 --revision <worker-sha> --actor your-name
-node bin/clew.js export DEMO-1 --dir /tmp/clew-export
-node bin/clew.js cleanup --retention-days 7
-node bin/clew.js telemetry install
 node bin/clew.js daemon start
-node bin/clew.js api task list
-CLEW_TELEMETRY_ENABLED=true node bin/clew.js telemetry status
-node bin/clew.js worktree list
-node bin/clew.js worktree prune
+node bin/clew.js runner serve
+node bin/clew.js run TASK --execution paired
 ```
 
-`worktree prune` removes only clean, inactive, Clew-owned worktrees. Dirty and active worktrees are retained for inspection.
+Remote endpoints require `wss://`; `ws://` is accepted only on loopback. A Runner is not a cluster scheduler: the current version has no automatic failover or multi-Runner scheduling.
 
-Use `task open-changes TASK` to inspect a task workspace. The viewer priority is an explicit `--viewer cursor|vscode` (or `changeViewer` configuration), Cursor, then VS Code; pass `--run RUN-ID` to select a persisted run. Copying the path is an explicit action via `--viewer worktree-path` and is never used as an automatic fallback.
+### What Clew does not do
 
-`task result` and `task history` expose the persisted result without direct SQLite access. `retry` records an auditable operator action and enforces the resolved attempt policy. `verify` records a new verification report against an explicitly pinned known revision without creating an implementation run.
+Clew is not a new model and not a standalone coding agent. Native harnesses own tool selection, context, shell/browser behavior, approvals, and editing; Clew owns the task, execution, evidence, review, and acceptance flow.
 
-Each completed native turn records reported token usage when the harness exposes it. `task usage` aggregates the complete task lifecycle, including retries and Deep stages. Missing provider data remains `unknown` or `partial`; Clew never estimates tokens or silently treats them as zero. Pricing is synced by an external cron via configured JSON endpoints (`pricing.sources`) or an explicit `--url`; every successful sync is an immutable catalog snapshot.
+The current version also does not provide a multi-Runner scheduler, automatic failover, PR/merge automation, automatic merge-conflict resolution, or automatic provisioning of ports, databases, and containers.
 
-Telemetry is optional and disabled by default. `telemetry install` installs the official OpenTelemetry trace runtime under `.clew/telemetry`; enable it with `CLEW_TELEMETRY_ENABLED=true` or project configuration, then point the official OTLP exporter at Phoenix or another collector with `OTEL_EXPORTER_OTLP_ENDPOINT`. Collector failures are reported as diagnostics and never change task state.
+### Documentation
 
-The local daemon is explicit and loopback-only. `clew daemon start` launches it in the background on `127.0.0.1:43176` by default and reports the UI URL and log path. Inspect its live health with `clew daemon status`, stop it with `clew daemon stop`, and use `clew api ...` to send authenticated commands through its API. CLI and API commands share one in-process `ClewService`; the daemon does not spawn a nested CLI per request. Use `clew daemon logs --follow` to stream structured JSON lifecycle records, or `clew daemon logs --lines 200` to read recent records. `daemon.log` contains safe server, WebSocket, and command metadata; `daemon.stderr.log` retains process stderr for diagnosis. Use `clew daemon serve --port PORT` only when a foreground process is useful for debugging. Startup detects and replaces stale ownership files left by an abrupt process exit. The daemon stores its bearer token, ownership metadata, and logs under `.clew` with restrictive permissions; it never starts automatically.
+- [`DONE.md`](./DONE.md) — detailed Russian usage guide and concrete scenarios;
+- [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) — supported versions and configuration;
+- [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — common diagnostics;
+- [`docs/UI.md`](./docs/UI.md) and [`docs/CONTROL-PLANE-V1.md`](./docs/CONTROL-PLANE-V1.md) — Web UI, API, and WebSocket;
+- [`docs/TASK-DATA-LIFECYCLE.md`](./docs/TASK-DATA-LIFECYCLE.md) — task data lifecycle;
+- [`VISION.md`](./VISION.md) — long-term direction;
+- [`ROADMAP.md`](./ROADMAP.md) — release outcomes and next work;
+- [`RELEASE.md`](./RELEASE.md) — release gate and sign-off.
 
-For daemon-run Codex tasks, the embedded Codex TUI is the worker from the first turn: the browser automatically opens xterm, and terminal input, questions, and Codex approval prompts remain interactive throughout execution. Clew does not start a competing headless writer. Select `Finish worker` (or run `clew finish-worker TASK`) when the interactive work is ready for Clew verification; Clew stops the TUI, reads the persisted thread through a separate read-only App Server, and then verifies the workspace. Hiding the terminal only closes the browser view; it does not stop the worker. To reopen a completed persisted session, use `clew session open TASK --stage worker --role worker --harness codex`. Set `CLEW_CODEX_OPEN_DESKTOP=true` to additionally open the worker worktree in Codex Desktop; the embedded CLI terminal is always created, independently of this flag. Use `--surface none` for capability/diagnostic checks. Unsupported, starting, or stale sessions return structured `unavailable` results.
+See [`docs/`](./docs/) for plugin, Scout, Controller/Runner, and operational contract details.
 
-Configuration precedence is command flag → environment → project `.clew.json` → user config → defaults. See [`docs/COMPATIBILITY.md`](./docs/COMPATIBILITY.md) and [`DONE.md`](./DONE.md) for keys and examples.
+### License
 
-Role-specific models can be selected with `models.worker`, `models.architect`, `models.reviewer`, and `models.qa` in `.clew.json` or with the corresponding `CLEW_*_MODEL` environment variables. Every run also receives a deterministic collision-resistant runtime namespace, persisted in its run history. Ports, databases, and containers remain caller-managed.
+MIT. The public npm name `clew` belongs to an unrelated project, so this repository ships through GitHub Releases and does not publish to that namespace.
 
-## Roadmap and future plans
-
-- [`docs/future-plans/index.html`](https://igorjin.github.io/Clew/future-plans/) — human-readable plan of what is next (hosted on GitHub Pages);
-- [`docs/future-plans/index.html`](./docs/future-plans/index.html) — the same plan as a file in the repository.
-
-## Release evidence
-
-- [`spec.md`](./spec.md) — product and technical contract;
-- [`VISION.md`](./VISION.md) — long-term product direction and target architecture;
-- [`ROADMAP.md`](./ROADMAP.md) — release outcomes and planned work packages;
-- [`tasks.md`](./tasks.md) — implementation record and current backlog;
-- [`tasks/`](./tasks/) — detailed active/planned task cards and canonical status fields;
-- [`docs/ACCEPTANCE.md`](./docs/ACCEPTANCE.md) — mapping of all ten acceptance criteria;
-- [`RELEASE.md`](./RELEASE.md) — release gate and live-signoff record;
-- [`RELEASE-0.2.md`](./RELEASE-0.2.md) — v0.2 scope and release gates;
-- [`RELEASE-0.3.md`](./RELEASE-0.3.md) — planned observability and execution-economics release;
-- [`RELEASE-0.5.md`](./RELEASE-0.5.md) — interactive terminal and worker lifecycle release;
-- [`RELEASE-0.6.md`](./RELEASE-0.6.md) — Controller/Runner transport, leases, and release evidence;
-- [`RELEASE-0.8.md`](./RELEASE-0.8.md) — agent change visibility and Git review;
-- [`RELEASE-0.9.md`](./RELEASE-0.9.md) — task finalization workflow and Task Screen v3;
-- [`RELEASE-0.10.md`](./RELEASE-0.10.md) — keyboard-first controls and shortcut discovery;
-- [`docs/TROUBLESHOOTING.md`](./docs/TROUBLESHOOTING.md) — operational diagnostics.
-
-## Intentional limits
-
-Clew has no multi-Runner scheduler, automatic failover, PR/merge automation, or automatic merge-conflict resolution. Runtime namespaces are identifiers and coordination metadata; Clew does not provision ports, databases, or containers. Node's built-in SQLite API is still marked experimental by Node.js.
-
-Clew does not implement a model loop: native harnesses own coding intelligence and tools; Clew owns the durable task lifecycle above them.
+[↑ Back to the Russian version](#russian)
