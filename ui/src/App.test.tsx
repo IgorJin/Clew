@@ -1562,6 +1562,112 @@ describe('settings modal (CLEW-099)', () => {
     await waitFor(() => expect(document.activeElement).toBe(last));
   });
 
+  it('shows the read-only Connections projection with doctor status', async () => {
+    api.execute.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'connections' && args[1] === 'login')
+        return { sessionId: 's-1', connectionId: 'codex-stand', status: 'authenticated' };
+      if (args[0] === 'connections')
+        return {
+          connections: [
+            {
+              id: 'codex-stand',
+              plugin: 'clew.runtime.codex',
+              enabled: true,
+              capabilities: ['execution.headless', 'output.structured'],
+            },
+            { id: 'otel-main', plugin: 'clew.telemetry.otel', enabled: false, capabilities: [] },
+          ],
+          diagnostics: [
+            {
+              connection: 'codex-default',
+              source: 'codexBin',
+              message: 'codexBin setting mapped to legacy connection',
+            },
+          ],
+        };
+      if (args[0] === 'doctor')
+        return {
+          ok: false,
+          checks: [
+            { name: 'connection:codex-stand', status: 'ready', version: '1.0.0', auth: true },
+            { name: 'connection:otel-main', status: 'disabled' },
+          ],
+          diagnostics: [],
+        };
+
+      return { fixture: true };
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));
+    const dialog = await screen.findByRole('dialog', { name: /settings/i });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^connections$/i }));
+
+    await waitFor(() => expect(within(dialog).getByText('codex-stand')).toBeTruthy());
+    expect(within(dialog).getByText('clew.runtime.codex')).toBeTruthy();
+    expect(within(dialog).getByText('execution.headless')).toBeTruthy();
+    expect(within(dialog).getByText('clew.telemetry.otel')).toBeTruthy();
+    expect(within(dialog).getByText('codexBin setting mapped to legacy connection')).toBeTruthy();
+    expect(within(dialog).getByText('ready')).toBeTruthy();
+    expect(within(dialog).getByText('auth: ok')).toBeTruthy();
+    expect(within(dialog).getAllByText('disabled').length).toBeGreaterThan(0);
+    expect(dialog.textContent).toMatch(/Git change viewers are not plugin connections/i);
+
+    const modelSuggestions = dialog.querySelector('datalist#connection-model-suggestions');
+
+    expect(modelSuggestions).toBeTruthy();
+    expect(modelSuggestions?.querySelectorAll('option').length).toBeGreaterThan(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: /add connection/i }));
+
+    const modelInput = await waitFor(() => {
+      const input = dialog.querySelector(
+        'input[list="connection-model-suggestions"]',
+      ) as HTMLInputElement | null;
+
+      expect(input).toBeTruthy();
+
+      return input as HTMLInputElement;
+    });
+
+    expect(modelInput.getAttribute('list')).toBe('connection-model-suggestions');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+    expect(
+      api.execute.mock.calls.some(
+        ([args]) => JSON.stringify(args) === JSON.stringify(['connections', 'list']),
+      ),
+    ).toBe(true);
+    expect(
+      api.execute.mock.calls.some(([args]) => JSON.stringify(args) === JSON.stringify(['doctor'])),
+    ).toBe(true);
+    fireEvent.click(within(dialog).getByRole('button', { name: /^api key$/i }));
+
+    const password = dialog.querySelector('input[type="password"]') as HTMLInputElement;
+
+    expect(password).toBeTruthy();
+    fireEvent.input(password, { target: { value: 'test-key-123' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^log in with api key$/i }));
+
+    await waitFor(() =>
+      expect(
+        api.execute.mock.calls.some(
+          ([args]) =>
+            JSON.stringify(args) ===
+            JSON.stringify([
+              'connections',
+              'login',
+              'codex-stand',
+              '--with-api-key',
+              '--api-key',
+              'test-key-123',
+            ]),
+        ),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(within(dialog).getByText('Authenticated codex-stand.')).toBeTruthy(),
+    );
+  });
+
   it('contains no secret-like strings', async () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: /^settings$/i }));

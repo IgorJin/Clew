@@ -1,3 +1,4 @@
 .clew/
+.clew-stand/
 node_modules/
 *.log

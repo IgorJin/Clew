@@ -1,0 +1,13 @@
+{
+  "id": "clew.runtime.fake",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "extensionPoints": [{ "point": "AgentRuntime", "version": "1" }],
+  "configSchema": { "type": "object", "properties": {} },
+  "scope": "execution-host",
+  "resources": {
+    "binaries": [],
+    "network": [],
+    "notes": "Test-only runtime fixture."
+  }
+}

@@ -523,6 +523,12 @@ const MIGRATIONS = Object.freeze([
   {
     version: 24,
     apply(db) {
+      // CLEW-131: immutable per-run runtime bindings. Pre-plugin runs have
+      // no row and read as `legacy-unknown` without losing history.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS run_bindings (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE, task_id TEXT, binding TEXT NOT NULL, created_at TEXT NOT NULL);
+      `);
+      // CLEW-126: bounded scout context persisted on the run.
       const columns = db.prepare('PRAGMA table_info(runs)').all();
 
       if (!columns.some((column) => column.name === 'scout_context_id'))

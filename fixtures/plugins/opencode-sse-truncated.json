@@ -1,0 +1,4 @@
+{
+  "sessionId": "sess_s",
+  "rawChunks": ["event: message.part.updated\ndata: {\"type\": \"broken\"\n\n"]
+}

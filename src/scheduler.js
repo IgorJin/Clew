@@ -21,16 +21,24 @@ function readyStateForTask(contract) {
 import {
   APPROVAL_DECISION,
   FakeHarness,
-  CodexHarness,
-  OpenCodeHarness,
   ExternalHarnessUnavailable,
   HarnessInterruptedError,
 } from './harness.js';
-import { FakeReviewer, CodexReviewer } from './review.js';
-import { FakeArchitect, CodexArchitect } from './architect.js';
+import { FakeReviewer } from './review.js';
+import { FakeArchitect } from './architect.js';
+import {
+  resolveCodexArchitect,
+  resolveCodexHarness,
+  resolveCodexReviewer,
+  resolveOpenCodeHarness,
+  selectCodexConnectionId,
+  selectOpenCodeConnectionId,
+} from './plugins/legacy.js';
 import { verificationEnvironment } from './trust.js';
 import { createCodexLiveEndpoint, createRuntimeNamespace } from './runtime.js';
 import { RUNNER_MESSAGE_KIND, createRunnerEnvelope } from './runner-protocol.js';
+import { buildRunBinding, checkBindingCompatible } from './plugins/binding.js';
+import { PLUGIN_ERROR_CODE, PluginError } from './plugins/errors.js';
 import { EXECUTION_ROLE, prepareExecutionBrief } from './execution-brief.js';
 import { createArchitectureResult } from './architecture-result.js';
 
@@ -42,6 +50,7 @@ export class Scheduler {
       harnessFactory = null,
       reviewerFactory = null,
       architectFactory = null,
+      runtimeResolver = null,
       planFactory = null,
       requirePlanApproval = true,
       signal = null,
@@ -58,6 +67,7 @@ export class Scheduler {
     this.harnessFactory = harnessFactory;
     this.reviewerFactory = reviewerFactory;
     this.architectFactory = architectFactory;
+    this.runtimeResolver = runtimeResolver;
     this.planFactory = planFactory;
     this.requirePlanApproval = requirePlanApproval;
     this.signal = signal;
@@ -161,6 +171,7 @@ export class Scheduler {
       : null;
 
     if (persistedRun) {
+      this.requireCompatibleBinding(persistedRun.id);
       const persistedScoutContextId = persistedRun.scoutContextId ?? null;
       const selectedScoutContextId = workerScoutContext?.contextId ?? null;
 
@@ -252,6 +263,17 @@ export class Scheduler {
 
         persistedRun = createdRun;
         runId = persistedRun.id;
+        if (!allocatedHere) this.requireCompatibleBinding(runId);
+        else
+          this.snapshotRunBinding({
+            runId,
+            taskId,
+            stageId,
+            attempt,
+            harnessName,
+            model: this.adapterConfig.models?.worker ?? null,
+            executionHost: 'local',
+          });
         if (!allocatedHere)
           workspace = {
             path: persistedRun.workspace,
@@ -744,6 +766,16 @@ export class Scheduler {
     };
 
     this.store.appendEvent(taskId, 'EXECUTION_BRIEF_PREPARED', { runId, executionBrief });
+    const binding = this.snapshotRunBinding({
+      runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      harnessName,
+      model: requirements.model ?? null,
+      executionHost: runner.runnerId,
+      persist: false,
+    });
     const run = {
       id: runId,
       taskId,
@@ -754,6 +786,7 @@ export class Scheduler {
       profile: policy?.name ?? task.profile,
       policy,
       startedAt: new Date().toISOString(),
+      ...(binding ? { binding } : {}),
     };
     const lease = {
       id: leaseId,
@@ -779,6 +812,7 @@ export class Scheduler {
         profile: policy?.name ?? task.profile,
         harness: harnessName,
         requirements,
+        ...(binding ? { binding } : {}),
       },
     });
 
@@ -788,6 +822,8 @@ export class Scheduler {
       offer,
       requirements: lease.requirements,
     });
+
+    if (binding) this.store.saveRunBinding(runId, binding);
     let storedResult = null;
 
     while (!storedResult) {
@@ -1761,6 +1797,15 @@ export class Scheduler {
     };
 
     this.store.createRun(run);
+    this.snapshotRunBinding({
+      runId,
+      taskId,
+      stageId: stage.id,
+      attempt,
+      harnessName,
+      model: this.adapterConfig.models?.[stage.kind === 'qa' ? 'qa' : 'worker'] ?? null,
+      executionHost: 'local',
+    });
     this.store.appendEvent(taskId, 'STAGE_RUN_STARTED', {
       ...run,
       branch: stageWorkspace.branch,
@@ -1881,18 +1926,100 @@ export class Scheduler {
     }
   }
 
+  /** Snapshot an immutable binding for a newly allocated run (CLEW-131). */
+  snapshotRunBinding({
+    runId,
+    taskId = null,
+    stageId = null,
+    attempt = null,
+    harnessName,
+    model = null,
+    executionHost = 'local',
+    persist = true,
+  }) {
+    if (!this.runtimeResolver) return null;
+
+    let connectionId;
+
+    if (harnessName === HARNESS_NAME.CODEX)
+      connectionId = selectCodexConnectionId(this.adapterConfig);
+    else if (harnessName === HARNESS_NAME.OPENCODE)
+      connectionId = selectOpenCodeConnectionId(this.adapterConfig);
+    else return null;
+
+    let adapter;
+
+    try {
+      adapter = this.runtimeResolver.resolve({ connectionId });
+    } catch (error) {
+      // Unregistered names (fake in production hosts) stay binding-free
+      // and read as legacy-unknown; real misconfiguration stays loud.
+      if (error?.code === PLUGIN_ERROR_CODE.UNKNOWN_ID) return null;
+
+      throw error;
+    }
+
+    const binding = buildRunBinding({
+      runId,
+      taskId,
+      stageId,
+      attempt,
+      connectionId,
+      adapter,
+      registry: this.runtimeResolver.registry,
+      model,
+      executionHost,
+    });
+
+    if (persist) this.store.saveRunBinding(runId, binding);
+
+    return binding;
+  }
+
+  /** Require a saved binding to still match this host (CLEW-131).
+   *
+   * Legacy runs (no binding row) and hosts without a resolver proceed
+   * unchanged. Anything else that mismatches is explicit recovery — the
+   * run is never re-routed to a different runtime automatically.
+   */
+  requireCompatibleBinding(runId) {
+    const record = this.store.getRunBinding(runId);
+
+    if (record.status === 'legacy-unknown' || !this.runtimeResolver) return record;
+
+    const verdict = checkBindingCompatible(record.binding, {
+      registry: this.runtimeResolver.registry,
+      resolver: this.runtimeResolver,
+    });
+
+    if (!verdict.compatible)
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.RECOVERY_REQUIRED,
+        `${verdict.reason} (run ${runId})`,
+      );
+
+    return { status: 'bound', runId, binding: record.binding };
+  }
+
   createHarnessAdapter(harnessName) {
     if (this.harnessFactory) return this.harnessFactory(harnessName);
     if (harnessName === HARNESS_NAME.FAKE) return new FakeHarness();
     if (harnessName === HARNESS_NAME.CODEX)
-      return new CodexHarness({
-        command: this.adapterConfig.codexBin,
-        openDesktop: this.adapterConfig.openCodexDesktop,
-        terminalManager: this.adapterConfig.terminalManager,
-        trustedWorkspaceRoot: this.workspaceManager.root ?? null,
+      return resolveCodexHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {
+          openDesktop: this.adapterConfig.openCodexDesktop,
+          terminalManager: this.adapterConfig.terminalManager,
+          trustedWorkspaceRoot: this.workspaceManager.root ?? null,
+        },
       });
     if (harnessName === HARNESS_NAME.OPENCODE)
-      return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
+      return resolveOpenCodeHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {},
+      });
 
     return new ExternalHarnessUnavailable(harnessName);
   }
@@ -1997,13 +2124,12 @@ export class Scheduler {
     if (this.reviewerFactory) return this.reviewerFactory(reviewerName);
 
     return reviewerName === HARNESS_NAME.CODEX
-      ? new CodexReviewer(
-          new CodexHarness({
-            command: this.adapterConfig.codexBin,
-            model: this.adapterConfig.models?.reviewer,
-            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
-          }),
-        )
+      ? resolveCodexReviewer({
+          resolver: this.runtimeResolver,
+          adapterConfig: this.adapterConfig,
+          hostServices: { trustedWorkspaceRoot: this.workspaceManager.root ?? null },
+          connectionId: this.adapterConfig.reviewConnection ?? undefined,
+        })
       : new FakeReviewer();
   }
 
@@ -2022,13 +2148,12 @@ export class Scheduler {
     if (this.architectFactory) return this.architectFactory(architectName);
 
     return architectName === HARNESS_NAME.CODEX
-      ? new CodexArchitect(
-          new CodexHarness({
-            command: this.adapterConfig.codexBin,
-            model: this.adapterConfig.models?.architect,
-            trustedWorkspaceRoot: this.workspaceManager.root ?? null,
-          }),
-        )
+      ? resolveCodexArchitect({
+          resolver: this.runtimeResolver,
+          adapterConfig: this.adapterConfig,
+          hostServices: { trustedWorkspaceRoot: this.workspaceManager.root ?? null },
+          connectionId: this.adapterConfig.architectConnection ?? undefined,
+        })
       : new FakeArchitect();
   }
 }

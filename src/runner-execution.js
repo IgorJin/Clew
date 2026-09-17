@@ -1,6 +1,12 @@
-import { FakeHarness, CodexHarness, OpenCodeHarness } from './harness.js';
-import { FakeReviewer, CodexReviewer } from './review.js';
-import { FakeArchitect, CodexArchitect } from './architect.js';
+import { FakeHarness } from './harness.js';
+import { FakeReviewer } from './review.js';
+import { FakeArchitect } from './architect.js';
+import {
+  resolveCodexHarness,
+  resolveOpenCodeHarness,
+  wrapCodexArchitect,
+  wrapCodexReviewer,
+} from './plugins/legacy.js';
 import { join } from 'node:path';
 import { GitWorktreeManager } from './workspace.js';
 
@@ -65,6 +71,8 @@ export class RunnerExecutionPort {
     workspaces = [],
     worktreeRoot = null,
     harnessFactory = null,
+    runtimeResolver = null,
+    runtimeInventory = null,
     adapterConfig = {},
   } = {}) {
     this.workspaces = new Map(workspaces.map((workspace) => [workspace.id, workspace.path]));
@@ -80,6 +88,8 @@ export class RunnerExecutionPort {
         : [],
     );
     this.harnessFactory = harnessFactory;
+    this.runtimeResolver = runtimeResolver;
+    this.runtimeInventory = runtimeInventory;
     this.adapterConfig = adapterConfig;
     this.active = new Map();
   }
@@ -92,27 +102,78 @@ export class RunnerExecutionPort {
     if (this.harnessFactory) return this.harnessFactory(name);
     if (name === 'fake') return new FakeHarness();
     if (name === 'codex')
-      return new CodexHarness({
-        command: this.adapterConfig.codexBin ?? 'codex',
-        openDesktop: this.adapterConfig.openCodexDesktop ?? false,
-        trustedWorkspaceRoot,
+      return resolveCodexHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {
+          openDesktop: this.adapterConfig.openCodexDesktop ?? false,
+          trustedWorkspaceRoot,
+        },
       });
     if (name === 'opencode')
-      return new OpenCodeHarness({ baseUrl: this.adapterConfig.openCodeUrl });
+      return resolveOpenCodeHarness({
+        resolver: this.runtimeResolver,
+        adapterConfig: this.adapterConfig,
+        hostServices: {},
+      });
     throw new Error(`unsupported Runner harness: ${name}`);
   }
 
   createReviewer(name, trustedWorkspaceRoot = null) {
     if (name === 'fake') return new FakeReviewer();
     if (name === 'codex')
-      return new CodexReviewer(this.createHarness('codex', trustedWorkspaceRoot));
+      return wrapCodexReviewer(this.createHarness('codex', trustedWorkspaceRoot));
     throw new Error(`unsupported Runner reviewer: ${name}`);
   }
 
   createArchitect(name) {
     if (name === 'fake') return new FakeArchitect();
-    if (name === 'codex') return new CodexArchitect(this.createHarness('codex'));
+    if (name === 'codex') return wrapCodexArchitect(this.createHarness('codex'));
     throw new Error(`unsupported Runner architect: ${name}`);
+  }
+
+  /** Check a plugin-bound lease against this Runner's inventory (CLEW-131).
+   *
+   * A Runner without inventory (legacy v1 route) refuses plugin-bound
+   * leases explicitly instead of executing them on a mismatched runtime.
+   */
+  requireBindingSupport(binding) {
+    if (!binding || typeof binding !== 'object')
+      throw new Error('Runner lease binding must be an object');
+
+    if (!this.runtimeInventory)
+      throw new Error(
+        'Runner does not support plugin-bound leases (legacy v1 route): refusing the plugin-bound lease explicitly; upgrade the Runner or offer a legacy harness route',
+      );
+
+    const entry = this.runtimeInventory.find((item) => item.plugin === binding.pluginId);
+
+    if (!entry)
+      throw new Error(
+        `unsupported Runner binding: plugin "${binding.pluginId}" is not installed on this Runner`,
+      );
+
+    if (entry.version !== binding.pluginVersion)
+      throw new Error(
+        `unsupported Runner binding: plugin "${binding.pluginId}" is at version ${entry.version} but the lease requires ${binding.pluginVersion}`,
+      );
+
+    const connection = (entry.connections ?? []).find((item) => item.id === binding.connectionId);
+
+    if (!connection || !connection.enabled)
+      throw new Error(
+        `unsupported Runner binding: connection "${binding.connectionId}" is unavailable on this Runner`,
+      );
+
+    const capabilities = entry.capabilities ?? [];
+    const missing = (binding.capabilitySnapshot ?? []).filter(
+      (capability) => !capabilities.includes(capability),
+    );
+
+    if (missing.length > 0)
+      throw new Error(
+        `unsupported Runner binding: this Runner lacks capabilities: ${missing.join(', ')}`,
+      );
   }
 
   async accept(offer, { signal, onEvent } = {}) {
@@ -120,6 +181,9 @@ export class RunnerExecutionPort {
 
     if (!projectRoot)
       throw new Error(`Runner workspace mapping is unavailable: ${offer.workspaceId}`);
+
+    if (offer.binding !== undefined && offer.binding !== null)
+      this.requireBindingSupport(offer.binding);
     const requirements = offer.requirements ?? {};
     const task = requirements.task;
 

@@ -1,0 +1,42 @@
+{
+  "sessionId": "sess_s",
+  "frames": [
+    {
+      "type": "message.part.updated",
+      "properties": {
+        "sessionID": "sess_s",
+        "part": { "type": "text", "text": "hello " }
+      }
+    },
+    {
+      "type": "message.part.updated",
+      "properties": {
+        "sessionID": "sess_s",
+        "part": { "type": "text", "text": "world" }
+      }
+    },
+    {
+      "type": "message.part.updated",
+      "properties": {
+        "sessionID": "sess_s",
+        "part": {
+          "type": "tool",
+          "tool": "npm",
+          "state": { "status": "completed", "input": { "command": "npm test" }, "output": "passed" }
+        }
+      }
+    },
+    {
+      "type": "session.permission.requested",
+      "properties": { "sessionID": "sess_s", "id": "perm_1" }
+    },
+    {
+      "type": "session.status",
+      "properties": {
+        "sessionID": "sess_s",
+        "status": { "type": "idle" },
+        "usage": { "inputTokens": 11, "outputTokens": 13, "model": "oc-fixture" }
+      }
+    }
+  ]
+}

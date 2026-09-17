@@ -28,6 +28,7 @@ export class RunnerTransport extends EventEmitter {
     productVersion,
     capabilities = [],
     workspaces = [],
+    runtimeInventory = null,
     store,
     logger,
     webSocketFactory = (url, options) => new WebSocket(url, options),
@@ -44,6 +45,7 @@ export class RunnerTransport extends EventEmitter {
     this.productVersion = productVersion;
     this.capabilities = [...new Set(capabilities)].sort();
     this.workspaces = [...new Set(workspaces)].sort();
+    this.runtimeInventory = runtimeInventory;
     this.store = store;
     this.logger = logger;
     this.webSocketFactory = webSocketFactory;
@@ -123,6 +125,9 @@ export class RunnerTransport extends EventEmitter {
         capabilities: this.capabilities,
         workspaces: this.workspaces,
         startedAt: new Date().toISOString(),
+        // CLEW-131: safe runtime inventory (ids/versions/capabilities only).
+        // Omitted for v1 runners, keeping the wire identical.
+        ...(this.runtimeInventory ? { runtimeInventory: this.runtimeInventory } : {}),
       },
     });
 

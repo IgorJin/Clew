@@ -1,16 +1,12 @@
-import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { redactSecrets } from './security.js';
+import { createNullTelemetrySink, defaultTelemetryHost } from './plugins/telemetry/index.js';
+import { TELEMETRY_DEFAULT_CONNECTION_ID } from './plugins/telemetry/manifest.js';
 
-const TELEMETRY_DIR = '.clew/telemetry';
-const OTEL_PACKAGES = [
-  '@opentelemetry/api@^1.9.0',
-  '@opentelemetry/sdk-trace-node@^2.10.0',
-  '@opentelemetry/sdk-trace-base@^2.10.0',
-  '@opentelemetry/exporter-trace-otlp-http@^0.221.0',
-];
+export { telemetryInstall } from './plugins/telemetry/index.js';
+
 const TERMINAL_STAGE_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'BLOCKED']);
 const ALLOWED_ATTRIBUTES = new Set([
   'task_id',
@@ -33,25 +29,12 @@ const ALLOWED_ATTRIBUTES = new Set([
   'trace_id',
 ]);
 
-function loadOtel(cwd) {
-  const loader = join(resolve(cwd), TELEMETRY_DIR, 'loader.cjs');
-
-  if (!existsSync(loader))
-    throw new Error('OpenTelemetry is not installed; run clew telemetry install');
-  const require = createRequire(loader);
-  const api = require('@opentelemetry/api');
-  const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
-  const { BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-  const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-
-  return { api, NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter };
+function randomTraceId() {
+  return randomUUID().replace(/-/g, '');
 }
 
-function endpointFor(config) {
-  const endpoint =
-    config.endpoint || process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://127.0.0.1:4318';
-
-  return endpoint.endsWith('/v1/traces') ? endpoint : `${endpoint.replace(/\/$/, '')}/v1/traces`;
+function randomSpanId() {
+  return randomUUID().replace(/-/g, '').slice(0, 16);
 }
 
 function eventAttributes(event) {
@@ -83,56 +66,8 @@ function eventAttributes(event) {
   );
 }
 
-class SafeExporter {
-  constructor(exporter, onError) {
-    this.exporter = exporter;
-    this.onError = onError;
-  }
-
-  export(spans, callback) {
-    try {
-      this.exporter.export(spans, (result) => {
-        if (result?.code !== 0) this.onError(result?.error?.message ?? 'OTLP export failed');
-        callback(result);
-      });
-    } catch (error) {
-      this.onError(error.message);
-      callback({ code: 1, error });
-    }
-  }
-
-  shutdown() {
-    return this.exporter.shutdown?.();
-  }
-
-  forceFlush() {
-    return this.exporter.forceFlush?.();
-  }
-}
-
-export function telemetryInstall({ cwd = process.cwd(), npm = 'npm' } = {}) {
-  const directory = resolve(cwd, TELEMETRY_DIR);
-
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'loader.cjs'), 'module.exports = {};\n');
-  writeFileSync(
-    join(directory, 'package.json'),
-    `${JSON.stringify({ name: 'clew-telemetry-runtime', private: true, type: 'commonjs' }, null, 2)}\n`,
-  );
-  execFileSync(
-    npm,
-    ['install', '--no-save', '--no-package-lock', '--ignore-scripts', ...OTEL_PACKAGES],
-    {
-      cwd: directory,
-      stdio: 'inherit',
-    },
-  );
-
-  return { directory, packages: OTEL_PACKAGES };
-}
-
 export class Observability {
-  constructor({ cwd = process.cwd(), config = {}, store = null } = {}) {
+  constructor({ cwd = process.cwd(), config = {}, store = null, plugins = null } = {}) {
     this.cwd = cwd;
     this.config = config;
     this.store = store;
@@ -140,37 +75,43 @@ export class Observability {
     this.runSpans = new Map();
     this.stageRuns = new Map();
     this.dropped = 0;
-    this.exportErrors = 0;
-    this.state = config.enabled ? 'initializing' : 'disabled';
-    this.installed = existsSync(join(resolve(cwd), TELEMETRY_DIR, 'loader.cjs'));
+    this.installed = existsSync(join(resolve(cwd), '.clew/telemetry', 'loader.cjs'));
+    this.error = null;
 
-    if (!config.enabled) return;
+    const host = plugins?.host ?? defaultTelemetryHost({ cwd, observability: config });
+    const connectionId = plugins?.connectionId ?? TELEMETRY_DEFAULT_CONNECTION_ID;
+    let sink;
+
     try {
-      const otel = loadOtel(cwd);
-      const exporter = new SafeExporter(
-        new otel.OTLPTraceExporter({ url: endpointFor(config) }),
-        (error) => {
-          this.exportErrors += 1;
-          this.error = redactSecrets(error);
-        },
-      );
-
-      this.provider = new otel.NodeTracerProvider({
-        spanProcessors: [
-          new otel.BatchSpanProcessor(exporter, {
-            maxQueueSize: config.maxQueueSize ?? 256,
-            maxExportBatchSize: Math.min(config.maxQueueSize ?? 256, 64),
-            exportTimeoutMillis: config.exportTimeoutMs ?? 5_000,
-          }),
-        ],
-      });
-      this.provider.register();
-      this.api = otel.api;
-      this.tracer = this.provider.getTracer(config.serviceName ?? 'clew');
-      this.state = 'ready';
+      sink = host.resolver.resolve({ connectionId });
     } catch (error) {
-      this.state = 'unavailable';
-      this.error = redactSecrets(error.message);
+      sink = createNullTelemetrySink({ id: connectionId });
+      this.error =
+        error?.code === 'PLUGIN_DISABLED' ? null : redactSecrets(error?.message ?? String(error));
+    }
+
+    this.sink = sink;
+
+    const sinkStatus = this.sinkStatus();
+
+    this.state = !config.enabled ? 'disabled' : sinkStatus.state;
+
+    if (!config.enabled) this.error = null;
+    else if (this.error === null || this.error === undefined) this.error = sinkStatus.error ?? null;
+  }
+
+  sinkStatus() {
+    try {
+      return this.sink.status();
+    } catch {
+      return {
+        state: 'unavailable',
+        endpoint: null,
+        queued: 0,
+        dropped: 0,
+        exportErrors: 0,
+        error: 'sink status failed',
+      };
     }
   }
 
@@ -178,68 +119,112 @@ export class Observability {
     this.store = store;
   }
 
-  parentContext(context) {
-    if (!context) return this.api.context.active();
-
-    return this.api.trace.setSpanContext(this.api.context.active(), {
-      ...context,
-      isRemote: false,
-    });
+  emitRecord(record) {
+    try {
+      this.sink.emit(record);
+    } catch {
+      this.dropped += 1;
+    }
   }
 
-  ensureTaskSpan(taskId, attributes) {
+  ensureTaskContext(taskId, attributes) {
     if (this.taskSpans.has(taskId)) return this.taskSpans.get(taskId);
+
     const persisted = this.store?.getTelemetryTask(taskId);
-    const span = persisted ? null : this.tracer.startSpan('clew.task', { attributes });
-    const context = persisted?.rootSpanContext ?? span?.spanContext();
 
-    if (!context) return null;
-    if (span) this.taskSpans.set(taskId, span);
-    if (!persisted) this.store?.saveTelemetryTask(taskId, context);
+    if (persisted?.rootSpanContext) {
+      const context = {
+        traceId: persisted.rootSpanContext.traceId,
+        spanId: persisted.rootSpanContext.spanId,
+      };
 
-    return { context, span };
+      this.taskSpans.set(taskId, context);
+
+      return { context, fresh: false };
+    }
+
+    const context = { traceId: randomTraceId(), spanId: randomSpanId() };
+
+    this.emitRecord({
+      version: 1,
+      signal: 'trace',
+      action: 'span-start',
+      spanKey: `task:${taskId}`,
+      name: 'clew.task',
+      attributes,
+      traceId: context.traceId,
+      spanId: context.spanId,
+    });
+    this.taskSpans.set(taskId, context);
+    this.store?.saveTelemetryTask(taskId, { ...context, traceFlags: 1 });
+
+    return { context, fresh: true };
   }
 
   onEvent(event) {
     if (this.state !== 'ready' || !this.store) return;
     try {
       const attributes = eventAttributes(event);
-      const task = this.ensureTaskSpan(event.task_id, attributes);
+      const task = this.ensureTaskContext(event.task_id, attributes);
 
       if (!task) return;
       const payload = event.payload ?? {};
       const runId = payload.runId ?? payload.run_id;
 
       if (event.type === 'STAGE_RUN_STARTED' && runId) {
-        const span = this.tracer.startSpan(
-          'clew.stage.run',
-          { attributes },
-          this.parentContext(task.context),
-        );
+        const runContext = { traceId: task.context.traceId, spanId: randomSpanId() };
 
-        this.runSpans.set(runId, span);
+        this.emitRecord({
+          version: 1,
+          signal: 'trace',
+          action: 'span-start',
+          spanKey: `run:${runId}`,
+          name: 'clew.stage.run',
+          attributes,
+          traceId: runContext.traceId,
+          spanId: runContext.spanId,
+          parent: task.context,
+        });
+        this.runSpans.set(runId, runContext);
         this.stageRuns.set(`${event.task_id}:${payload.stageId ?? payload.stage_id ?? ''}`, runId);
-        this.store.saveTelemetryRun(runId, event.task_id, span.spanContext());
+        this.store.saveTelemetryRun(runId, event.task_id, { ...runContext, traceFlags: 1 });
       }
       const stageKey = `${event.task_id}:${payload.stageId ?? payload.stage_id ?? ''}`;
       const effectiveRunId = runId ?? this.stageRuns.get(stageKey);
-      const parent = effectiveRunId && this.runSpans.get(effectiveRunId)?.spanContext();
-      const eventSpan = this.tracer.startSpan(
-        `clew.event.${event.type.toLowerCase()}`,
-        { attributes },
-        this.parentContext(parent ?? task.context),
-      );
+      const parent = (effectiveRunId && this.runSpans.get(effectiveRunId)) || task.context;
 
-      eventSpan.end();
+      this.emitRecord({
+        version: 1,
+        signal: 'trace',
+        action: 'instant',
+        spanKey: `event:${event.task_id}:${Date.now()}:${randomSpanId()}`,
+        name: `clew.event.${event.type.toLowerCase()}`,
+        attributes,
+        traceId: parent.traceId,
+        spanId: randomSpanId(),
+        parent,
+      });
       if (event.type === 'STAGE_STATE_CHANGED' && TERMINAL_STAGE_STATES.has(payload.status)) {
         const finishedRunId = this.stageRuns.get(stageKey);
 
-        this.runSpans.get(finishedRunId)?.end();
-        this.runSpans.delete(finishedRunId);
+        if (finishedRunId) {
+          this.emitRecord({
+            version: 1,
+            signal: 'trace',
+            action: 'span-end',
+            spanKey: `run:${finishedRunId}`,
+          });
+          this.runSpans.delete(finishedRunId);
+        }
         this.stageRuns.delete(stageKey);
       }
       if (event.type === 'TASK_COMPLETED') {
-        this.taskSpans.get(event.task_id)?.end();
+        this.emitRecord({
+          version: 1,
+          signal: 'trace',
+          action: 'span-end',
+          spanKey: `task:${event.task_id}`,
+        });
         this.taskSpans.delete(event.task_id);
       }
     } catch {
@@ -248,22 +233,44 @@ export class Observability {
   }
 
   status() {
+    const sink = this.sinkStatus();
+
     return {
       state: this.state,
       installed: this.installed,
-      endpoint: this.config.enabled ? endpointFor(this.config) : null,
-      dropped: this.dropped,
-      exportErrors: this.exportErrors,
-      error: this.error ?? null,
+      endpoint: this.config.enabled ? (sink.endpoint ?? null) : null,
+      dropped: this.dropped + (sink.dropped ?? 0),
+      exportErrors: sink.exportErrors ?? 0,
+      error: this.error ?? sink.error ?? null,
     };
   }
 
   async shutdown() {
-    for (const span of this.runSpans.values()) span.end();
-    for (const span of this.taskSpans.values()) span.end();
+    for (const [runId] of this.runSpans)
+      this.emitRecord({ version: 1, signal: 'trace', action: 'span-end', spanKey: `run:${runId}` });
+
+    for (const [taskId] of this.taskSpans)
+      this.emitRecord({
+        version: 1,
+        signal: 'trace',
+        action: 'span-end',
+        spanKey: `task:${taskId}`,
+      });
+
     this.runSpans.clear();
     this.stageRuns.clear();
     this.taskSpans.clear();
-    await this.provider?.shutdown?.();
+
+    try {
+      await this.sink.flush();
+    } catch {
+      // Flush failures are already counted by the sink; shutdown continues.
+    }
+
+    try {
+      await this.sink.dispose();
+    } catch {
+      // Dispose is deadline-bounded inside the sink; never hangs shutdown.
+    }
   }
 }

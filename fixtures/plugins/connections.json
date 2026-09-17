@@ -1,0 +1,6 @@
+{
+  "connections": [
+    { "id": "fake-test", "plugin": "clew.runtime.fake", "enabled": true, "config": {} },
+    { "id": "fake-off", "plugin": "clew.runtime.fake", "enabled": false, "config": {} }
+  ]
+}

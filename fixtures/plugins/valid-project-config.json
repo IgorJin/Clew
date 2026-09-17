@@ -1,0 +1,6 @@
+{
+  "agents": {
+    "worker": { "connection": "fake-test", "model": null },
+    "reviewer": { "connection": "fake-test", "model": null }
+  }
+}

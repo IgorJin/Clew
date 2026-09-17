@@ -471,9 +471,11 @@ Release assignment is pending; v0.10 is signed off locally and Scout v0 is the n
 
 Exact dependencies and acceptance criteria live in the [task index](./tasks/README.md). Canonical facts and evidence remain protected after export. The first backend is local on each execution host; Runner v1 data permissions remain unchanged. Formal QA policy and cross-host blob transfer are separate work.
 
-## Plugin architecture proposal
+## Plugin architecture epic
 
-The proposed next integration boundary is documented in [Plugin architecture and implementation plan](./docs/PLUGIN-ARCHITECTURE.md). It covers a shared plugin registry, runtime connections for Codex/OpenCode/Claude Code, role routing, Controller/Runner compatibility, and extraction of the existing OpenTelemetry integration. Release assignment is pending; the first scope is P1–P5, followed by metrics, pricing sources, and change viewers.
+The [Plugin architecture and implementation plan](./docs/PLUGIN-ARCHITECTURE.md) is split into cards [CLEW-127 through CLEW-133](./tasks/README.md), running in parallel with the Scout and storage queues (release unassigned).
+
+Scope decision of 2026-09-11: Codex and OpenCode runtimes only. Claude Code, marketplace/hot reload, metrics and log export, external-CLI live smoke, and the workflow constructor are excluded from this epic; telemetry is limited to extracting the existing OTel traces flow into a `TelemetrySink` plugin. Execution order: `CLEW-127 → (CLEW-128 + CLEW-129) → CLEW-130 → CLEW-131 → CLEW-133`, with `CLEW-132` after `CLEW-127`.
 
 ## Research queue after v0.10
 

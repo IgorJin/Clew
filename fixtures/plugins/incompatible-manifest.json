@@ -1,0 +1,13 @@
+{
+  "id": "clew.runtime.fake",
+  "version": "1.0.0",
+  "apiVersion": "2",
+  "extensionPoints": [{ "point": "AgentRuntime", "version": "1" }],
+  "configSchema": { "type": "object", "properties": {} },
+  "scope": "execution-host",
+  "resources": {
+    "binaries": [],
+    "network": [],
+    "notes": "Negative fixture: Plugin API version mismatch."
+  }
+}

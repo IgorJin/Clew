@@ -115,6 +115,18 @@ export class PairedExecutionPort extends ExecutionPort {
     });
 
     if (!match.matched) throw new Error(`Runner cannot execute stage: ${match.reason}`);
+
+    // CLEW-131: plugin-bound runs require a Runner that advertises
+    // binding support. Legacy v1 routes fail here explicitly instead of
+    // executing on a mismatched runtime downstream.
+    if (request.run?.binding) {
+      const runner = this.store.getRunnerProjection(this.runnerId);
+
+      if (!runner?.capabilities?.includes('plugin-bindings'))
+        throw new Error(
+          `paired Runner ${this.runnerId} does not support plugin-bound leases (legacy v1 route): upgrade the Runner or run without a bound connection`,
+        );
+    }
     const persisted = this.store.allocateRunnerLease({
       run: request.run,
       lease: request.lease,

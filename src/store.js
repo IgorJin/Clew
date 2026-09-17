@@ -954,6 +954,48 @@ export class Store {
 
     return row ? parseRun(row) : null;
   }
+  /** Persist an immutable run binding (CLEW-131).
+   *
+   * Strict insert: a run is bound once, before execution. A duplicate
+   * write surfaces caller bugs loudly instead of silently replacing the
+   * pinned runtime.
+   */
+  saveRunBinding(runId, binding) {
+    if (!binding || typeof binding !== 'object') throw new Error('run binding must be an object');
+
+    const row = this.getRun(runId);
+
+    if (!row) throw new Error(`run not found: ${runId}`);
+
+    this.db
+      .prepare('INSERT INTO run_bindings (run_id,task_id,binding,created_at) VALUES (?,?,?,?)')
+      .run(runId, row.task_id, JSON.stringify(binding), new Date().toISOString());
+
+    return binding;
+  }
+  /** Read a run binding (CLEW-131).
+   *
+   * Runs without a binding row predate plugins and read as
+   * `legacy-unknown` with history intact. Corrupt rows throw loudly.
+   */
+  getRunBinding(runId) {
+    const row = this.db.prepare('SELECT * FROM run_bindings WHERE run_id=?').get(runId);
+
+    if (!row) return { status: 'legacy-unknown', runId, binding: null };
+
+    let binding;
+
+    try {
+      binding = JSON.parse(row.binding);
+    } catch (error) {
+      throw new Error(`run binding for ${runId} is corrupt: ${error.message}`, { cause: error });
+    }
+
+    if (!binding || typeof binding !== 'object')
+      throw new Error(`run binding for ${runId} is corrupt: expected an object`);
+
+    return { status: 'bound', runId, binding };
+  }
   recordUsage(input) {
     const usage = normalizeUsage(input, input);
 

@@ -2,14 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { URL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import {
-  isVersionAtLeast,
-  isSupportedVersion,
-  SUPPORTED_CODEX_CLI_VERSION,
-  SUPPORTED_OPENCODE_CLI_VERSION,
-} from './compatibility.js';
 import {
   OPERATOR_ACTION,
   PLAN_STATUS,
@@ -35,13 +28,37 @@ import { analyzeTask } from './task-analysis.js';
 import { buildFinalizationReport } from './finalization.js';
 import { createProjectId, detectProject } from './project.js';
 import { pickFolder } from './folder-picker.js';
+import { loadConfig } from './config.js';
+import { buildRuntimeHost } from './plugins/host.js';
+import { PLUGIN_ERROR_CODE, PluginError } from './plugins/errors.js';
+import { validateConfigValue } from './plugins/validate-config.js';
+import {
+  RESERVED_CONNECTION_IDS,
+  listHostConnections,
+  removeHostConnection,
+  saveHostConnection,
+  saveUserAgent,
+} from './plugins/host-config.js';
+import {
+  assertHarnessConnectionExclusive,
+  legacyDefaultModel,
+  LEGACY_PLUGIN_IDS,
+} from './plugins/legacy.js';
+import {
+  AGENT_ROLES,
+  collectRoleSources,
+  resolveAgentRoutes,
+  routeSourceOf,
+} from './plugins/role-routing.js';
 import { ScoutRunner } from './scout-runner.js';
 
 const SERVICE_COMMANDS = new Set([
   'approve',
   'approve-run',
+  'agents',
   'cleanup',
   'complete',
+  'connections',
   'continue',
   'doctor',
   'events',
@@ -191,61 +208,6 @@ function probeCommand(command, args) {
   }
 }
 
-function withVersionCompatibility(check, expectedVersion, { minimum = false } = {}) {
-  if (!check.ok) return { ...check, compatible: false, expectedVersion };
-  const compatible = minimum
-    ? isVersionAtLeast(check.detail, expectedVersion)
-    : isSupportedVersion(check.detail, expectedVersion);
-
-  return {
-    ...check,
-    ok: compatible,
-    compatible,
-    expectedVersion,
-    detail: compatible
-      ? check.detail
-      : `${check.detail} (${minimum ? 'minimum' : 'expected'} ${expectedVersion})`,
-  };
-}
-
-async function probeOpenCodeEndpoint(value) {
-  let url;
-
-  try {
-    url = new URL(value);
-  } catch {
-    return { ok: false, detail: 'invalid URL' };
-  }
-  if (!['http:', 'https:'].includes(url.protocol)) return { ok: false, detail: 'invalid URL' };
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1_000);
-    const response = await fetch(new URL('/global/health', url), {
-      signal: controller.signal,
-      headers: { accept: 'application/json' },
-    });
-    const body = await response.json().catch(() => ({}));
-    const compatible =
-      response.ok &&
-      body.healthy === true &&
-      isSupportedVersion(body.version, SUPPORTED_OPENCODE_CLI_VERSION);
-
-    clearTimeout(timeout);
-
-    return {
-      ok: compatible,
-      compatible,
-      expectedVersion: SUPPORTED_OPENCODE_CLI_VERSION,
-      detail: compatible
-        ? `healthy ${body.version}`
-        : `incompatible or unhealthy (HTTP ${response.status}, version ${body.version ?? 'unknown'})`,
-    };
-  } catch {
-    return { ok: false, detail: 'unreachable' };
-  }
-}
-
 export class ClewService {
   constructor({
     cwd = process.cwd(),
@@ -264,7 +226,18 @@ export class ClewService {
     this.runnerGateway = runnerGateway;
     this.editorLauncher = editorLauncher;
     this.folderPicker = folderPicker;
+    this.loginSessions = new Map();
     this.scoutRunner = scoutRunner ?? new ScoutRunner({ cwd: this.cwd, store, config });
+  }
+
+  /** Reload host config after a settings write so the daemon sees it. */
+  reloadConfig() {
+    this.config = loadConfig(this.cwd, {
+      ...process.env,
+      CLEW_USER_CONFIG: this.config.userConfigPath,
+    });
+
+    return this.config;
   }
 
   supports(args) {
@@ -293,6 +266,8 @@ export class ClewService {
     if (command === 'interrupt') return this.interrupt(subcommand, rest);
     if (command === 'retry') return this.retry(subcommand, rest, signal);
     if (command === 'complete') return this.complete(subcommand, rest);
+    if (command === 'connections') return this.connections(subcommand, rest);
+    if (command === 'agents') return this.agents(subcommand, rest);
     if (command === 'finish-worker') return this.finishWorker(subcommand, rest);
     if (command === 'run') return this.run(subcommand, rest, signal);
     if (command === 'pricing') return this.syncPricing(subcommand, rest);
@@ -910,7 +885,300 @@ export class ClewService {
     return { taskId, ...summary, records: this.store.listUsage(taskId, filters) };
   }
 
+  /** Safe connection listing for CLI/UI (CLEW-130).
+   *
+   * Only the safe projection leaves the host: connection id, plugin,
+   * enabled flag, and advertised capabilities. Connection configs,
+   * binaries, endpoints, and credentials are never included.
+   */
+  hostForSettings() {
+    return buildRuntimeHost(this.config, {
+      terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
+    });
+  }
+
+  connections(subcommand = 'list', args = []) {
+    const host = this.hostForSettings();
+    const userConfigPath = this.config.userConfigPath;
+
+    if (!subcommand || subcommand === 'list')
+      return {
+        connections: host.connections.map((entry) => {
+          let capabilities;
+
+          try {
+            capabilities =
+              host.resolver.resolve({ connectionId: entry.id }).describe()?.capabilities ?? [];
+          } catch {
+            capabilities = [];
+          }
+
+          return { id: entry.id, plugin: entry.plugin, enabled: entry.enabled, capabilities };
+        }),
+        diagnostics: host.diagnostics,
+      };
+
+    if (subcommand === 'show') {
+      const id = args[0] ?? getOptionValue(args, '--id');
+
+      if (!id) throw new Error('usage: clew connections show ID');
+      const entry = host.connections.find((candidate) => candidate.id === id);
+
+      if (!entry)
+        throw new PluginError(PLUGIN_ERROR_CODE.UNKNOWN_ID, `unknown connection id "${id}"`, {
+          connectionId: id,
+        });
+      const stored = listHostConnections(userConfigPath).find((candidate) => candidate.id === id);
+      const manifest = host.registry.get(entry.plugin).manifest;
+
+      return {
+        id,
+        plugin: entry.plugin,
+        enabled: entry.enabled,
+        source: stored ? 'user' : 'legacy',
+        reserved: RESERVED_CONNECTION_IDS.includes(id),
+        config: stored?.config ?? {},
+        configSchema: manifest.configSchema,
+      };
+    }
+
+    if (subcommand === 'save') return this.saveConnection(host, args);
+    if (subcommand === 'remove') {
+      const id = args[0] ?? getOptionValue(args, '--id');
+
+      if (!id) throw new Error('usage: clew connections remove ID');
+      removeHostConnection(userConfigPath, id);
+      this.reloadConfig();
+
+      return { removed: true, id };
+    }
+    if (subcommand === 'login') return this.loginConnection(host, args);
+    if (subcommand === 'login-status') return this.loginStatus(args);
+
+    throw new Error('usage: clew connections list|show|save|remove|login|login-status');
+  }
+
+  saveConnection(host, args) {
+    const id = args[0] ?? getOptionValue(args, '--id');
+    const plugin = getOptionValue(args, '--plugin');
+
+    if (!id || !plugin)
+      throw new Error(
+        'usage: clew connections save ID --plugin PLUGIN [--bin PATH] [--base-url URL] [--model M] [--enabled true|false]',
+      );
+    if (!host.registry.has(plugin))
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.INVALID_CONFIG,
+        `unknown plugin "${plugin}"; allowed: ${host.registry
+          .list()
+          .map((entry) => entry.id)
+          .join(', ')}`,
+      );
+    const existing = listHostConnections(this.config.userConfigPath).find(
+      (candidate) => candidate.id === id,
+    );
+    const config = { ...(existing?.config ?? {}) };
+
+    for (const [flag, key] of [
+      ['--bin', 'bin'],
+      ['--base-url', 'baseUrl'],
+      ['--model', 'model'],
+    ]) {
+      const value = getOptionValue(args, flag);
+
+      if (value === undefined) continue;
+      if (value === '') delete config[key];
+      else config[key] = value;
+    }
+    const enabledFlag = getOptionValue(args, '--enabled');
+    const enabled = enabledFlag === undefined ? true : enabledFlag !== 'false';
+
+    validateConfigValue(
+      host.registry.get(plugin).manifest.configSchema,
+      config,
+      `connections["${id}"].config`,
+    );
+    saveHostConnection(this.config.userConfigPath, { id, plugin, enabled, config });
+    this.reloadConfig();
+
+    return { saved: true, id, plugin, enabled, config, path: this.config.userConfigPath };
+  }
+
+  async loginConnection(host, args) {
+    const id = args[0] ?? getOptionValue(args, '--id');
+    const withApiKey = args.includes('--with-api-key');
+
+    if (!id) throw new Error('usage: clew connections login ID [--with-api-key --api-key KEY]');
+
+    const adapter = host.resolver.resolve({ connectionId: id });
+
+    if (!withApiKey) {
+      if (typeof adapter.authenticate !== 'function')
+        throw new PluginError(
+          PLUGIN_ERROR_CODE.UNSUPPORTED_CAPABILITY,
+          `connection "${id}" does not support interactive authentication`,
+          { connectionId: id },
+        );
+
+      const session = {
+        sessionId: randomUUID(),
+        connectionId: id,
+        status: 'pending',
+        startedAt: new Date().toISOString(),
+      };
+      let resolveCode;
+
+      session.codeReady = new Promise((resolve) => {
+        resolveCode = resolve;
+      });
+      this.loginSessions.set(session.sessionId, session);
+      void adapter
+        .authenticate({
+          onDeviceCode: (payload) => {
+            session.verificationUrl = payload.verificationUrl;
+            session.userCode = payload.userCode;
+            resolveCode(true);
+          },
+          onOutput: (text) => {
+            session.output = `${session.output ?? ''}${text}`.slice(-4_000);
+          },
+        })
+        .then(
+          (result) => {
+            session.status = result.status;
+            session.detail = result.detail ?? null;
+          },
+          (error) => {
+            session.status = 'failed';
+            session.detail = error?.message ?? String(error);
+          },
+        );
+
+      // Give the CLI a moment to print the device code, then return so the UI
+      // can display it while the process waits for browser approval.
+      await Promise.race([session.codeReady, new Promise((resolve) => setTimeout(resolve, 2_500))]);
+
+      return this.publicLogin(session);
+    }
+
+    // --with-api-key: key arrives as a flag value so daemon/API callers
+    // (including the UI) can use it; stdin remains a CLI fallback.
+    // The key is piped to the child process only and is never persisted.
+    if (typeof adapter.loginWithApiKey !== 'function')
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.UNSUPPORTED_CAPABILITY,
+        `connection "${id}" does not support API key authentication`,
+        { connectionId: id },
+      );
+
+    let apiKey = getOptionValue(args, '--api-key');
+
+    if (apiKey === undefined && process.stdin && !process.stdin.isTTY) {
+      const keyBuffer = [];
+
+      for await (const chunk of process.stdin) keyBuffer.push(chunk);
+      apiKey = Buffer.concat(keyBuffer).toString('utf8').trim();
+    }
+
+    if (!apiKey)
+      throw new PluginError(
+        PLUGIN_ERROR_CODE.INVALID_CONFIG,
+        'API key cannot be empty; pass --api-key KEY or pipe it via stdin',
+      );
+
+    const session = {
+      sessionId: randomUUID(),
+      connectionId: id,
+      status: 'pending',
+      startedAt: new Date().toISOString(),
+    };
+
+    this.loginSessions.set(session.sessionId, session);
+
+    void adapter.loginWithApiKey(apiKey).then(
+      (result) => {
+        session.status = result.status;
+        session.detail = result.detail ?? null;
+      },
+      (error) => {
+        session.status = 'failed';
+        session.detail = error?.message ?? String(error);
+      },
+    );
+
+    // Give the API key authentication a moment to complete.
+    await Promise.race([
+      new Promise((r) => setTimeout(r, 2_500)),
+      new Promise((r) => setTimeout(r, 0)),
+    ]);
+
+    return this.publicLogin(session);
+  }
+
+  loginStatus(args) {
+    const sessionId = args[0] ?? getOptionValue(args, '--session');
+
+    if (!sessionId) throw new Error('usage: clew connections login-status SESSION-ID');
+    const session = this.loginSessions.get(sessionId);
+
+    if (!session)
+      throw new PluginError(PLUGIN_ERROR_CODE.UNKNOWN_ID, `unknown login session "${sessionId}"`);
+
+    return this.publicLogin(session);
+  }
+
+  publicLogin(session) {
+    return {
+      sessionId: session.sessionId,
+      connectionId: session.connectionId,
+      status: session.status,
+      ...(session.verificationUrl ? { verificationUrl: session.verificationUrl } : {}),
+      ...(session.userCode ? { userCode: session.userCode } : {}),
+      ...(session.detail ? { detail: session.detail } : {}),
+    };
+  }
+
+  agents(subcommand = 'list', args = []) {
+    if (!subcommand || subcommand === 'list') {
+      const { routes } = this.resolveRunRoutes([]);
+
+      return { roles: Object.values(routes) };
+    }
+
+    if (subcommand === 'set') {
+      const role = args[0] ?? getOptionValue(args, '--role');
+      const connection = getOptionValue(args, '--connection');
+
+      if (!role || !AGENT_ROLES.includes(role))
+        throw new Error(
+          `usage: clew agents set ROLE --connection ID [--model M] (roles: ${AGENT_ROLES.join(', ')})`,
+        );
+      if (!connection) throw new Error('--connection is required');
+      const host = this.hostForSettings();
+
+      if (!host.connections.some((entry) => entry.id === connection))
+        throw new PluginError(
+          PLUGIN_ERROR_CODE.HOST_POLICY_DENIED,
+          `connection "${connection}" is not available on this execution host`,
+          { connectionId: connection },
+        );
+      const model = getOptionValue(args, '--model', null);
+
+      saveUserAgent(this.config.userConfigPath, role, { connection, model: model || null });
+      this.reloadConfig();
+
+      return { saved: true, role, connection, model: model || null };
+    }
+
+    throw new Error('usage: clew agents list|set');
+  }
+
   async session(subcommand, args) {
+    if (getOptionValue(args, '--connection'))
+      throw new Error(
+        'session open does not support --connection yet; terminal surfaces move to plugins in a later release (use --harness)',
+      );
     if (subcommand === 'capabilities') {
       const harness = getOptionValue(args, '--harness', 'codex');
 
@@ -1026,13 +1294,15 @@ export class ClewService {
 
     this.store.setStage(taskId, stageId, 'QUEUED');
     this.store.setTaskState(taskId, TASK_STATE.QUEUED);
+    this.assertRunFlagExclusivity(args);
+    const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
     const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
-      getOptionValue(args, '--harness'),
-      getOptionValue(args, '--review-harness'),
-      getOptionValue(args, '--architect'),
+      this.harnessSelectionFor(args, routes, 'worker', '--harness', null),
+      this.harnessSelectionFor(args, routes, 'reviewer', '--review-harness', null),
+      this.harnessSelectionFor(args, routes, 'architect', '--architect', null),
       previousRuns.length === 1 ? previousRuns.at(-1).session_id : null,
       [],
       scoutSelection ? { scoutContext: scoutSelection } : {},
@@ -1104,13 +1374,16 @@ export class ClewService {
         },
       });
     const feedback = [{ severity: 'blocking', criterion: 'operator', reason: message }];
+
+    this.assertRunFlagExclusivity(args);
+    const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
     const scoutSelection = getScoutSelection(args);
     const result = await this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile', task.contract.profile),
-      getOptionValue(args, '--harness', latestRun?.harness),
-      getOptionValue(args, '--review-harness'),
-      getOptionValue(args, '--architect'),
+      this.harnessSelectionFor(args, routes, 'worker', '--harness', latestRun?.harness),
+      this.harnessSelectionFor(args, routes, 'reviewer', '--review-harness', null),
+      this.harnessSelectionFor(args, routes, 'architect', '--architect', null),
       existingGrant?.session_id ?? latestRun?.session_id ?? null,
       feedback,
       {
@@ -1393,20 +1666,100 @@ export class ClewService {
     }
   }
 
+  /** Probe one connection into a safe, secret-free doctor entry (CLEW-130). */
+  async probeConnection(host, entry, { required }) {
+    let adapter;
+
+    try {
+      adapter = host.resolver.resolve({ connectionId: entry.id });
+    } catch (error) {
+      const status =
+        error?.code === 'PLUGIN_DISABLED'
+          ? 'disabled'
+          : error?.code === 'PLUGIN_UNKNOWN_ID'
+            ? 'unconfigured'
+            : error?.code === 'PLUGIN_INCOMPATIBLE_API' || error?.code === 'PLUGIN_INCOMPATIBLE'
+              ? 'incompatible'
+              : 'unavailable';
+
+      return {
+        name: `connection:${entry.id}`,
+        ok: false,
+        required,
+        status,
+        plugin: entry.plugin,
+        capabilities: [],
+        reason: error?.code ?? 'unavailable',
+      };
+    }
+
+    const capabilities = adapter.describe()?.capabilities ?? [];
+    let probe;
+
+    try {
+      probe = await adapter.probe();
+    } catch (error) {
+      probe = { status: 'unavailable', detail: error?.message ?? String(error) };
+    }
+
+    // Secret-safe projection: binary paths, endpoints, and raw auth output
+    // never leave the host. Ready reports the version string; anything else
+    // reports a reason code.
+    const ready = probe?.status === 'ready';
+
+    return {
+      name: `connection:${entry.id}`,
+      ok: ready,
+      required,
+      status: ready ? 'ready' : 'unavailable',
+      plugin: entry.plugin,
+      capabilities,
+      // Secret-safe auth signal: a boolean only — never the account or
+      // raw `login status` output.
+      ...(probe?.auth ? { auth: probe.auth.ok === true } : {}),
+      ...(ready && typeof probe.version?.version === 'string'
+        ? { version: probe.version.version }
+        : {}),
+      ...(!ready
+        ? {
+            reason:
+              probe?.version?.ok === false
+                ? 'binary-unavailable'
+                : probe?.auth?.ok === false
+                  ? 'auth-unavailable'
+                  : 'probe-failed',
+          }
+        : {}),
+    };
+  }
+
   async doctor(args) {
     const requiredHarness = getOptionValue(args, '--harness');
-    const runtimeConfig = this.resolveCommandConfig(args);
+    const selectedConnection = getOptionValue(args, '--connection');
 
     if (requiredHarness && !['codex', 'opencode'].includes(requiredHarness))
       throw new Error('--harness must be codex or opencode');
-    const codexVersion = probeCommand(runtimeConfig.codexBin, ['--version']);
-    const codexAuth = codexVersion.ok
-      ? probeCommand(runtimeConfig.codexBin, ['login', 'status'])
-      : { ok: false, detail: 'Codex CLI unavailable' };
-    const openCodeVersion = probeCommand(runtimeConfig.openCodeBin, ['--version']);
+
+    assertHarnessConnectionExclusive({
+      harness: requiredHarness ?? null,
+      connection: selectedConnection ?? null,
+    });
+
+    const host = buildRuntimeHost(this.resolveCommandConfig(args), {
+      terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
+    });
+    const entries = host.connections.filter(
+      (entry) => !selectedConnection || entry.id === selectedConnection,
+    );
+
+    if (selectedConnection && entries.length === 0)
+      throw new Error(`unknown connection "${selectedConnection}" on this execution host`);
+
+    const requiredPlugin = requiredHarness ? LEGACY_PLUGIN_IDS[requiredHarness] : null;
     const telemetry = new Observability({
       cwd: this.cwd,
-      config: { ...runtimeConfig.observability, enabled: true },
+      config: { ...this.resolveCommandConfig(args).observability, enabled: true },
     });
     const telemetryStatus = telemetry.status();
 
@@ -1425,40 +1778,39 @@ export class ClewService {
         required: false,
         ...telemetryStatus,
       },
-      {
-        name: 'codex-cli',
-        ...withVersionCompatibility(codexVersion, SUPPORTED_CODEX_CLI_VERSION, { minimum: true }),
-        required: requiredHarness === 'codex',
-        command: runtimeConfig.codexBin,
-      },
-      { name: 'codex-auth', ...codexAuth, required: requiredHarness === 'codex' },
-      {
-        name: 'opencode-cli',
-        ...withVersionCompatibility(openCodeVersion, SUPPORTED_OPENCODE_CLI_VERSION),
-        required: requiredHarness === 'opencode',
-        command: runtimeConfig.openCodeBin,
-      },
-      {
-        name: 'opencode-endpoint',
-        ...(await probeOpenCodeEndpoint(runtimeConfig.openCodeUrl)),
-        required: requiredHarness === 'opencode',
-        url: runtimeConfig.openCodeUrl,
-      },
     ];
 
-    return { ok: checks.filter((check) => check.required).every((check) => check.ok), checks };
+    for (const entry of entries)
+      checks.push(
+        await this.probeConnection(host, entry, {
+          required: selectedConnection
+            ? true
+            : requiredPlugin
+              ? entry.plugin === requiredPlugin
+              : false,
+        }),
+      );
+
+    return {
+      ok: checks.filter((check) => check.required).every((check) => check.ok),
+      checks,
+      diagnostics: host.diagnostics,
+    };
   }
 
   run(taskId, args, signal, options = {}) {
     if (!taskId) throw new Error('task id is required');
     const scoutSelection = getScoutSelection(args);
 
+    this.assertRunFlagExclusivity(args);
+    const { routes } = this.resolveRunRoutes(args, this.resolveCommandConfig(args));
+
     return this.scheduler(args, signal).runTask(
       taskId,
       getOptionValue(args, '--profile'),
-      getOptionValue(args, '--harness'),
-      getOptionValue(args, '--review-harness'),
-      getOptionValue(args, '--architect'),
+      this.harnessSelectionFor(args, routes, 'worker', '--harness', null),
+      this.harnessSelectionFor(args, routes, 'reviewer', '--review-harness', null),
+      this.harnessSelectionFor(args, routes, 'architect', '--architect', null),
       null,
       [],
       scoutSelection ? { ...options, scoutContext: scoutSelection } : options,
@@ -1477,6 +1829,81 @@ export class ClewService {
       throw new Error('interactive worker terminal is unavailable');
 
     return { taskId, runId: run.id, status: 'FINISHING' };
+  }
+
+  /** Flag-level exclusivity before route validation (CLEW-130).
+   *
+   * Runs before `resolveRunRoutes` so `--harness X --connection Y` fails
+   * with the actionable conflict error even when `Y` is otherwise unknown.
+   */
+  assertRunFlagExclusivity(args) {
+    const getFlag = (name) => getOptionValue(args, name);
+    const { sources } = collectRoleSources({
+      getFlag,
+      config: this.config,
+      env: process.env,
+    });
+
+    for (const [role, flag] of [
+      ['worker', '--harness'],
+      ['reviewer', '--review-harness'],
+      ['architect', '--architect'],
+    ]) {
+      const explicit = getFlag(flag);
+
+      if (explicit == null) continue;
+
+      const { level, connection } = routeSourceOf(sources[role]);
+
+      if (level !== 'default') assertHarnessConnectionExclusive({ harness: explicit, connection });
+    }
+  }
+
+  /** Resolve `role → connection → model` for every agent role (CLEW-130).
+   *
+   * Precedence per role: run/stage flag → environment → project → user →
+   * defaults. Applies the legacy reviewer default on Codex connections and
+   * returns the host so callers reuse one resolver per command.
+   */
+  resolveRunRoutes(args, runtimeConfig = this.config) {
+    const getFlag = (name) => getOptionValue(args, name);
+    const host = buildRuntimeHost(runtimeConfig, {
+      terminalManager: this.terminalManager,
+      telemetryCwd: this.cwd,
+    });
+    const allowedConnections = host.connections.map((entry) => entry.id);
+    const { sources, diagnostics } = collectRoleSources({
+      getFlag,
+      config: this.config,
+      env: process.env,
+    });
+    const routes = resolveAgentRoutes({ sources, options: { allowedConnections } });
+
+    for (const role of AGENT_ROLES) {
+      if (routes[role].model == null) {
+        const plugin = host.resolver.describeConnection(routes[role].connection).plugin;
+
+        routes[role].model = legacyDefaultModel(role, plugin);
+      }
+    }
+
+    return { host, routes, diagnostics };
+  }
+
+  /** Select a legacy harness name for a role, honoring the connection routes.
+   *
+   * An explicit `--harness`-style flag combined with any non-default route
+   * source is an explicit error; otherwise the flag wins, a default route
+   * falls back to `fallback`, and a routed role returns null (the
+   * connection id in `adapterConfig` drives resolution).
+   */
+  harnessSelectionFor(args, routes, role, flagName, fallback = null) {
+    const explicit = getOptionValue(args, flagName);
+
+    if (explicit != null && routes[role].source !== 'default')
+      assertHarnessConnectionExclusive({ harness: explicit, connection: routes[role].connection });
+
+    return explicit ?? (routes[role].source === 'default' ? fallback : null);
   }
 
   scheduler(args, signal) {
@@ -1498,9 +1925,25 @@ export class ClewService {
     } else if (executionMode !== 'local')
       throw new Error(`unsupported execution mode: ${executionMode}`);
 
+    const { host, routes } = this.resolveRunRoutes(args, runtimeConfig);
+
     return new Scheduler(this.store, manager, {
       signal,
-      adapterConfig: { ...runtimeConfig, terminalManager: this.terminalManager },
+      adapterConfig: {
+        ...runtimeConfig,
+        models: {
+          ...runtimeConfig.models,
+          worker: routes.worker.model,
+          architect: routes.architect.model,
+          reviewer: routes.reviewer.model,
+          qa: routes.qa.model,
+        },
+        connection: routes.worker.source === 'default' ? null : routes.worker.connection,
+        reviewConnection: routes.reviewer.source === 'default' ? null : routes.reviewer.connection,
+        architectConnection:
+          routes.architect.source === 'default' ? null : routes.architect.connection,
+      },
+      runtimeResolver: host.resolver,
       executionPort,
       scoutRunner: this.scoutRunner,
     });
@@ -1518,7 +1961,7 @@ export class ClewService {
       },
       worktreeRoot: resolve(
         this.cwd,
-        getOptionValue(args, '--worktree-root', this.config.worktreeRoot),
+        getOptionValue(args, '--worktree-root', this.config.worktreeRoot ?? '.'),
       ),
     };
   }

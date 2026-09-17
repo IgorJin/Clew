@@ -23,6 +23,7 @@ import {
   stopDaemon,
 } from './daemon.js';
 import { ClewService } from './control-service.js';
+import { buildRunnerHost, collectRunnerInventory } from './plugins/host.js';
 import { RunnerExecutionPort } from './runner-execution.js';
 import { RunnerService } from './runner.js';
 import { RunnerStore } from './runner-store.js';
@@ -123,7 +124,7 @@ async function printDaemonLogs(rest) {
 }
 function printHelp() {
   console.log(
-    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID] [--project ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT] [--harness fake|codex|opencode] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--execution local|paired] [--review-harness fake|codex] [--architect fake|codex] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew doctor [--harness codex|opencode]`,
+    `Clew v${packageVersion}\n\nCommands:\n  clew init\n  clew task create --title TITLE --description TEXT [--id ID] [--project ID]\n  clew task create --json task.json | --md task.md [--id ID]\n  clew task create --file contract.json (legacy)\n  clew task list | show ID | result ID\n  clew task history ID [--stage STAGE] [--attempt N]\n  clew plan ID\n  clew approve ID [gate-id]\n  clew reject ID [gate-id] [--reason TEXT]\n  clew approve-run APPROVAL-ID [--actor ACTOR]\n  clew reject-run APPROVAL-ID [--actor ACTOR]\n  clew interrupt ID [--actor ACTOR]\n  clew retry TASK [STAGE] [--actor ACTOR] [--reason TEXT] [--harness fake|codex|opencode] [--connection ID] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew verify TASK --revision SHA [--stage STAGE] [--actor ACTOR]\n  clew worktree list | remove PATH [--force] | prune\n  clew run ID [--profile PROFILE] [--harness fake|codex|opencode] [--connection ID] [--execution local|paired] [--review-harness fake|codex] [--review-connection ID] [--architect fake|codex] [--architect-connection ID] [--scout-context ID | --no-scout] [--scout-sections LIST]\n  clew status ID [--watch] [--interval MS]\n  clew events ID [--watch]\n  clew connections list\n  clew doctor [--harness codex|opencode] [--connection ID]`,
   );
   console.log('  clew task architecture TASK | brief TASK [--run RUN-ID]');
   console.log(
@@ -230,13 +231,26 @@ async function runRunnerCommand(subcommand) {
     maxOutboxBytes: runnerConfig.outbox.maxBytes,
     reservedTerminalEntries: runnerConfig.outbox.reservedEntries,
   });
+  const runtimeInventory = collectRunnerInventory(runnerConfig.adapterConfig);
+  // CLEW-133: the Runner resolves executors through the plugin registry
+  // like the Controller side; legacy name branches stay as fallback.
+  const runnerHost = buildRunnerHost(runnerConfig.adapterConfig);
   const transport = new RunnerTransport({
     endpoint: runnerConfig.controllerUrl,
     credential: runnerConfig.credential,
     runnerId: runnerConfig.runnerId,
     productVersion: packageVersion,
-    capabilities: runnerConfig.capabilities,
+    // CLEW-131: the capability advertises binding support; legacy v1
+    // runners never send it, so the Controller can refuse plugin routes
+    // for them explicitly.
+    capabilities: [
+      ...runnerConfig.capabilities,
+      ...(runtimeInventory.length > 0 ? ['plugin-bindings'] : []),
+    ],
     workspaces: runnerConfig.workspaces.map(({ id }) => ({ id })),
+    // CLEW-131: safe runtime inventory makes this Runner accept
+    // plugin-bound leases; without it the Runner stays on the v1 route.
+    runtimeInventory,
     store,
     reconnect: {
       initialMs: runnerConfig.reconnect.minDelayMs,
@@ -247,6 +261,8 @@ async function runRunnerCommand(subcommand) {
     workspaces: runnerConfig.workspaces,
     worktreeRoot: join(runnerConfig.stateDir, 'worktrees'),
     adapterConfig: runnerConfig.adapterConfig,
+    runtimeResolver: runnerHost.resolver,
+    runtimeInventory,
   });
   const service = new RunnerService({ store, transport, executionPort });
   const controller = new AbortController();

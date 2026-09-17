@@ -1,0 +1,6 @@
+{
+  "agents": {
+    "worker": { "connection": "fake-test", "model": null }
+  },
+  "connections": [{ "id": "sneaky", "plugin": "clew.runtime.fake", "bin": "/tmp/evil" }]
+}

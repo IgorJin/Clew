@@ -74,6 +74,20 @@ The [architecture plan](./docs/TASK-DATA-LIFECYCLE.md) is split into S/M cards. 
 | [CLEW-121](./tasks/CLEW-121.md) | M    | Storage controls and bounded history UI                 | 106, 112, 113, 117           |
 | [CLEW-122](./tasks/CLEW-122.md) | M    | Task data lifecycle integration and scale acceptance    | 110, 115, 118, 119, 120, 121 |
 
+## Planned — Plugin architecture (release unassigned)
+
+The [plugin architecture proposal](./docs/PLUGIN-ARCHITECTURE.md) is split into seven cards that run in parallel with the Scout and storage queues. Scope decision of 2026-09-11: Codex and OpenCode only; Claude Code, marketplace/hot reload, metrics and log export, external-CLI live smoke, and the workflow constructor are excluded from this epic. Telemetry is limited to extracting the existing OTel traces flow into a `TelemetrySink` plugin.
+
+| Task                                              | Size | Work package                                           | Depends on    |
+| ------------------------------------------------- | ---- | ------------------------------------------------------ | ------------- |
+| [CLEW-127](./tasks/CLEW-127-plugins-contracts.md) | M    | Plugin API v1, registry, resolver, DI rule             | —             |
+| [CLEW-128](./tasks/CLEW-128-plugins-codex.md)     | M    | Codex runtime behind AgentRuntime                      | 127           |
+| [CLEW-129](./tasks/CLEW-129-plugins-opencode.md)  | M    | OpenCode runtime behind AgentRuntime                   | 127           |
+| [CLEW-130](./tasks/CLEW-130-plugins-routing.md)   | M    | Role-connection-model routing, doctor, safe projection | 128, 129      |
+| [CLEW-131](./tasks/CLEW-131-plugins-paired.md)    | M    | Binding snapshots, migration, Runner compatibility     | 130           |
+| [CLEW-132](./tasks/CLEW-132-plugins-telemetry.md) | S    | OTel traces as TelemetrySink                           | 127           |
+| [CLEW-133](./tasks/CLEW-133-plugins-release.md)   | M    | Fixture-only conformance, factory cleanup, docs        | 130, 131, 132 |
+
 ## v0.1 completion record
 
 | Range          | Status   | Release evidence                                                                                          |
